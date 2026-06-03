@@ -165,6 +165,7 @@ test('CapacitorAdapter writes JSON, labels, and captured data to the intended ap
   const unknownLabel = await ctx.FsOutput.saveLabelFile('FIELD_0001_1.txt', '', 'unknown');
   await ctx.CapacitorAdapter.writeDatasetJson('metadata/FIELD_0001.json', { tree: 'FIELD_0001' });
   await ctx.CapacitorAdapter.persistDatasetImage('images/field/FIELD_0001_1.jpg', new Blob(['fake'], { type: 'image/jpeg' }));
+  await ctx.CapacitorAdapter.persistDatasetFile('depth/field/FIELD_0001_1.raw', new Blob(['depth'], { type: 'application/octet-stream' }));
 
   assert.deepEqual(jsonResult, { ok: true, method: 'native' });
   assert.deepEqual(trainLabel, { ok: true, method: 'native' });
@@ -177,6 +178,7 @@ test('CapacitorAdapter writes JSON, labels, and captured data to the intended ap
     'PalmAnnotate/Output TXT/FIELD_0001_1.txt',
     'PalmAnnotate/dataset/metadata/FIELD_0001.json',
     'PalmAnnotate/dataset/images/field/FIELD_0001_1.jpg',
+    'PalmAnnotate/dataset/depth/field/FIELD_0001_1.raw',
   ]);
   assert.ok(writes.every(w => w.directory === 'EXTERNAL'));
   assert.equal(writes[0].encoding, 'utf8');
@@ -246,6 +248,8 @@ test('CapacitorAdapter.deleteDatasetTree unlinks a tree\'s images, metadata, and
   assert.ok(deleted.every(a => a.directory === 'EXTERNAL'), 'deletes from the app-external root');
   assert.ok(paths.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_1.jpg'));
   assert.ok(paths.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_4.jpg'));
+  assert.ok(paths.includes('PalmAnnotate/dataset/depth/field/DAMIMAS_A21B_0001_1.raw'));
+  assert.ok(paths.includes('PalmAnnotate/dataset/depth/field/DAMIMAS_A21B_0001_1.json'));
   assert.ok(paths.includes('PalmAnnotate/dataset/metadata/DAMIMAS_A21B_0001.json'));
   assert.ok(paths.includes('PalmAnnotate/Output JSON/DAMIMAS_A21B_0001.json'));
   // sideCount 4 → never reaches a 5th side; the missing _2.jpg was swallowed.

@@ -7,7 +7,7 @@ import { makeDom, findByText, getByText, waitFor } from './dom-stub.mjs';
 
 function makeCaptureContext(shots, opts = {}) {
   const dom = makeDom();
-  const writes = { images: [], metadata: [] };
+  const writes = { images: [], files: [], metadata: [], deletes: [] };
   const adapter = {
     async persistDatasetImage(relPath, blob) {
       writes.images.push({ relPath, blob });
@@ -17,9 +17,20 @@ function makeCaptureContext(shots, opts = {}) {
         file: { name: relPath.split('/').pop(), relPath },
       };
     },
+    async persistDatasetFile(relPath, blob, fallback) {
+      writes.files.push({ relPath, blob, fallback });
+      return {
+        uri: 'native://documents/PalmAnnotate/dataset/' + relPath,
+        path: 'PalmAnnotate/dataset/' + relPath,
+      };
+    },
     async writeDatasetJson(relPath, data) {
       writes.metadata.push({ relPath, data });
       return { ok: true };
+    },
+    async deleteDatasetTree(treeName, sideCount) {
+      writes.deletes.push({ treeName, sideCount });
+      return { ok: true, removed: 0 };
     },
   };
   const source = {
@@ -45,7 +56,10 @@ function makeCaptureContext(shots, opts = {}) {
       document: dom.document,
       navigator: {},
       URL: URLStub,
-      CaptureSources: { default: () => source },
+      CaptureSources: {
+        default: () => source,
+        list: () => opts.sources || [source],
+      },
       Storage: { active: () => adapter, isNative: () => !!opts.native },
     },
   });
