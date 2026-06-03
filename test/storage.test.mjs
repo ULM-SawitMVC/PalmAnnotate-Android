@@ -154,7 +154,7 @@ function makeNativeFs({ tree = false } = {}) {
   return fsImpl;
 }
 
-test('CapacitorAdapter writes JSON, labels, and captured data to the intended Documents/PalmAnnotate folders', async () => {
+test('CapacitorAdapter writes JSON, labels, and captured data to the intended app-external PalmAnnotate folders', async () => {
   const fsImpl = makeNativeFs();
   const ctx = loadNativeStorage(fsImpl);
 
@@ -178,7 +178,7 @@ test('CapacitorAdapter writes JSON, labels, and captured data to the intended Do
     'PalmAnnotate/dataset/metadata/FIELD_0001.json',
     'PalmAnnotate/dataset/images/field/FIELD_0001_1.jpg',
   ]);
-  assert.ok(writes.every(w => w.directory === 'DOCUMENTS'));
+  assert.ok(writes.every(w => w.directory === 'EXTERNAL'));
   assert.equal(writes[0].encoding, 'utf8');
   assert.equal(writes[1].encoding, 'utf8');
   assert.equal(writes[3].encoding, 'utf8');
@@ -206,7 +206,7 @@ test('Android dataset load reads Output TXT corrections outside dataset and pref
   assert.deepEqual(readCalls.at(-1), {
     path: 'PalmAnnotate/Output TXT/train/DAMIMAS_A21B_0001_1.txt',
     encoding: 'utf8',
-    directory: 'DOCUMENTS',
+    directory: 'EXTERNAL',
   });
 });
 
@@ -227,6 +227,30 @@ test('CapacitorAdapter sanitizes filenames and split paths before native writes'
     'PalmAnnotate/dataset/images/field/FIELD_0001_1.jpg',
   ]);
   assert.equal(paths.some(path => path.includes('..') || path.includes('\\')), false);
+});
+
+test('CapacitorAdapter.deleteDatasetTree unlinks a tree\'s images, metadata, and output JSON (ignoring missing files)', async () => {
+  const fsImpl = makeNativeFs();
+  const deleted = [];
+  // Simulate a real device: side 1 exists, side 2 is already gone (throws).
+  fsImpl.deleteFile = async (args) => {
+    if (args.path.endsWith('_2.jpg')) throw new Error('File does not exist');
+    deleted.push(args);
+  };
+  const ctx = loadNativeStorage(fsImpl);
+
+  const res = await ctx.CapacitorAdapter.deleteDatasetTree('DAMIMAS_A21B_0001', 4);
+  assert.equal(res.ok, true, 'never throws even when some files are missing');
+
+  const paths = deleted.map(a => a.path);
+  assert.ok(deleted.every(a => a.directory === 'EXTERNAL'), 'deletes from the app-external root');
+  assert.ok(paths.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_1.jpg'));
+  assert.ok(paths.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_4.jpg'));
+  assert.ok(paths.includes('PalmAnnotate/dataset/metadata/DAMIMAS_A21B_0001.json'));
+  assert.ok(paths.includes('PalmAnnotate/Output JSON/DAMIMAS_A21B_0001.json'));
+  // sideCount 4 → never reaches a 5th side; the missing _2.jpg was swallowed.
+  assert.ok(!paths.some(p => p.endsWith('_5.jpg')), 'respects the side count');
+  assert.ok(!paths.some(p => p.endsWith('_2.jpg')), 'the throwing (missing) file is skipped');
 });
 
 test('FsaAdapter keeps output JSON and corrected labels in their separately chosen folders', async () => {

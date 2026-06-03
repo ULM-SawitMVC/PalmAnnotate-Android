@@ -287,6 +287,16 @@ const FsaAdapter = (() => {
     return { ok: true };
   }
 
+  /**
+   * No-op on web: captured trees live as in-memory File objects, not on a
+   * persistent dataset folder, so removing the tree from the session index is
+   * all that's needed. Mirrors the native adapter's signature.
+   * @returns {Promise<{ok:boolean, removed:number}>}
+   */
+  async function deleteDatasetTree(/* treeName, sideCount */) {
+    return { ok: true, removed: 0 };
+  }
+
   function _safeFileName(filename, fallback) {
     const raw = String(filename || '').replace(/\\/g, '/').split('/').pop() || '';
     const safe = _safeSegment(raw);
@@ -338,7 +348,7 @@ const FsaAdapter = (() => {
     getOutputDirHandle, getLabelsDirHandle,
     verifyAccess,
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
-    persistDatasetImage, writeDatasetJson,
+    persistDatasetImage, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
   };
 })();

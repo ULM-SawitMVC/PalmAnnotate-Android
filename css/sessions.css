@@ -109,6 +109,16 @@
 .home__primary:hover,
 .sheet__cta:hover { filter: brightness(1.05); }
 
+/* Constrain the leading icon — an inline <svg> with a viewBox but no width/height
+   defaults to the replaced-element size and would otherwise balloon to fill the
+   button (and overflow into the cards above). Keep it a fixed, non-flexing glyph. */
+.home__primary svg,
+.sheet__cta svg {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+}
+
 /* ── Section headings ─────────────────────────────────────────────────── */
 
 .home__section-title,
@@ -213,6 +223,10 @@
   border-top: 1px solid var(--c-border);
 }
 .home__secondary .link-btn { flex: 1; }
+
+/* Standalone export-folder row sits full-width under the secondary actions. */
+.saf-row { width: 100%; }
+.saf-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .link-btn {
   display: flex;
@@ -331,7 +345,32 @@
 .field input:focus,
 .field select:focus { outline: none; border-color: var(--c-accent); }
 
-/* ── Toggle (Mode ID Otomatis) ────────────────────────────────────────── */
+/* ── Sides segmented control (4 / 8) ──────────────────────────────────── */
+
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+}
+.seg__btn {
+  min-height: 52px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-bg);
+  color: var(--c-text-muted);
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.seg__btn.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-text);
+}
+
+/* ── Toggle (Auto ID Mode) ────────────────────────────────────────────── */
 
 .toggle-card {
   display: flex;
@@ -376,6 +415,7 @@
   .home__primary:active,
   .sheet__cta:active,
   .list-row__main:active,
+  .seg__btn:active,
   .link-btn:active { transform: scale(0.98); }
 }
 
@@ -395,6 +435,60 @@
 @media (prefers-reduced-motion: reduce) {
   .home__primary, .sheet__cta, .list-row__main, .link-btn,
   .switch__slider, .switch__slider::before { transition: none; }
+}
+
+/* ── Confirm dialog (delete session / tree) ───────────────────────────── */
+
+.pa-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(0, 0, 0, 0.62);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.pa-modal__card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 18px;
+  padding: var(--space-lg);
+  box-shadow: var(--shadow-soft);
+}
+.pa-modal__title {
+  margin: 0 0 var(--space-sm);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.pa-modal__msg {
+  margin: 0 0 var(--space-lg);
+  color: var(--c-text-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.pa-modal__actions { display: flex; gap: var(--space-sm); }
+.pa-modal__btn {
+  flex: 1;
+  min-height: 50px;
+  border-radius: 12px;
+  border: 1px solid var(--c-border);
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pa-modal__btn--ghost { background: transparent; color: var(--c-text-muted); }
+.pa-modal__btn--primary { background: var(--c-accent); border-color: var(--c-accent); color: #0c120c; }
+.pa-modal__btn--danger { background: var(--c-red); border-color: var(--c-red); color: #fff; }
+
+@media (pointer: coarse) {
+  .pa-modal__btn:active { transform: scale(0.98); }
 }
 
 /* ── Header routing: reflect the active view ───────────────────────────── */

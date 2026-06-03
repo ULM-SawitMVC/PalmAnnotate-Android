@@ -10,7 +10,9 @@ python -m http.server 4173
 
 ## 2. Load A Dataset
 
-Click **Load Folder** and choose a dataset root containing `images/` and `labels/`.
+On web, click **Load Folder** and choose a dataset root containing `images/` and `labels/`.
+
+On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location.
 
 PalmAnnotate groups files by tree name and side number. A tree named `DAMIMAS_A21B_0001` should have files such as:
 
@@ -23,10 +25,12 @@ DAMIMAS_A21B_0001_4.jpg
 
 ## 3. Configure Output
 
-Choose:
+Choose (web):
 
 - **Output JSON Folder**
 - optional **YOLO Label Folder (.txt)**
+
+On Android, output JSON/TXT is written under the app-specific PalmAnnotate storage automatically; SAF export is a separate best-effort mirror for user-browsable copies.
 
 PalmAnnotate does not ask for photo date or variety. Variety is derived from the tree name when JSON is generated. Output names stay aligned with the original dataset.
 

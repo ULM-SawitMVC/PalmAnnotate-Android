@@ -32,6 +32,7 @@ function boot() {
   dom.document.body.appendChild(container);
 
   const opened = [];
+  const openedWith = []; // records { name, sessionId } so the routing arg is testable
   const captureHook = async (session) => ({
     name: `DAMIMAS_A21B_${String(session.nextId).padStart(4, '0')}`,
     treeId: session.nextId,
@@ -44,11 +45,11 @@ function boot() {
     container,
     hooks: {
       capture: captureHook,
-      openPohon: (name) => opened.push(name),
+      openPohon: (name, sessionId) => { opened.push(name); openedWith.push({ name, sessionId }); },
     },
   });
 
-  return { dom, container, SessionsUI: ctx.SessionsUI, SessionStore: ctx.SessionStore, opened };
+  return { dom, container, SessionsUI: ctx.SessionsUI, SessionStore: ctx.SessionStore, opened, openedWith };
 }
 
 const num = (el) => Number(el.textContent);
@@ -110,23 +111,84 @@ test('tapping a pohon row invokes the openPohon hook with its tree name', async 
   assert.deepEqual(opened, ['DAMIMAS_A21B_0001']);
 });
 
-test('Start-Session form creates a session locked to the typed variety+blok', async () => {
+test('opening a tree passes its session id so the editor can return to that session', async () => {
+  const { container, SessionsUI, SessionStore, openedWith } = boot();
+
+  const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B', sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
+
+  // showDetail is the public entry the host uses for the editor's Home button.
+  await SessionsUI.showDetail(s.id);
+  await waitFor(() => container.querySelector('.list-row'));
+
+  container.querySelector('.list-row__main').click();
+  assert.equal(openedWith.length, 1);
+  assert.equal(openedWith[0].name, 'DAMIMAS_A21B_0001');
+  assert.equal(openedWith[0].sessionId, s.id, 'session id handed to the host for back-navigation');
+});
+
+test('deleting a tree asks for confirmation first, then removes it', async () => {
+  const { dom, container, SessionsUI, SessionStore } = boot();
+
+  const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B', sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
+
+  await SessionsUI.showDetail(s.id);
+  await waitFor(() => container.querySelector('.list-row__del'));
+
+  // Trash on the tree row → a confirm dialog appears; nothing deleted yet.
+  container.querySelector('.list-row__del').click();
+  await waitFor(() => dom.document.body.querySelector('.pa-modal'));
+  let fresh = await SessionStore.getSession(s.id);
+  assert.equal(fresh.trees.length, 1, 'tree survives until the user confirms');
+
+  // Confirm → tree removed and the detail re-renders to the empty state.
+  dom.document.body.querySelector('.pa-modal__btn--danger').click();
+  await waitFor(() => container.querySelector('.sheet__empty'));
+  fresh = await SessionStore.getSession(s.id);
+  assert.equal(fresh.trees.length, 0, 'confirmed delete drops the pohon from the session');
+});
+
+test('Start-Session form creates a session locked to the typed variety+block', async () => {
   const { container, SessionsUI, SessionStore } = boot();
 
   await SessionsUI.showHome();
   container.querySelector('.home__primary').click(); // → Start form
+  await waitFor(() => container.querySelector('.form-card')); // async (loads suggestions)
 
-  assert.ok(container.querySelector('.form-card'), 'start form rendered');
-  container.querySelector('select').value = 'DAMIMAS';
-  const inputs = container.querySelectorAll('input'); // [other, blok, photos, switch]
+  // Variety + block are now free text; sides is a fixed 4/8 segmented control.
+  const inputs = container.querySelectorAll('input'); // [variety, block, auto-id switch]
+  inputs[0].value = 'DAMIMAS';
   inputs[1].value = 'A21B';
-  inputs[2].value = '6';
+  container.querySelector('[data-sides="8"]').click(); // choose 8 photos per tree
 
-  container.querySelector('.sheet__cta').click(); // Mulai Dokumentasi → detail
+  container.querySelector('.sheet__cta').click(); // Start Documentation → detail
   await waitFor(() => container.querySelector('.lock-badge__title'));
   assert.equal(container.querySelector('.lock-badge__title').textContent, 'DAMIMAS · A21B');
 
   const sessions = await SessionStore.getSessions();
   assert.equal(sessions.length, 1);
-  assert.equal(sessions[0].sideCount, 6, 'photos-per-tree carried into the session');
+  assert.equal(sessions[0].sideCount, 8, 'chosen photos-per-tree carried into the session');
+});
+
+test('typed variety + block are remembered for the next session', async () => {
+  const { SessionStore } = boot();
+  await SessionStore.createSession({ variety: 'TENERA', blok: 'B07', sideCount: 4 });
+  const cache = await SessionStore.getInputCache();
+  assert.deepEqual(cache.varieties, ['TENERA']);
+  assert.deepEqual(cache.bloks, ['B07']);
+});
+
+test('Start form suggests remembered variety + block (plus the DAMIMAS seed)', async () => {
+  const { container, SessionsUI, SessionStore } = boot();
+  await SessionStore.createSession({ variety: 'TENERA', blok: 'B07', sideCount: 4 });
+
+  await SessionsUI.showHome();
+  container.querySelector('.home__primary').click(); // → Start form
+  await waitFor(() => container.querySelector('.form-card'));
+
+  const options = Array.from(container.querySelectorAll('option')).map(o => o.value);
+  assert.ok(options.includes('TENERA'), 'remembered variety suggested');
+  assert.ok(options.includes('B07'), 'remembered block suggested');
+  assert.ok(options.includes('DAMIMAS'), 'DAMIMAS seed always suggested');
 });

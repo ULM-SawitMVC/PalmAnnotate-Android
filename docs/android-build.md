@@ -2,7 +2,7 @@
 
 PalmAnnotate ships as a native Android app via **Capacitor 6**, wrapping the same
 vanilla-JS web app in a WebView. This guide covers prerequisites, debug and
-release builds, signing, APK size, and the deferred field-hardening work.
+release builds, signing, APK size, SAF export, and Orbbec SDK integration.
 
 For the high-level field flow and dev loop, see the
 [README "Android app (Capacitor)" section](../README.md#android-app-capacitor).
@@ -15,6 +15,7 @@ For the high-level field flow and dev loop, see the
 - **JDK 17** — the Capacitor 6 Android Gradle plugin and this project's
   `kotlinOptions.jvmTarget = "17"` require JDK 17. Android Studio bundles a
   compatible JBR; for CLI builds set `JAVA_HOME` to a JDK 17 install.
+- **Android minSdk 24** — required by the vendored Orbbec SDK wrapper.
 
 One-time setup:
 
@@ -26,7 +27,7 @@ npm run sync       # build:www (slim ORT vendor) + cap sync -> android/
 `npm run sync` runs `scripts/build-www.mjs` (assembles `www/` and vendors the
 slim onnxruntime-web wasm runtime) and then `cap sync` (copies `www/` into
 `android/app/src/main/assets/public` and updates native plugins). **Re-run it
-after any change to `js/`, `index.html`, `css/`, or `models/`.**
+after any change to `js/`, `index.html`, `css/`, `assets/`, or `models/`.**
 
 ## Build a debug APK
 
@@ -122,82 +123,95 @@ $ANDROID_HOME/build-tools/<version>/apksigner verify --print-certs \
   android/app/build/outputs/apk/release/app-release.apk
 ```
 
-## APK size note (onnxruntime wasm)
+## Current Android native integrations
 
-The on-device detector uses onnxruntime-web's **`wasm` execution provider only**
-(`executionProviders: ['wasm']` in `js/detect/detector.js`). The upstream
-`onnxruntime-web/dist` is ~70MB because it ships many runtime variants
-(jsep / jspi / asyncify / training) the app never loads.
+### Working storage + SAF export folder
 
-`scripts/build-www.mjs` therefore **vendors a slim subset** into
-`www/vendor/onnxruntime` — only:
+The app's reliable working store is **app-specific external storage** through the
+Capacitor Filesystem plugin (`Directory.External`):
 
-- `ort.min.js`
-- `ort-wasm-simd-threaded.wasm`
-- `ort-wasm-simd-threaded.mjs`
+```text
+/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/
+  dataset/
+  Output JSON/
+  Output TXT/
+```
 
-This trims roughly **~50MB** from the APK while keeping detection fully offline.
-If you change the detector's execution provider (e.g. add WebGPU/JSEP), update
-`ORT_WASM_EP_FILES` in `scripts/build-www.mjs` to vendor the matching files.
+This avoids scoped-storage failures that occurred when writing captured photos to
+public `Documents` on target SDK 34. Files can still be retrieved through USB/adb
+or the in-app **Download Session** export.
 
-## Deferred work (concrete approaches)
+For user-browsable copies, `SafPlugin.kt` implements a native
+`ACTION_OPEN_DOCUMENT_TREE` folder picker and persists the grant with
+`takePersistableUriPermission`. The Sessions home **Export folder** row stores
+that tree URI in `SessionStore`; captures and session downloads are mirrored
+(best-effort) under:
 
-These are intentionally **not yet implemented**. Each entry below is enough to
-start the work without re-deriving the design.
+```text
+<chosen folder>/PalmAnnotate/dataset/...
+```
 
-### (a) SAF folder picker for dataset / output location
+SAF is additive: failure to mirror into the public folder must not break the
+primary app-storage capture flow.
 
-Today the Android paths are fixed under `Documents/PalmAnnotate/{dataset,Output
-JSON,Output TXT}`. Operators should instead **pick** the dataset/output folder
-(e.g. an SD card or USB-OTG drive) via the **Storage Access Framework (SAF)**.
+### Orbbec USB camera SDK
 
-Two viable approaches:
+`OrbbecPlugin.kt` is wired to the Orbbec Android SDK wrapper AAR:
 
-- **Capacitor community plugin** — add
-  [`@capawesome/capacitor-file-picker`](https://capawesome.io/plugins/file-picker/)
-  and call `pickDirectory()` to get a `content://` tree URI. Persist read/write
-  permission across reboots with `takePersistableUriPermission`, store the URI
-  string in `@capacitor/preferences`, and route reads/writes through
-  `@capacitor/filesystem` (or the picker's file APIs) against that tree.
-- **Small native SAF intent** — add a `@PluginMethod` to a native plugin that
-  fires `Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)` via
-  `startActivityForResult`, takes the persistable permission on the returned
-  `content://` URI, and resolves the URI to JS. Resolve subfolders/files with
-  `DocumentFile.fromTreeUri(...)`.
+```text
+android/app/libs/obsensor_v2.0.6_2026031801_release.aar
+```
 
-In both cases, store the chosen tree URI in Preferences and fall back to the
-current fixed Documents path when none is selected, so behavior is unchanged
-until an operator opts in.
+The AAR came from `OrbbecSDK-Android-Wrapper-2.0.6.zip` and bundles the Java API,
+JNI libraries (`libOrbbecSDK.so`, `libobsensor_jni.so`, etc.), and extension
+assets. `android/app/build.gradle` includes it with:
 
-### (b) Orbbec SDK `.aar` integration
+```gradle
+implementation fileTree(dir: 'libs', include: ['*.aar'])
+```
 
-`OrbbecPlugin.kt` is a working scaffold: USB device enumeration, vendor-id
-filtering (`ORBBEC_VENDOR_ID = 0x2BC5`), and runtime USB permission are real;
-`open()`, `capture()`, and `startPreview()` are stubs that reject with
-"Orbbec SDK not integrated yet".
+The Orbbec SDK requires **minSdk 24** (`android/variables.gradle`). Current native
+methods:
 
-To finish it:
+- `isAvailable()` / `listDevices()` — Android USB-host enumeration filtered to
+  Orbbec vendor id `0x2BC5`.
+- `requestPermission()` — runtime USB permission with a one-shot broadcast
+  receiver (`FLAG_MUTABLE`, `RECEIVER_NOT_EXPORTED`).
+- `open()` — creates `OBContext`, opens the first SDK-visible device, selects a
+  capturable color profile, and starts a `Pipeline` on a single worker thread.
+- `capture()` — waits for a color frame and returns base64 JPEG plus dimensions.
+  MJPG is passed through; RGB/BGR/RGBA/BGRA/YUYV/UYVY/NV21/NV12/I420 are encoded
+  to JPEG in Kotlin.
+- `close()` — stops and releases the pipeline, device, and SDK context.
 
-1. Drop the Orbbec Android SDK `.aar` into **`android/app/libs/`** (the
-   `flatDir` repo in `android/app/build.gradle` already exposes that folder).
-2. **Uncomment** the dependency line in `android/app/build.gradle`:
-   `// implementation fileTree(dir: 'libs', include: ['*.aar'])`
-   (If the SDK ships as a Maven artifact instead, add its repo + a normal
-   `implementation "<group>:<artifact>:<version>"` line.)
-3. Implement the `TODO(OrbbecSDK)` blocks in `OrbbecPlugin.kt`:
-   - **`open()`** — create `OBContext`, query the device, build a `Pipeline`,
-     `Config().enableStream(color profile)`, then `pipeline.start(config)`.
-     Cache the pipeline as a field. Run off the main thread (Dispatchers.IO).
-   - **`capture()`** — `pipeline.waitForFrames(...)`, take the color frame,
-     encode to JPEG (the frame may already be MJPG, else `Bitmap.compress`),
-     base64-encode, and resolve `{ base64, width, height, format: "jpeg" }`.
-   - **`close()`** — `pipeline.stop()/close()` and `obContext.close()`.
+The built-in camera remains PalmAnnotate's default capture source. The Orbbec
+source is registered as an optional `CaptureSource`; runtime validation still
+requires a physical Android device with the Orbbec/Gemini camera attached.
 
-The JS layer already chooses the built-in camera by default and only calls into
-the Orbbec plugin when explicitly selected, so wiring the SDK does not affect the
-default capture path.
+## APK size notes
 
-### (c) Offline fonts
+The APK now contains three sizeable offline/runtime payloads when present:
+
+1. **onnxruntime-web wasm** — the detector uses onnxruntime-web's `wasm`
+   execution provider only (`executionProviders: ['wasm']` in
+   `js/detect/detector.js`). `scripts/build-www.mjs` vendors only:
+   - `ort.min.js`
+   - `ort-wasm-simd-threaded.wasm`
+   - `ort-wasm-simd-threaded.mjs`
+
+   This trims roughly **~50MB** versus copying all of `onnxruntime-web/dist`.
+   If the detector's execution provider changes (for example WebGPU/JSEP), update
+   `ORT_WASM_EP_FILES` in `scripts/build-www.mjs`.
+
+2. **YOLO model weights** — any local `models/*.onnx` is copied into `www/` and
+   then into the APK for fully offline detection. The weights stay gitignored.
+
+3. **Orbbec SDK AAR** — `obsensor_v2.0.6_2026031801_release.aar` contributes the
+   Orbbec Java API, native `.so` files, and SDK assets.
+
+## Deferred work
+
+### Offline fonts
 
 The web app may reference system/CDN fonts. For a guaranteed-offline field
 device, **self-host** the fonts:

@@ -116,7 +116,7 @@ Other Gradle targets: `assembleRelease` (needs a signing config), `clean`, `inst
 - `capture/` — capture-first flow: `capture-flow.js` (metadata form, per-side capture, **GPS**),
   `capture-source.js` (device camera, native + web), `orbbec-source.js` (Orbbec USB source).
 - `detect/detector.js` — on-device YOLO via onnxruntime-web (lazy-loaded; offline on Android).
-- `storage/` — `storage-adapter.js` (`Storage.active()` facade) + `fsa-adapter.js` (web File System Access) + `capacitor-adapter.js` (native Filesystem). `persist/session-store.js` = autosave.
+- `storage/` — `storage-adapter.js` (`Storage.active()` facade) + `fsa-adapter.js` (web File System Access) + `capacitor-adapter.js` (native Filesystem) + `saf-store.js` (optional SAF "export folder" — native only, mirrors captures to a user-picked public folder; see Android specifics). `persist/session-store.js` = autosave.
 - `project.js` / `fs-output.js` — thin facades over the active storage adapter.
 
 ## Platform detection (used everywhere)
@@ -129,9 +129,28 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
 ## Android specifics
 
 - `android/app/src/main/java/dev/sawitulm/palmannotate/` — `MainActivity.java` (registers
-  `OrbbecPlugin`), `OrbbecPlugin.kt` (USB-host enumeration is real; SDK frame capture is stubbed
-  with `TODO(OrbbecSDK)`).
-- App id / namespace: `dev.sawitulm.palmannotate`. SDK: min 22, target/compile 34.
+  `OrbbecPlugin` + `SafPlugin`), `OrbbecPlugin.kt` (Android USB-host enumeration/permission +
+  Orbbec SDK color-frame JPEG capture), `SafPlugin.kt` (Storage Access Framework folder picker +
+  `DocumentFile` writes).
+- App id / namespace: `dev.sawitulm.palmannotate`. SDK: min 24 (required by Orbbec SDK), target/compile 34.
+- **Orbbec SDK:** `android/app/libs/obsensor_v2.0.6_2026031801_release.aar` is vendored from
+  `OrbbecSDK-Android-Wrapper-2.0.6.zip` and included with `implementation fileTree(dir: 'libs',
+  include: ['*.aar'])`. The plugin's `open()` creates `OBContext`/`Pipeline`, `capture()` returns a
+  base64 JPEG color frame, and `close()` releases SDK resources. Built-in camera remains the default
+  capture source; Orbbec runtime still needs real-device + camera validation.
+- **Storage root = `Directory.External`** (`capacitor-adapter.js`): all dataset images/labels,
+  metadata, Output JSON/TXT and session downloads live under
+  `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/…`. This is the only location that,
+  on every supported Android version, the app can both write **and** read back through the WebView
+  (`convertFileSrc`) without a runtime permission. `Directory.Documents` was used first but fails
+  under scoped storage on target SDK 34 (Android 13/14) — captured photos landed nowhere and showed
+  "Image unavailable". Files are retrievable via USB/`adb` or the in-app **Download Session** export.
+- **Export folder (SAF):** `SafPlugin.kt` + `js/storage/saf-store.js` let the operator pick a public,
+  browsable folder (Documents / SD card / USB-OTG) via the system picker. When set, each captured
+  tree's photos + metadata are **mirrored** into `<chosen>/PalmAnnotate/dataset/…` (best-effort, on
+  top of the reliable app-external working store — never replaces it). The chosen tree URI is
+  remembered in SessionStore settings (`safFolderUri`/`safFolderName`) and re-verified each use; the
+  picker UI is the "Export folder" row on the Sessions home (native only).
 - `AndroidManifest.xml` permissions: `INTERNET` + `ACCESS_COARSE/FINE_LOCATION` (for capture GPS).
   **Any runtime permission the WebView requests must be declared here or Android auto-denies it.**
 - Installed Capacitor plugins (`capacitor.plugins.json`): filesystem, camera, preferences.

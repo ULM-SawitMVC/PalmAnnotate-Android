@@ -7,7 +7,8 @@
  *   - Web (Chrome/Edge): the File System Access API (showDirectoryPicker,
  *     FileSystemDirectoryHandle, blob URLs from <input webkitdirectory> Files).
  *   - Android (Capacitor): the native Filesystem plugin under a fixed
- *     Documents/PalmAnnotate folder, with convertFileSrc() for image URLs.
+ *     app-external PalmAnnotate folder (Directory.External), with
+ *     convertFileSrc() for image URLs.
  *
  * `Storage.active()` returns the right StorageAdapter for the current runtime
  * and caches it. Both adapters implement the SAME interface so the rest of the
@@ -31,6 +32,7 @@
  *   async readJSON(ref) -> object
  *   // INPUT dataset (Android only path; web keeps using <input webkitdirectory>)
  *   async readDatasetEntries() -> Array<{relPath, name, kind:'file', ext}>
+ *   async deleteDatasetTree(treeName, sideCount) -> {ok, removed}     // native: unlink files; web: no-op
  *   imageUrlFor(side) -> string              // web: createObjectURL; native: convertFileSrc
  *   async labelTextFor(side) -> string|null  // web: labelFile.text(); native: read+decode
  */

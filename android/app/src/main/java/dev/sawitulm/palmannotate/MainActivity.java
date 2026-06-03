@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // Register native plugins BEFORE the Capacitor bridge initialises.
         registerPlugin(OrbbecPlugin.class);
+        registerPlugin(SafPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

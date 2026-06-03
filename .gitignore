@@ -35,6 +35,9 @@ Damimas_Only/
 # On-device model weights (large; swap-in — folder + config are committed)
 models/*.onnx
 
+# Local Orbbec SDK release archives (the required AAR is vendored under android/app/libs/)
+OrbbecSDK-Android-Wrapper-*.zip
+
 # Capacitor / Node (commit android/ source, ignore build artifacts)
 node_modules/
 www/

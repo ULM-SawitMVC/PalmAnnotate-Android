@@ -90,7 +90,7 @@ test('Android load/save flow is platform-aware instead of using web-only folder 
   assert.match(app, /DatasetManager\.loadFromAdapter\(\)/);
   assert.match(app, /ProjectConfig\.get\(\)\.hasOutputDir/);
   assert.match(app, /ProjectConfig\.get\(\)\.hasLabelsDir/);
-  assert.match(app, /Documents\/PalmAnnotate/);
+  assert.match(app, /app-external PalmAnnotate|PalmAnnotate app storage/);
 });
 
 test('viewport and touch CSS cover Android phone and tablet targets', () => {
@@ -151,11 +151,14 @@ test('capture-first session shell is present and wired (home ⇄ editor routing)
   assert.match(app, /function _enterEditorView\(\)/);
   assert.match(app, /async function _showHome\(\)/);
   assert.match(app, /async function _capturePohon\(session\)/);
-  assert.match(app, /async function _openPohonByName\(name\)/);
+  assert.match(app, /async function _openPohonByName\(name, sessionId\)/);
   assert.match(app, /CaptureFlow\.start\(\{[\s\S]*session: \{[\s\S]*treeId: session\.nextId/);
   assert.match(app, /SessionsUI\.init\(\{[\s\S]*capture: \(session\) => _capturePohon\(session\)/);
-  assert.match(app, /openPohon: \(name\) => _openPohonByName\(name\)/);
-  assert.match(app, /if \(btnHome\)\s+btnHome\.addEventListener\('click', \(\) => _showHome\(\)\)/);
+  assert.match(app, /openPohon: \(name, sessionId\) => _openPohonByName\(name, sessionId\)/);
+  assert.match(app, /if \(btnHome\)\s+btnHome\.addEventListener\('click', \(\) => _onHomeButton\(\)\)/);
+  // The editor's Home button returns to the owning session when we came from one.
+  assert.match(app, /function _onHomeButton\(\)[\s\S]*_showSessionDetail\(_activeSessionId\)/);
+  assert.match(app, /async function _showSessionDetail\(id\)[\s\S]*SessionsUI\.showDetail\(id\)/);
   // Boot lands on the home view rather than auto-entering the editor.
   assert.match(app, /async function _bootView\(\)[\s\S]*_restoreCapturedTrees\(\)[\s\S]*_showHome\(\)/);
 

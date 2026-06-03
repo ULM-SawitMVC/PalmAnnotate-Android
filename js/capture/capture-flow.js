@@ -22,7 +22,7 @@
  *
  * All UI is built/removed here (appended to document.body) and styled via
  * css/capture.css. Capture sources come from CaptureSources.default(), so the
- * Orbbec USB source (Phase 5) drops in without changes here.
+ * Orbbec USB source drops in without changes here.
  */
 const CaptureFlow = (() => {
 
@@ -257,7 +257,7 @@ const CaptureFlow = (() => {
       overlay.innerHTML = '';
       const panel = _el('div', 'capture-panel capture-meta');
 
-      panel.appendChild(_el('h2', 'capture-title', 'New Pohon'));
+      panel.appendChild(_el('h2', 'capture-title', 'New Tree'));
 
       // Locked variety·blok badge.
       const lock = _el('div', 'capture-lock');
@@ -265,7 +265,7 @@ const CaptureFlow = (() => {
       const lockText = _el('div', 'capture-lock__text');
       lockText.appendChild(_el('span', 'capture-lock__variety', session.variety || ''));
       lockText.appendChild(_el('span', 'capture-lock__blok',
-        session.blok ? `Blok ${session.blok}` : 'No blok'));
+        session.blok ? `Block ${session.blok}` : 'No block'));
       lock.appendChild(lockText);
       panel.appendChild(lock);
 
@@ -519,6 +519,10 @@ const CaptureFlow = (() => {
    */
   async function _persistAndBuild(treeName, metadata, shots) {
     const adapter = Storage.active();
+    // Optional public-folder mirror (best-effort; null unless the operator chose
+    // an export folder via SAF). Captured copies land here so they're browsable
+    // in any file manager, alongside the reliable app-storage copy.
+    const saf = (window.SafStore && SafStore.isSupported && SafStore.isSupported()) ? SafStore : null;
     const sides = [];
 
     for (let i = 0; i < shots.length; i++) {
@@ -532,6 +536,9 @@ const CaptureFlow = (() => {
         console.warn('[CaptureFlow] persistDatasetImage failed for', relPath, e);
         persisted = {};
       }
+      if (saf) {
+        try { await saf.writeImage(`dataset/${relPath}`, shots[i].blob); } catch (_) {}
+      }
       sides.push({
         imageFile: persisted.file || null,
         imageUri:  persisted.uri  || null,
@@ -544,6 +551,9 @@ const CaptureFlow = (() => {
       await adapter.writeDatasetJson(`metadata/${treeName}.json`, metadata);
     } catch (e) {
       console.warn('[CaptureFlow] writeDatasetJson failed:', e);
+    }
+    if (saf) {
+      try { await saf.writeJson(`dataset/metadata/${treeName}.json`, metadata); } catch (_) {}
     }
 
     return {

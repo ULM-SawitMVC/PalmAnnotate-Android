@@ -5,10 +5,10 @@
  *
  * Bridges the CaptureSource interface (see js/capture/capture-source.js) to the
  * native Capacitor plugin window.Capacitor.Plugins.Orbbec (OrbbecPlugin.kt).
- * The native USB-host parts (enumerate / request permission) are real; the SDK
- * frame capture is a Phase 5 stub that rejects until the Orbbec Android SDK
- * .aar is integrated on-device. This source is registered when present but is
- * never the default — the built-in device camera stays the default source.
+ * The native plugin enumerates/request-permissions via Android USB-host APIs and
+ * captures a color frame through Orbbec's Android SDK wrapper. This source is
+ * registered when present but is never the default — the built-in device camera
+ * stays the default source.
  *
  * ─── CaptureSource interface ───────────────────────────────────────────────
  *   id        : 'orbbec'
@@ -110,10 +110,8 @@ const OrbbecSource = (() => {
    * Opens the pipeline (native open()) then grabs a frame (native capture()),
    * converting the returned base64 JPEG into a Blob with pixel dimensions.
    *
-   * NOTE (Phase 5): the native capture() is currently a stub that rejects with
-   * "Orbbec SDK not integrated yet" — that error is surfaced to the caller. The
-   * capture flow treats a thrown error as a failed capture (distinct from the
-   * null "user cancelled" return).
+   * The capture flow treats a thrown error as a failed capture (distinct from
+   * the null "user cancelled" return).
    *
    * @returns {Promise<{blob:Blob, width:number, height:number}|null>}
    */
@@ -123,8 +121,15 @@ const OrbbecSource = (() => {
       throw new Error('Orbbec plugin unavailable');
     }
 
-    // Ensure the pipeline is open before grabbing a frame. open() is also a
-    // Phase 5 stub today, so this rejects with the SDK-not-integrated message.
+    if (typeof Orbbec.requestPermission === 'function') {
+      const permission = await Orbbec.requestPermission();
+      if (!permission || permission.granted !== true) {
+        throw new Error('Orbbec USB permission denied');
+      }
+    }
+
+    // Ensure the pipeline is open before grabbing a frame. Native capture() also
+    // opens lazily, but the explicit open gives clearer device/permission errors.
     if (typeof Orbbec.open === 'function') {
       await Orbbec.open();
     }

@@ -6,35 +6,40 @@ The app is designed for the SawitMVC dataset and writes schema `version: 4` outp
 
 ## Features
 
-- Load a local dataset folder containing `images/` and `labels/`.
+- Load a local dataset folder containing `images/` and `labels/` (web) or capture trees in locked Android field sessions.
 - Correct bounding boxes per side: draw, move, resize, delete, and change class.
 - Link duplicate bunch detections across adjacent sides.
 - Resolve class mismatches before saving confirmed output.
+- Run optional offline YOLO over-detection when an ONNX model is present.
 - Export corrected YOLO labels, session backup JSON, CSV summaries, identity JSON, and SawitMVC output JSON.
-- Resume from previously saved output JSON files.
+- Mirror Android captures to a user-picked public SAF export folder.
+- Resume from previously saved output JSON files and persisted Android sessions.
 
 ## Android app (Capacitor)
 
-The same vanilla-JS app ships as a native Android app via Capacitor 6, for
-field annotation directly on a tablet/phone. Native is detected at runtime
-(`window.Capacitor.isNativePlatform()`); no separate codebase.
+The same vanilla-JS app ships as a native Android app via Capacitor 6 for field
+annotation directly on a tablet/phone. Native is detected at runtime
+(`window.Capacitor.isNativePlatform()`); there is no separate app codebase.
 
 ### Field flow
 
-1. **Capture 4 views** of a tree with the built-in camera (one per side).
-2. The on-device **YOLO detector** auto **over-detects** bunches across the
-   views (proposes generous, all-`B2` boxes — easier to delete a spurious box
-   than to draw a missed one). The model runs fully offline via
+1. Start or resume a locked **Session** (variety + block), then add one tree at a
+   time.
+2. **Capture 4 views** of the tree (one per side). The built-in device camera is
+   the default capture source.
+3. The on-device **YOLO detector** can auto **over-detect** bunches across the
+   views (generous, all-`B2` suggestions). The model runs fully offline through
    onnxruntime-web's `wasm` execution provider.
-3. **Annotate** in the swipe carousel: set each bunch's class and **cross-link**
-   duplicate detections that appear on adjacent views, so each physical bunch is
-   counted once.
-4. Move on to the **next tree** and repeat.
+4. **Annotate** in the swipe carousel: set each bunch's class and **cross-link**
+   duplicate detections on adjacent views so each physical bunch is counted once.
+5. Move on to the **next tree**. Session state, captured registry, and settings
+   persist through app restarts.
 
 ### Dev loop
 
 ```bash
 npm install              # install Capacitor + onnxruntime-web
+npm test                 # Node test suite
 npm run sync             # build:www (slim vendor) + cap sync into android/
 ```
 
@@ -44,7 +49,7 @@ Then either open the project in Android Studio:
 npx cap open android     # or: npm run android
 ```
 
-…or build from the CLI:
+…or build from the CLI (JDK 17 required):
 
 ```bash
 cd android && ./gradlew assembleDebug
@@ -52,37 +57,54 @@ cd android && ./gradlew assembleDebug
 ```
 
 Re-run `npm run sync` whenever the web app (`js/`, `index.html`, `css/`,
-`models/`) changes so the native `www/` and the vendored ORT runtime are
-refreshed.
+`assets/`, `models/`) changes so the native `www/` and the vendored ORT runtime
+are refreshed. Android's `minSdk` is **24** because the Orbbec SDK requires it.
 
 ### Where data lives on device
 
-On Android the app reads/writes under the shared Documents directory:
+Android keeps the reliable working store in app-specific external storage:
 
 ```text
-Documents/PalmAnnotate/
-  dataset/         input images + labels
+/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/
+  dataset/         captured/input images + labels + metadata
   Output JSON/     one canonical {TREE_NAME}.json per tree
   Output TXT/      corrected YOLO label files
 ```
 
+This path is readable by the app/WebView without scoped-storage permission
+failures. For operator-browsable copies, use the **Export folder** row on the
+Sessions home screen: it opens Android's Storage Access Framework folder picker
+and mirrors captures/downloaded session JSON into:
+
+```text
+<chosen public folder>/PalmAnnotate/dataset/...
+```
+
+The SAF export folder is best-effort and additive; the app-storage copy remains
+the source of truth.
+
 ### On-device detector model
 
-Drop your exported single-class YOLO model at `models/ffb-detector.onnx`
-(see [models/README.md](models/README.md) for export flags). The next
-`npm run sync` copies it into `www/` and the detector picks it up automatically
-— no rebuild of native code required.
+Drop your exported single-class YOLO model at `models/ffb-detector.onnx` (or set
+`modelFile` in `models/detector.config.json` to your filename; see
+[models/README.md](models/README.md) for export flags). The next `npm run sync`
+copies `models/` into `www/` and the detector picks it up automatically — no
+native-code rebuild required unless Android sources changed.
 
 ### Camera sources
 
-The **built-in device camera is the default** capture source. An **Orbbec USB
-(RGB-D) camera** source is present as a **scaffolded native plugin**
-(`OrbbecPlugin.kt`): USB enumeration/permission are real, but frame capture is
-stubbed until the Orbbec SDK `.aar` is wired in. See
-[docs/android-build.md](docs/android-build.md).
+The **built-in device camera is still the default** capture source. The native
+**Orbbec USB (RGB-D) camera** plugin is now wired to the Orbbec Android SDK
+wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`):
 
-For the full Android build, signing, and deferred-work guide, see
-[docs/android-build.md](docs/android-build.md).
+- Android USB-host enumeration and runtime USB permission are real.
+- `open()` starts an Orbbec `OBContext`/`Pipeline` color stream.
+- `capture()` returns one color frame as base64 JPEG (`{base64,width,height}`).
+- `close()` releases the pipeline/device/context.
+
+Runtime Orbbec capture still needs testing on a physical Android device with the
+Gemini/Orbbec hardware attached. For the full Android build, signing, SAF, and
+Orbbec notes, see [docs/android-build.md](docs/android-build.md).
 
 ## Output Schema
 

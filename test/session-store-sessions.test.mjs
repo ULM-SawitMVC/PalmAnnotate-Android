@@ -66,6 +66,32 @@ test('addTreeToSession appends pohon, dedupes by name, and advances nextId', asy
   assert.equal(after.nextId, 51);
 });
 
+test('removeTreeFromSession drops one pohon, updates counts, and never rewinds nextId', async () => {
+  const { SessionStore } = loadStore();
+  const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0002', treeId: 2, sideCount: 4 });
+
+  const before = await SessionStore.getSession(s.id);
+  assert.equal(before.trees.length, 2);
+  assert.equal(before.nextId, 3);
+
+  const after = await SessionStore.removeTreeFromSession(s.id, 'DAMIMAS_A21B_0001');
+  assert.equal(after.trees.length, 1);
+  assert.equal(after.trees[0].name, 'DAMIMAS_A21B_0002');
+  assert.equal(after.nextId, 3, 'ids are never reused — counter stays put');
+
+  // Reflected in the rolled-up stats and persisted across a read.
+  const stats = await SessionStore.homeStats();
+  assert.equal(stats.totalPohon, 1);
+
+  // Removing an unknown name is a no-op (still returns the session, not null).
+  const noop = await SessionStore.removeTreeFromSession(s.id, 'NOPE');
+  assert.equal(noop.trees.length, 1);
+  // Bad session id degrades to null (non-throwing contract).
+  assert.equal(await SessionStore.removeTreeFromSession('nope', 'X'), null);
+});
+
 test('homeStats rolls sessions up into groups by variety+blok', async () => {
   const { SessionStore } = loadStore();
 
@@ -126,4 +152,30 @@ test('non-throwing contract: bad ids and missing names degrade gracefully', asyn
   const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
   const unchanged = await SessionStore.addTreeToSession(s.id, { /* no name */ });
   assert.equal(unchanged.trees.length, 0);
+});
+
+test('input cache remembers varieties/blocks most-recent-first, deduped, and survives reload', async () => {
+  const ls = makeLocalStorage();
+  const store = loadStore(ls).SessionStore;
+
+  await store.createSession({ variety: 'DAMIMAS', blok: 'A21A' });
+  await store.createSession({ variety: 'TENERA', blok: 'B07' });
+  // Re-using a variety (different case) moves it to the front without duplicating.
+  await store.createSession({ variety: 'damimas', blok: 'A21A' });
+
+  let cache = await store.getInputCache();
+  assert.deepEqual(cache.varieties, ['damimas', 'TENERA'], 'most-recent first, case-insensitive dedupe');
+  assert.deepEqual(cache.bloks, ['A21A', 'B07']);
+
+  // Blank values are never cached.
+  await store.rememberInput('', '   ');
+  cache = await store.getInputCache();
+  assert.deepEqual(cache.varieties, ['damimas', 'TENERA']);
+  assert.deepEqual(cache.bloks, ['A21A', 'B07']);
+
+  // Survives an app restart (same backing store, fresh module instance).
+  const reloaded = loadStore(ls).SessionStore;
+  const after = await reloaded.getInputCache();
+  assert.deepEqual(after.varieties, ['damimas', 'TENERA']);
+  assert.deepEqual(after.bloks, ['A21A', 'B07']);
 });

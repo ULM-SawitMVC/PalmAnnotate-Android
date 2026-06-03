@@ -3,6 +3,7 @@
 # Built application files
 *.apk
 *.aar
+!app/libs/obsensor_v2.0.6_2026031801_release.aar
 *.ap_
 *.aab
 

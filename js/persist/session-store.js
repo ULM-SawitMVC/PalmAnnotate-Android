@@ -13,8 +13,9 @@
  *   window.Capacitor && window.Capacitor.isNativePlatform && isNativePlatform().
  *
  * Why this exists: image/label files captured on-device persist on disk under
- * Documents/PalmAnnotate/dataset, but the DatasetManager tree list lives only in
- * memory. This registry is the INDEX of those captured trees so the app can
+ * the app-external PalmAnnotate/dataset folder (see CapacitorAdapter), but the
+ * DatasetManager tree list lives only in memory. This registry is the INDEX of
+ * those captured trees so the app can
  * repopulate DatasetManager after a restart. Settings (operator/variety defaults)
  * and optional autosave snapshots ride along on the same store.
  *
@@ -34,6 +35,7 @@ const SessionStore = (() => {
   const K_SETTINGS       = NS + 'settings';
   const K_CAPTURED       = NS + 'capturedRegistry';
   const K_SESSIONS       = NS + 'sessions';
+  const K_INPUTCACHE     = NS + 'inputCache';
   const SNAPSHOT_PREFIX  = NS + 'snapshot.';
 
   /**
@@ -46,7 +48,7 @@ const SessionStore = (() => {
 
   // All keys this module owns, used by clearAll(). Snapshot keys are discovered
   // dynamically (they're per-tree), so they're handled separately there.
-  const FIXED_KEYS = [K_SETTINGS, K_CAPTURED, K_SESSIONS];
+  const FIXED_KEYS = [K_SETTINGS, K_CAPTURED, K_SESSIONS, K_INPUTCACHE];
 
   // ── Backend selection ───────────────────────────────────────────────────────
 
@@ -228,8 +230,8 @@ const SessionStore = (() => {
   // DAMIMAS·A21B and DAMIMAS·A21A are different groups; two sessions on the same
   // variety+blok roll up into ONE group. This index is what powers the home
   // screen's stats + resumable-session list across app restarts. Image/label
-  // files still live on disk under Documents/PalmAnnotate/dataset; the trees here
-  // carry only the persistable refs needed to reopen them.
+  // files still live on disk under the app-external PalmAnnotate/dataset folder;
+  // the trees here carry only the persistable refs needed to reopen them.
 
   let _sidCounter = 0;
 
@@ -310,6 +312,9 @@ const SessionStore = (() => {
     const sessions = await getSessions();
     sessions.push(session);
     await _setJSON(K_SESSIONS, sessions);
+    // Remember the typed variety/block for next time's suggestions. Pass the raw
+    // opts.variety (not the 'UNKNOWN' fallback) so a blank entry isn't cached.
+    await rememberInput(String(opts.variety || '').trim(), blok);
     return session;
   }
 
@@ -369,6 +374,30 @@ const SessionStore = (() => {
   }
 
   /**
+   * Remove one pohon (tree) from a session by name and persist. The
+   * auto-increment counter is intentionally NOT rewound — tree ids are never
+   * reused. On-disk files are handled by the caller (the storage adapter's
+   * deleteDatasetTree); this only updates the index.
+   * @param {string} id
+   * @param {string} treeName
+   * @returns {Promise<object|null>} the updated session, or null if not found.
+   */
+  async function removeTreeFromSession(id, treeName) {
+    const sessions = await getSessions();
+    const idx = sessions.findIndex(s => s && s.id === id);
+    if (idx === -1) return null;
+    const session = sessions[idx];
+    const before = Array.isArray(session.trees) ? session.trees.length : 0;
+    session.trees = (session.trees || []).filter(t => t && t.name !== treeName);
+    if (session.trees.length !== before) {
+      session.updatedAt = new Date().toISOString();
+      sessions[idx] = session;
+      await _setJSON(K_SESSIONS, sessions);
+    }
+    return session;
+  }
+
+  /**
    * Remove a session from the index by id and persist. Does NOT delete the
    * on-disk image/label files (those are the dataset of record).
    * @param {string} id
@@ -405,6 +434,59 @@ const SessionStore = (() => {
       totalSessions: sessions.length,
       groups: Array.from(groups.values()).sort((a, b) => b.pohon - a.pohon),
     };
+  }
+
+  // ── Input cache (variety / block autocomplete) ───────────────────────────────
+  //
+  // Field crews type the same handful of varieties and blocks over and over. We
+  // remember what they entered — most-recent first, capped, case-insensitively
+  // deduped — so the new-session form can offer them as <datalist> suggestions.
+  // This cache is independent of the sessions list: deleting a session does not
+  // forget its variety/block.
+
+  const RECENT_CAP = 12;
+
+  /**
+   * Prepend `value` to a recents list (most-recent first), dropping any prior
+   * case-insensitive duplicate and capping the length. Blank values are ignored.
+   */
+  function _pushRecent(list, value) {
+    const base = Array.isArray(list) ? list : [];
+    const v = String(value == null ? '' : value).trim();
+    if (!v) return base.slice(0, RECENT_CAP);
+    const out = [v];
+    for (const item of base) {
+      if (String(item).trim().toLowerCase() !== v.toLowerCase()) out.push(item);
+    }
+    return out.slice(0, RECENT_CAP);
+  }
+
+  /**
+   * Remembered free-text inputs for the new-session form.
+   * @returns {Promise<{varieties:string[], bloks:string[]}>}
+   */
+  async function getInputCache() {
+    const v = await _getJSON(K_INPUTCACHE, {});
+    const obj = (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    return {
+      varieties: Array.isArray(obj.varieties) ? obj.varieties : [],
+      bloks: Array.isArray(obj.bloks) ? obj.bloks : [],
+    };
+  }
+
+  /**
+   * Record a variety and/or block the operator just used so it surfaces as a
+   * suggestion next time. Blank values are skipped. Never throws.
+   * @returns {Promise<{varieties:string[], bloks:string[]}>}
+   */
+  async function rememberInput(variety, blok) {
+    const cache = await getInputCache();
+    const next = {
+      varieties: _pushRecent(cache.varieties, variety),
+      bloks: _pushRecent(cache.bloks, blok),
+    };
+    await _setJSON(K_INPUTCACHE, next);
+    return next;
   }
 
   // ── In-progress annotation snapshots (optional autosave) ─────────────────────
@@ -483,7 +565,8 @@ const SessionStore = (() => {
     getCapturedRegistry, addCapturedTree, removeCapturedTree,
     // sessions / groups
     getSessions, getSession, createSession, updateSession, addTreeToSession,
-    removeSession, homeStats, groupKeyFor,
+    removeTreeFromSession, removeSession, homeStats, groupKeyFor,
+    getInputCache, rememberInput,
     // snapshots
     saveSnapshot, loadSnapshot, clearSnapshot,
     // bulk

@@ -27,15 +27,17 @@ test('Android app id, namespace, strings, and Capacitor config stay aligned', ()
 
 test('Android SDK and plugin dependencies cover current debug APK requirements', () => {
   const variables = read('android/variables.gradle');
+  const appGradle = read('android/app/build.gradle');
   const pkg = JSON.parse(read('package.json'));
 
-  assert.match(variables, /minSdkVersion = 22/);
+  assert.match(variables, /minSdkVersion = 24/);
   assert.match(variables, /compileSdkVersion = 34/);
   assert.match(variables, /targetSdkVersion = 34/);
   assert.equal(pkg.dependencies['@capacitor/android'].startsWith('^6.'), true);
   assert.equal(pkg.dependencies['@capacitor/filesystem'].startsWith('^6.'), true);
   assert.equal(pkg.dependencies['@capacitor/camera'].startsWith('^6.'), true);
   assert.equal(pkg.dependencies['@capacitor/preferences'].startsWith('^6.'), true);
+  assert.match(appGradle, /implementation fileTree\(dir: 'libs', include: \['\*\.aar'\]\)/);
 });
 
 test('Android manifest remains orientation-flexible for phone and tablet aspect ratios', () => {
@@ -74,6 +76,10 @@ test('Android Orbbec USB camera integration is optional and registered', () => {
   assert.match(plugin, /const val ORBBEC_VENDOR_ID = 0x2BC5/);
   assert.match(plugin, /Context\.RECEIVER_NOT_EXPORTED/);
   assert.match(plugin, /PendingIntent\.FLAG_MUTABLE/);
+  assert.match(plugin, /OBContext/);
+  assert.match(plugin, /Pipeline/);
+  assert.match(plugin, /waitForFrameSet/);
+  assert.doesNotMatch(plugin, /Orbbec SDK not integrated yet/);
 });
 
 test('Native activity uses a full-screen WebView instead of fixed-size Android views', () => {

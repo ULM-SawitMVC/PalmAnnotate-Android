@@ -1,6 +1,6 @@
 # PalmAnnotate Architecture
 
-PalmAnnotate is a static single-page app. It has no backend, build step, model inference, or network dependency after the page loads.
+PalmAnnotate is a static single-page app. It has no backend and no app-logic bundler: the root `index.html`, `js/`, `css/`, `assets/`, and `models/` are copied into `www/` for Android. On-device YOLO inference is optional and runs fully offline when a local ONNX model is present.
 
 ## Main Modules
 
@@ -15,8 +15,11 @@ PalmAnnotate is a static single-page app. It has no backend, build step, model i
 | `js/dedup-ui.js` | Two-canvas linking surface and suggestion panels. |
 | `js/results.js` | Counting, result rendering, and auxiliary exports. |
 | `js/output-schema.js` | SawitMVC schema `version: 4` output and legacy output loading. |
-| `js/fs-output.js` | File System Access API writes and download fallback. |
+| `js/fs-output.js` | Output facade over web/native storage writes and download fallback. |
 | `js/project.js` | Output folders and save tracking. |
+| `js/storage/*` | Web File System Access adapter, Android Capacitor Filesystem adapter, and optional native SAF export mirror. |
+| `js/capture/*` | Built-in camera capture, session capture flow, and optional Orbbec USB capture source. |
+| `js/detect/detector.js` | Optional offline YOLO detector via onnxruntime-web wasm. |
 
 ## Flow
 
@@ -71,9 +74,9 @@ Opposite sides are not scored because the perspective difference is too large fo
 
 ## Persistence
 
-Project configuration is in memory only. Saved status comes from the output folder scan and the current browser session.
+Project configuration is in memory on the web; Android session/settings state is persisted through `SessionStore` (Capacitor Preferences). Saved status comes from output scans plus the current session registry.
 
-If the browser supports the File System Access API, output JSON and corrected labels are written directly to the selected folders. Manual JSON save can fall back to downloads; auto-save requires a writable output JSON folder and never downloads silently.
+If the browser supports the File System Access API, output JSON and corrected labels are written directly to selected folders. On Android, the working store is app-specific external storage under `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate`; the optional SAF export folder mirrors captures/downloads into a user-picked public folder. Manual JSON save can fall back to downloads on web; auto-save requires a writable output JSON target and never downloads silently.
 
 Navigation, loading, compute, and save operations run through a single queue. Saves use an immutable session snapshot and validate tree names, image filenames, label filenames, and per-side annotation counts before writing.
 
@@ -84,7 +87,7 @@ Saved output filenames are dataset-driven:
 
 ## Known Limits
 
-- No YOLO inference is run inside the app.
+- YOLO inference is optional; if `models/<modelFile>` is absent, detection is disabled without throwing.
 - No visual embeddings, tracking, or image hashing are used for deduplication.
 - One bbox can be linked to only one counterpart per adjacent side pair.
 - Folder handles must be selected again after a browser refresh.

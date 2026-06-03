@@ -5,19 +5,28 @@
  * plugin (Android). No bundler/import: core plugins are reachable at
  * window.Capacitor.Plugins.Filesystem and enum values are passed as strings.
  *
- * Layout (all under Documents/PalmAnnotate):
+ * Layout (all under {External}/PalmAnnotate, i.e.
+ * /Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate):
  *   PalmAnnotate/dataset/images/{split}/{stem}_{N}.jpg
  *   PalmAnnotate/dataset/labels/{split}/{stem}_{N}.txt
  *   PalmAnnotate/Output JSON/{tree_name}.json
  *   PalmAnnotate/Output TXT/{split}/{stem}_{N}.txt
  *
- * For M1 the input/output roots are this fixed Documents/PalmAnnotate folder.
- * A SAF (Storage Access Framework) folder picker is a later phase — see TODOs.
+ * Storage root: Directory.External (app-specific external storage). This is the
+ * ONLY location that, on every supported Android version, the app can both write
+ * AND read back through the WebView (Capacitor.convertFileSrc) without any
+ * runtime permission. The public Documents folder was tried first but, under
+ * scoped storage (Android 11+, and reliably broken on 13/14 = targetSdk 34),
+ * Filesystem.writeFile to Directory.Documents fails — which left captured photos
+ * neither on disk nor displayable ("Image unavailable"). Files here are reachable
+ * over USB/adb and via the in-app "Download Session" export. A SAF (Storage
+ * Access Framework) folder picker — letting the operator choose a public, fully
+ * browsable folder — is the proper long-term replacement; see TODOs.
  */
 const CapacitorAdapter = (() => {
 
-  const DIRECTORY     = 'DOCUMENTS';          // Capacitor Directory enum (string form)
-  const BASE          = 'PalmAnnotate';       // root subfolder under Documents
+  const DIRECTORY     = 'EXTERNAL';           // Capacitor Directory enum (string form)
+  const BASE          = 'PalmAnnotate';       // root subfolder under app-external storage
   const OUTPUT_JSON   = BASE + '/Output JSON';
   const OUTPUT_TXT    = BASE + '/Output TXT';
   const DATASET       = BASE + '/dataset';
@@ -55,19 +64,19 @@ const CapacitorAdapter = (() => {
     _baseEnsured = true;
   }
 
-  // ── Output directory selection (fixed folder for M1) ────────────────────────
-  // TODO(SAF): replace the fixed Documents/PalmAnnotate root with a real
-  // Storage Access Framework folder picker so users can choose any location.
+  // ── Output directory selection (fixed reliable app store) ──────────────────
+  // SAF export lives in js/storage/saf-store.js as an additive public mirror;
+  // this adapter intentionally remains the app-readable source of truth.
 
   async function pickOutputDir() { await _ensureBase(); return true; }
   async function pickLabelsDir() { await _ensureBase(); return true; }
   function clearLabelsDir() { /* fixed folder on native — nothing to clear */ }
-  function resetDirs() { /* fixed Documents/PalmAnnotate folder — nothing to reset */ }
+  function resetDirs() { /* fixed app-external PalmAnnotate folder — nothing to reset */ }
 
   function hasOutputDir() { return true; }
   function hasLabelsDir() { return true; }
-  function outputDirName() { return 'Documents/PalmAnnotate'; }
-  function labelsDirName() { return 'Documents/PalmAnnotate'; }
+  function outputDirName() { return 'PalmAnnotate (app storage)'; }
+  function labelsDirName() { return 'PalmAnnotate (app storage)'; }
 
   async function verifyAccess() { return true; }
 
@@ -258,6 +267,46 @@ const CapacitorAdapter = (() => {
     }
   }
 
+  /**
+   * Best-effort removal of every on-disk artefact for one captured tree: its
+   * side images, any saved labels, the per-tree metadata, and the output JSON.
+   * Used when the operator deletes a tree from a session so a later folder
+   * re-scan can't resurrect it. Each candidate is deleted independently and a
+   * "not found" is ignored, so this never throws.
+   * @param {string} treeName  e.g. DAMIMAS_A21B_0001
+   * @param {number} [sideCount=8] how many sides to attempt (defaults high)
+   * @returns {Promise<{ok:boolean, removed:number}>}
+   */
+  async function deleteDatasetTree(treeName, sideCount) {
+    const fs = _fs();
+    const stem = _safeSegment(treeName);
+    if (!fs || !stem) return { ok: false, removed: 0 };
+    await _ensureBase();
+    const n = Math.max(1, Math.min(64, Math.floor(Number(sideCount) || 8)));
+    const candidates = [];
+    for (let i = 1; i <= n; i++) {
+      // Captured trees use split 'field'; include 'train' in case a side was
+      // ever filed there, plus both label locations.
+      candidates.push(DATASET + `/images/field/${stem}_${i}.jpg`);
+      candidates.push(DATASET + `/images/train/${stem}_${i}.jpg`);
+      candidates.push(DATASET + `/labels/field/${stem}_${i}.txt`);
+      candidates.push(OUTPUT_TXT + `/field/${stem}_${i}.txt`);
+    }
+    candidates.push(DATASET + `/metadata/${stem}.json`);
+    candidates.push(OUTPUT_JSON + `/${stem}.json`);
+
+    let removed = 0;
+    for (const path of candidates) {
+      try {
+        await fs.deleteFile({ path, directory: DIRECTORY });
+        removed += 1;
+      } catch (e) {
+        // Missing file — expected for most candidates; ignore.
+      }
+    }
+    return { ok: true, removed };
+  }
+
   // ── Dataset input ──────────────────────────────────────────────────────────
 
   /**
@@ -272,8 +321,8 @@ const CapacitorAdapter = (() => {
     const out = [];
     if (!fs) return out;
     await _ensureBase();
-    // TODO(SAF): allow picking an arbitrary dataset folder; M1 uses the fixed
-    // Documents/PalmAnnotate roots.
+    // Native dataset loading reads the fixed app-external PalmAnnotate working
+    // store. SAF export is a write-only public mirror, not the read source.
     await _walk(fs, DATASET, '', out);
     await _walk(fs, OUTPUT_TXT, 'Output TXT', out);
     return out;
@@ -402,7 +451,7 @@ const CapacitorAdapter = (() => {
     hasOutputDir, hasLabelsDir, outputDirName, labelsDirName,
     verifyAccess,
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
-    persistDatasetImage, writeDatasetJson,
+    persistDatasetImage, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
   };
 })();

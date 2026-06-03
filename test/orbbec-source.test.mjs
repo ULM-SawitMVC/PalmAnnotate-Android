@@ -50,6 +50,7 @@ test('OrbbecSource capture opens native plugin and converts base64 frame to Blob
   const ctx = loadOrbbec({
     plugin: {
       async isAvailable() { return { available: true }; },
+      async requestPermission() { calls.push('requestPermission'); return { granted: true }; },
       async open() { calls.push('open'); },
       async capture() {
         calls.push('capture');
@@ -64,11 +65,24 @@ test('OrbbecSource capture opens native plugin and converts base64 frame to Blob
   });
 
   const frame = await ctx.OrbbecSource.capture();
-  assert.deepEqual(calls, ['open', 'capture']);
+  assert.deepEqual(calls, ['requestPermission', 'open', 'capture']);
   assert.equal(frame.width, 640);
   assert.equal(frame.height, 480);
   assert.equal(frame.blob.type, 'image/jpeg');
   assert.equal(await frame.blob.text(), 'jpeg-bytes');
+});
+
+test('OrbbecSource capture rejects when USB permission is denied', async () => {
+  await assert.rejects(
+    () => loadOrbbec({
+      plugin: {
+        async requestPermission() { return { granted: false }; },
+        async open() { throw new Error('should not open'); },
+        async capture() { throw new Error('should not capture'); },
+      },
+    }).OrbbecSource.capture(),
+    /Orbbec USB permission denied/
+  );
 });
 
 test('OrbbecSource capture rejects clearly when plugin or frame payload is missing', async () => {

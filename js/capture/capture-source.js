@@ -5,7 +5,7 @@
  *
  * A CaptureSource abstracts "where a single photo comes from" so the rest of the
  * capture flow never branches on platform or hardware. The built-in device
- * camera is the DEFAULT source; Phase 5 will register an Orbbec USB source via
+ * camera is the DEFAULT source; the Orbbec USB source registers itself via
  * CaptureSources.register(src) without touching CaptureFlow.
  *
  * ─── CaptureSource interface ───────────────────────────────────────────────
