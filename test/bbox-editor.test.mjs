@@ -99,6 +99,46 @@ test('BBoxEditor draws, reclasses, and deletes a bbox through pointer/touch-safe
   assert.equal(canvas.style.touchAction, undefined);
 });
 
+test('BBoxEditor._render survives a resize before the image loads (tr still null)', async () => {
+  // Regression: on-device, a layout pass (ResizeObserver) fired before img.onload,
+  // so _rebuildTransforms left tr=null and _render threw an uncaught
+  // "Cannot read properties of null (reading 'scaleToCanvas')", aborting the
+  // editor pipeline. The guard in _render must make this a no-op, not a throw.
+  let capturedResize = null;
+  class CapturingResizeObserver {
+    constructor(cb) { capturedResize = cb; }
+    observe() {}
+    disconnect() {}
+  }
+  // An image whose onload never fires → image and tr stay null.
+  class NeverImage {
+    constructor() { this.naturalWidth = 0; this.naturalHeight = 0; }
+    set src(_v) { /* never invokes onload */ }
+    get src() { return this._src; }
+  }
+
+  const dom = makeDom();
+  const ctx = loadModule(['js/yolo-io.js', 'js/canvas.js', 'js/bbox-editor.js'], {
+    globals: {
+      document: dom.document,
+      Image: NeverImage,
+      ResizeObserver: CapturingResizeObserver,
+      devicePixelRatio: 1,
+      innerWidth: 1280,
+      innerHeight: 800,
+    },
+  });
+  const canvas = dom.document.createElement('canvas');
+  canvas.clientWidth = 1000;
+  canvas.clientHeight = 1000;
+  dom.document.body.appendChild(canvas);
+
+  ctx.BBoxEditor.create(canvas, 'img://never', [], () => {});
+  assert.equal(typeof capturedResize, 'function');
+  // Firing the resize before the image has loaded must NOT throw.
+  assert.doesNotThrow(() => capturedResize());
+});
+
 test('BBoxEditor ignores sub-minimum accidental drags on touch screens', async () => {
   const { ctx, canvas } = loadEditor();
   const updates = [];

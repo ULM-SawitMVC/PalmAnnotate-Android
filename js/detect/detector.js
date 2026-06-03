@@ -79,9 +79,19 @@ const Detector = (() => {
       if (!window.ort) throw new Error('ort runtime did not initialize window.ort');
       try {
         // Point the wasm loader at the matching dist (vendored on native, CDN on web).
-        window.ort.env.wasm.wasmPaths = native ? VENDOR_BASE : CDN_BASE;
+        // The path MUST be absolute: ORT loads the wasm proxy via dynamic import(),
+        // and a bare relative specifier like "vendor/onnxruntime/" is rejected by
+        // the module resolver ("Failed to resolve module specifier"). Resolve it
+        // against the document base so it becomes e.g. https://localhost/vendor/… .
+        window.ort.env.wasm.wasmPaths = native
+          ? new URL(VENDOR_BASE, document.baseURI).href
+          : CDN_BASE;
+        // The WebView is not cross-origin isolated, so SharedArrayBuffer is
+        // unavailable. Force single-thread so ORT never tries to spawn workers
+        // (which would need SAB) and falls over.
+        window.ort.env.wasm.numThreads = 1;
       } catch (err) {
-        console.warn('Detector: could not set ort.env.wasm.wasmPaths —', err);
+        console.warn('Detector: could not set ort.env.wasm options —', err);
       }
       return window.ort;
     })();

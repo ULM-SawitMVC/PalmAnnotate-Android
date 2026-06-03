@@ -260,6 +260,12 @@ const BBoxEditor = (() => {
     const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // The transform only exists once the image has loaded (see _rebuildTransforms).
+    // A _resize() can fire before img.onload (e.g. a layout pass on tab switch),
+    // which would otherwise throw on tr.* below and abort the render pipeline with
+    // an uncaught TypeError. Bail early; img.onload will re-render with a valid tr.
+    if (!tr) return;
+
     // Draw image
     if (image) {
       const tl = tr.imageToCanvas(0, 0);

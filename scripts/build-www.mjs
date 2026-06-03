@@ -17,14 +17,21 @@ import path from 'node:path';
 
 // Only the files the 'wasm' execution provider needs are vendored (see the
 // detector — executionProviders: ['wasm']). onnxruntime-web/dist also ships
-// many other wasm variants (jsep / jspi / asyncify / training, ~70MB total)
-// that this app never loads; copying just these three keeps the APK ~50MB
-// smaller while remaining fully offline. Each is copied only if present in the
-// installed onnxruntime-web version; a missing entry warns and is skipped.
+// other wasm variants (jspi / asyncify / training, ~50MB total) that this app
+// never loads; copying just these keeps the APK smaller while remaining fully
+// offline. Each is copied only if present in the installed onnxruntime-web
+// version; a missing entry warns and is skipped.
+//
+// IMPORTANT: onnxruntime-web 1.19's classic `ort.min.js` bundle loads the
+// *JSEP* wasm variant for the wasm EP (it dynamically imports
+// `ort-wasm-simd-threaded.jsep.mjs`, which in turn fetches the `.jsep.wasm`),
+// NOT the plain `ort-wasm-simd-threaded.{mjs,wasm}`. Vendoring the non-jsep
+// pair left the runtime unable to resolve a backend on-device ("no available
+// backend found" → detection silently disabled). Vendor the jsep pair.
 const ORT_WASM_EP_FILES = [
   'ort.min.js',
-  'ort-wasm-simd-threaded.wasm',
-  'ort-wasm-simd-threaded.mjs'
+  'ort-wasm-simd-threaded.jsep.mjs',
+  'ort-wasm-simd-threaded.jsep.wasm'
 ];
 
 // Repo root is the parent dir of this script's dir (scripts/ -> repo root).

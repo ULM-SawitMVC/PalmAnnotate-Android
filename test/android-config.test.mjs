@@ -113,8 +113,12 @@ test('Capacitor sync output contains the app shell, Android storage code, and of
     'js/carousel/carousel-ui.js',
     'js/detect/detector.js',
     'vendor/onnxruntime/ort.min.js',
-    'vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
-    'vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
+    // onnxruntime-web 1.19's ort.min.js loads the JSEP wasm variant for the
+    // wasm EP (not the plain non-jsep pair). Vendoring the wrong variant left
+    // the on-device runtime with "no available backend found" → detection
+    // silently disabled. These two MUST be the jsep files. See build-www.mjs.
+    'vendor/onnxruntime/ort-wasm-simd-threaded.jsep.wasm',
+    'vendor/onnxruntime/ort-wasm-simd-threaded.jsep.mjs',
     'models/detector.config.json',
   ];
 

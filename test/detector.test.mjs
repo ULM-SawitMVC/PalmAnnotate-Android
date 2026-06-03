@@ -120,6 +120,43 @@ test('detect(): returns [] (non-throwing) when the model is absent', async () =>
   assert.deepEqual(boxes, []);
 });
 
+test('isAvailable() on native sets an ABSOLUTE wasmPaths and single-thread ORT', async () => {
+  // Regression for the on-device "no available backend found" failure:
+  //  - wasmPaths must be absolute (a bare "vendor/onnxruntime/" specifier makes
+  //    ORT's dynamic import() of the wasm proxy fail to resolve), and
+  //  - numThreads must be 1 (the WebView is not cross-origin isolated, so there
+  //    is no SharedArrayBuffer for worker threads).
+  const holder = {};
+  const fakeOrt = { env: { wasm: {} } };
+  // Simulate <script> injection: appending the script makes window.ort appear
+  // and fires onload synchronously, exactly like the real ORT runtime bundle.
+  const doc = {
+    baseURI: 'https://localhost/',
+    head: {
+      appendChild(el) { holder.ctx.ort = fakeOrt; if (el.onload) el.onload(); },
+    },
+    createElement(tag) {
+      if (String(tag).toLowerCase() === 'script') return { src: '', async: false, onload: null, onerror: null };
+      return { style: {}, appendChild() {}, setAttribute() {} };
+    },
+  };
+
+  const ctx = loadModule(['js/yolo-io.js', 'js/detect/detector.js'], {
+    globals: {
+      fetch: fakeFetch,                                  // config + model probe OK
+      ort: undefined,                                    // force the inject path
+      document: doc,
+      Capacitor: { isNativePlatform: () => true },       // native runtime branch
+    },
+  });
+  holder.ctx = ctx;
+
+  const ok = await ctx.Detector.isAvailable();
+  assert.equal(ok, true);
+  assert.equal(ctx.ort.env.wasm.wasmPaths, 'https://localhost/vendor/onnxruntime/');
+  assert.equal(ctx.ort.env.wasm.numThreads, 1);
+});
+
 test('getConfig() exposes the detect-only defaults before any load', () => {
   const ctx = loadModule(['js/yolo-io.js', 'js/detect/detector.js']);
   const cfg = ctx.Detector.getConfig();
