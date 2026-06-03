@@ -26,9 +26,6 @@ debug.log
 # Local dataset (tidak perlu di-repo)
 Damimas_Only/
 
-# Claude Code project instructions (lokal)
-CLAUDE.md
-
 # wrangler files
 .wrangler
 .dev.vars*
