@@ -470,8 +470,32 @@
 body.crsl-shell .tabs { display: none; }
 body.crsl-shell.crsl-show-tabs .tabs { display: flex; }
 body.crsl-shell .dataset-toolbar { display: none; }
+/* Reclaim the whole top strip: the brand header is redundant in the editor —
+   the carousel's own compact topbar carries Home + tree name. Hiding it frees
+   ~68px of vertical space so the bottom action row never gets pushed off-screen.
+   (crsl-shell is only on the editor view; Home keeps its header.) */
+body.crsl-shell .header { display: none; }
 body.crsl-shell .editor-area { padding: 0; }
-body.crsl-shell #panel-carousel { padding: var(--space-sm); }
+body.crsl-shell #panel-carousel { padding: var(--space-xs); }
 body.crsl-shell .carousel-root { gap: var(--space-xs); }
-/* Give the image stage the lion's share of the screen. */
-body.crsl-shell .carousel-stage { flex: 1 1 auto; min-height: 52vh; }
+
+/* The stage flexes to fill leftover space but MUST be allowed to shrink
+   (min-height:0), otherwise a tall stage forces the column past the viewport and
+   the clipped (overflow:hidden) bottom rows — the Next/Save actions — vanish
+   with no way to scroll. Pin the bottom controls so they're always visible and
+   let the image absorb any shrink instead. */
+body.crsl-shell .carousel-stage { flex: 1 1 0; min-height: 0; }
+body.crsl-shell .carousel-bottom { flex: 0 0 auto; gap: var(--space-xs); }
+
+/* Keep the confirmed-links list to a single scrollable row so a tree with many
+   cross-links can't grow the bottom block and shove the action row away. */
+body.crsl-shell .crsl-links { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+
+/* Tighter chrome: trim button padding + row gaps to save space (touch targets
+   keep their min-height for usability). */
+body.crsl-shell .carousel-topbar { gap: var(--space-sm); padding: 2px 0; }
+body.crsl-shell .crsl-classbar,
+body.crsl-shell .crsl-actionrow { gap: 0.4rem; }
+body.crsl-shell .crsl-action { padding: 0 0.85rem; }
+body.crsl-shell .crsl-chip { padding: 0 0.7rem; min-width: 48px; }
+body.crsl-shell .crsl-thumb { width: 56px; height: 42px; }

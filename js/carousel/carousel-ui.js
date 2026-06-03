@@ -90,6 +90,18 @@ const CarouselUI = (() => {
   // Cached image elements per side (lazy) for fast review re-render.
   const _imgCache = new Map(); // sideIndex -> HTMLImageElement | null
 
+  // Proactively release decoded image memory when leaving a tree. The cache only
+  // ever holds the CURRENT tree's sides (<=8), but at field scale (250 trees /
+  // 1000 photos) navigating tree-to-tree must not leave decoded bitmaps pinned —
+  // detach handlers + drop src so the WebView can free them immediately instead
+  // of waiting for GC, then clear the map.
+  function _releaseImgCache() {
+    for (const img of _imgCache.values()) {
+      if (img) { img.onload = null; img.onerror = null; try { img.src = ''; } catch (_) {} }
+    }
+    _imgCache.clear();
+  }
+
   // Current REVIEW transform (image→canvas) for hit-testing taps.
   let _reviewTr = null;
 
@@ -967,7 +979,7 @@ const CarouselUI = (() => {
     _destroyEditor();
     _root = containerEl;
     _destroyed = false;
-    _imgCache.clear();
+    _releaseImgCache();
     _linkColorMap.clear();
     _colorSeq = 0;
     _selectedId = null;
@@ -1066,7 +1078,7 @@ const CarouselUI = (() => {
       _stage.removeEventListener('pointerup', _onStageUp);
       _stage.removeEventListener('pointercancel', _onStageCancel);
     }
-    _imgCache.clear();
+    _releaseImgCache();
     _ptr = null;
     _selectedId = null;
     _linkSource = null;

@@ -132,6 +132,15 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(style, /@media \(pointer: coarse\) and \(min-aspect-ratio: 3 \/ 2\) and \(max-width: 1280px\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)/);
   assert.match(carousel, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)[\s\S]*\.crsl-thumb[\s\S]*width:\s*56px/);
+
+  // Single-screen shell viewport safety: the brand header is hidden to reclaim
+  // space, the stage is allowed to shrink (min-height:0), the bottom controls are
+  // pinned (flex:0 0 auto), and the links list stays one scrollable row — so the
+  // Next/Save action row can never be pushed off the viewport by cross-links.
+  assert.match(carousel, /body\.crsl-shell \.header \{ display: none; \}/);
+  assert.match(carousel, /body\.crsl-shell \.carousel-stage \{ flex: 1 1 0; min-height: 0; \}/);
+  assert.match(carousel, /body\.crsl-shell \.carousel-bottom \{ flex: 0 0 auto/);
+  assert.match(carousel, /body\.crsl-shell \.crsl-links \{ flex-wrap: nowrap; overflow-x: auto/);
 });
 
 test('capture-first session shell is present and wired (home ⇄ editor routing)', () => {
