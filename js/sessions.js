@@ -665,7 +665,17 @@ const SessionsUI = (() => {
     return _renderHome();
   }
 
-  return { init, showHome, showDetail, refresh };
+  // Android system Back / edge-swipe back: move within the session shell instead
+  // of letting the Activity close. Returns true when the back action is consumed.
+  function handleBack() {
+    if (_view === 'detail' || _view === 'start') {
+      _renderHome();
+      return true;
+    }
+    return false;
+  }
+
+  return { init, showHome, showDetail, refresh, handleBack };
 })();
 
 window.SessionsUI = SessionsUI;

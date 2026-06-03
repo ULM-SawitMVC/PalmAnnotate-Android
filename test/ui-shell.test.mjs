@@ -6,6 +6,7 @@ import assert from 'node:assert';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+const sessionsJs = readFileSync(new URL('../js/sessions.js', import.meta.url), 'utf8');
 const style = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8');
 const carousel = readFileSync(new URL('../css/carousel.css', import.meta.url), 'utf8');
 const capture = readFileSync(new URL('../css/capture.css', import.meta.url), 'utf8');
@@ -159,8 +160,12 @@ test('capture-first session shell is present and wired (home ⇄ editor routing)
   // The editor's Home button returns to the owning session when we came from one.
   assert.match(app, /function _onHomeButton\(\)[\s\S]*_showSessionDetail\(_activeSessionId\)/);
   assert.match(app, /async function _showSessionDetail\(id\)[\s\S]*SessionsUI\.showDetail\(id\)/);
+  assert.match(app, /window\.PalmAnnotateHandleBack = function \(\)/);
+  assert.match(app, /SessionsUI\.handleBack\(\)/);
   // Boot lands on the home view rather than auto-entering the editor.
   assert.match(app, /async function _bootView\(\)[\s\S]*_restoreCapturedTrees\(\)[\s\S]*_showHome\(\)/);
+  assert.match(sessionsJs, /function handleBack\(\)[\s\S]*_view === 'detail'[\s\S]*_renderHome\(\)[\s\S]*return true/);
+  assert.match(sessionsJs, /return \{ init, showHome, showDetail, refresh, handleBack \}/);
 
   // sessions.css carries the home/start/detail surfaces and header routing.
   const sessions = readFileSync(new URL('../css/sessions.css', import.meta.url), 'utf8');

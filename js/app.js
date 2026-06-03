@@ -149,6 +149,41 @@ document.addEventListener('DOMContentLoaded', () => {
     return _showHome();
   }
 
+  // Android hardware/gesture Back entry point. MainActivity calls this before it
+  // lets Android finish the Activity, so the SPA can go editor → session detail
+  // → home, or close transient overlays, instead of exiting immediately.
+  window.PalmAnnotateHandleBack = function () {
+    const modal = document.querySelector('.pa-modal');
+    if (modal) {
+      const cancel = modal.querySelector('button');
+      if (cancel) cancel.click();
+      return true;
+    }
+    const captureOverlay = document.querySelector('.capture-overlay');
+    if (captureOverlay) {
+      const cancel = captureOverlay.querySelector('.capture-btn--ghost');
+      if (cancel) cancel.click();
+      return true;
+    }
+    if (modalProjectCfg && !modalProjectCfg.classList.contains('hidden')) {
+      modalProjectCfg.classList.add('hidden');
+      return true;
+    }
+    if (modalMismatch && !modalMismatch.classList.contains('hidden')) {
+      if (btnMismatchCancel) btnMismatchCancel.click();
+      else modalMismatch.classList.add('hidden');
+      return true;
+    }
+    if (editorArea && !editorArea.classList.contains('hidden')) {
+      _onHomeButton();
+      return true;
+    }
+    if (homeView && !homeView.classList.contains('hidden') && window.SessionsUI && SessionsUI.handleBack) {
+      return !!SessionsUI.handleBack();
+    }
+    return false;
+  };
+
   // Photograph one pohon for a session (locked variety+blok, auto/manual id).
   // Mirrors _startCapture's persistence but returns the tree to SessionsUI so it
   // can record it in the session index. Returns the datasetTree or null.

@@ -82,15 +82,20 @@ test('Android Orbbec USB camera integration is optional and registered', () => {
   assert.doesNotMatch(plugin, /Orbbec SDK not integrated yet/);
 });
 
-test('Native activity uses a full-screen WebView instead of fixed-size Android views', () => {
+test('Native activity uses a full-screen WebView and delegates Android Back to the SPA', () => {
   const layout = read('android/app/src/main/res/layout/activity_main.xml');
   const styles = read('android/app/src/main/res/values/styles.xml');
+  const activity = read('android/app/src/main/java/dev/sawitulm/palmannotate/MainActivity.java');
 
   assert.match(layout, /<androidx\.coordinatorlayout\.widget\.CoordinatorLayout[\s\S]*android:layout_width="match_parent"[\s\S]*android:layout_height="match_parent"/);
   assert.match(layout, /<WebView[\s\S]*android:layout_width="match_parent"[\s\S]*android:layout_height="match_parent"/);
   assert.doesNotMatch(layout, /dp"/, 'layout should not hardcode fixed dp sizes around the WebView');
   assert.match(styles, /<item name="windowActionBar">false<\/item>/);
   assert.match(styles, /<item name="windowNoTitle">true<\/item>/);
+  assert.match(activity, /OnBackPressedCallback/);
+  assert.match(activity, /PalmAnnotateHandleBack/);
+  assert.match(activity, /evaluateJavascript/);
+  assert.match(activity, /if \(!consumed\) finish\(\)/);
 });
 
 test('Capacitor sync output contains the app shell, Android storage code, and offline detector vendor files', () => {
