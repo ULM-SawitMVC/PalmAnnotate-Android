@@ -136,8 +136,10 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
 - **Orbbec SDK:** `android/app/libs/obsensor_v2.0.6_2026031801_release.aar` is vendored from
   `OrbbecSDK-Android-Wrapper-2.0.6.zip` and included with `implementation fileTree(dir: 'libs',
   include: ['*.aar'])`. The plugin's `open()` creates `OBContext`/`Pipeline`, `capture()` returns a
-  base64 JPEG color frame, and `close()` releases SDK resources. Built-in camera remains the default
-  capture source; Orbbec runtime still needs real-device + camera validation.
+  base64 JPEG color frame, and `close()` releases SDK resources. Built-in camera remains the fallback;
+  when Orbbec is attached/available, the side-capture panel shows a Camera selector. Current Orbbec
+  persistence is RGB-only under `dataset/images/field/{TREE}_{side}.jpg` plus optional SAF mirror;
+  no depth folder/files are written yet. Orbbec runtime still needs real-device + camera validation.
 - **Storage root = `Directory.External`** (`capacitor-adapter.js`): all dataset images/labels,
   metadata, Output JSON/TXT and session downloads live under
   `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/…`. This is the only location that,

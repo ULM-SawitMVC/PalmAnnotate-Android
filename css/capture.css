@@ -177,6 +177,39 @@ select.capture-input {
 .capture-actions .capture-btn { flex: 1; }
 .capture-actions--review { margin-top: var(--space-md); }
 
+/* ---- Capture source selector ---- */
+.capture-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--c-text-muted);
+}
+
+.capture-source__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--c-text-dim);
+}
+
+.capture-source__select {
+  min-height: 56px;
+  width: 100%;
+  padding: 0 var(--space-md);
+  font-family: var(--f-body);
+  font-size: 1rem;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+}
+
+.capture-source--single {
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+}
+
 /* ---- Side progress ---- */
 .capture-progress {
   display: flex;

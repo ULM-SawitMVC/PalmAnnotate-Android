@@ -190,9 +190,25 @@ methods:
   to JPEG in Kotlin.
 - `close()` — stops and releases the pipeline, device, and SDK context.
 
-The built-in camera remains PalmAnnotate's default capture source. The Orbbec
-source is registered as an optional `CaptureSource`; runtime validation still
-requires a physical Android device with the Orbbec/Gemini camera attached.
+The built-in camera remains PalmAnnotate's safe default capture source. When an
+Orbbec USB camera is attached and `Orbbec.isAvailable()` reports a device, the
+side-capture panel shows a **Camera** selector with `Device Camera` and
+`Orbbec USB camera`; choose Orbbec before tapping **Capture**. Android may show a
+USB permission dialog on first use. The selected source is remembered for the
+rest of the capture flow, but if the Orbbec is unplugged/unavailable the panel
+falls back to the device camera.
+
+Current Orbbec persistence is RGB-only: the plugin captures one color frame,
+encodes it as JPEG, and stores it through the normal PalmAnnotate image path
+`dataset/images/field/{TREE}_{side}.jpg` plus optional SAF mirror. The app does
+**not** currently save a depth frame or `dataset/depth/...` mirror. Depth support
+requires an explicit follow-up design because the annotation pipeline and YOLO
+labels consume RGB images only today; if enabled later, depth files should use the
+same stem as RGB, for example `dataset/depth/field/{TREE}_{side}.png` or `.bin`,
+and cleanup must delete them together with RGB/JSON/TXT.
+
+Runtime validation still requires a physical Android device with the Orbbec/Gemini
+camera attached.
 
 ### Verified Android file lifecycle
 

@@ -21,8 +21,9 @@
  *     sides:[ { imageFile, imageUri, labelFile:null, labelUri:null } ] }
  *
  * All UI is built/removed here (appended to document.body) and styled via
- * css/capture.css. Capture sources come from CaptureSources.default(), so the
- * Orbbec USB source drops in without changes here.
+ * css/capture.css. Capture sources come from CaptureSources; when an optional
+ * USB source such as Orbbec is attached, the side-capture panel exposes a
+ * camera selector instead of silently using the built-in camera.
  */
 const CaptureFlow = (() => {
 
@@ -34,6 +35,7 @@ const CaptureFlow = (() => {
   // value (standard Date API) so names are unique across app launches without a
   // persistent store, then incremented per captured tree.
   let _seq = Date.now() % 1000;
+  let _selectedSourceId = null;
 
   function _nextSeq() {
     const n = _seq % 1000;
@@ -68,6 +70,36 @@ const CaptureFlow = (() => {
   function _pad4(n) {
     const v = Math.max(0, Math.floor(Number(n) || 0));
     return String(v).padStart(4, '0');
+  }
+
+  /** Return registered capture sources whose isAvailable() check passes. */
+  async function _availableSources() {
+    const registry = window.CaptureSources;
+    const sources = registry && typeof registry.list === 'function'
+      ? registry.list()
+      : [];
+    const available = [];
+    for (const src of sources) {
+      if (!src || typeof src.capture !== 'function') continue;
+      try {
+        if (!src.isAvailable || await src.isAvailable()) available.push(src);
+      } catch (_) {
+        // A broken optional source must not block the built-in camera.
+      }
+    }
+    if (!available.length && registry && typeof registry.default === 'function') {
+      const fallback = registry.default();
+      if (fallback) available.push(fallback);
+    }
+    return available;
+  }
+
+  function _chooseSource(available) {
+    if (!available || !available.length) return null;
+    const remembered = _selectedSourceId && available.find(s => s.id === _selectedSourceId);
+    if (remembered) return remembered;
+    const builtin = available.find(s => s.id === 'builtin-camera');
+    return builtin || available[0];
   }
 
   /**
@@ -413,7 +445,8 @@ const CaptureFlow = (() => {
    */
   function _captureSide(overlay, sideNum, sideCount) {
     return new Promise((resolve) => {
-      const source = CaptureSources.default();
+      let source = null;
+      let availableSources = [];
 
       async function shoot() {
         overlay.innerHTML = '';
@@ -422,11 +455,40 @@ const CaptureFlow = (() => {
         panel.appendChild(_el('p', 'capture-subtitle',
           'Frame the side, then capture.'));
 
+        availableSources = await _availableSources();
+        source = _chooseSource(availableSources);
+        if (!source) {
+          panel.appendChild(_el('p', 'capture-subtitle',
+            'No camera source is available.'));
+        } else if (availableSources.length > 1) {
+          const row = _el('label', 'capture-source');
+          row.appendChild(_el('span', 'capture-source__label', 'Camera'));
+          const select = document.createElement('select');
+          select.className = 'capture-source__select';
+          for (const src of availableSources) {
+            const opt = document.createElement('option');
+            opt.value = src.id;
+            opt.textContent = src.name || src.id;
+            opt.selected = src.id === source.id;
+            select.appendChild(opt);
+          }
+          select.addEventListener('change', () => {
+            _selectedSourceId = select.value;
+            source = _chooseSource(availableSources);
+          });
+          row.appendChild(select);
+          panel.appendChild(row);
+        } else {
+          panel.appendChild(_el('p', 'capture-source capture-source--single',
+            `Camera: ${source.name || source.id}`));
+        }
+
         const actions = _el('div', 'capture-actions');
         const cancelBtn = _el('button', 'capture-btn capture-btn--ghost', 'Cancel');
         cancelBtn.type = 'button';
         const shootBtn = _el('button', 'capture-btn capture-btn--primary', 'Capture');
         shootBtn.type = 'button';
+        shootBtn.disabled = !source;
         actions.appendChild(cancelBtn);
         actions.appendChild(shootBtn);
         panel.appendChild(actions);

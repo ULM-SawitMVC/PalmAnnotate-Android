@@ -112,8 +112,12 @@ wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`):
 - `close()` releases the pipeline/device/context.
 
 Runtime Orbbec capture still needs testing on a physical Android device with the
-Gemini/Orbbec hardware attached. Android storage/SAF behavior has been field-
-checked with an export shaped like `PalmAnnotate-Debug.zip`:
+Gemini/Orbbec hardware attached. When plugged in, Orbbec appears as an optional
+**Camera** choice during side capture; the device camera remains the fallback.
+Current Orbbec capture saves RGB JPEG only through the normal
+`dataset/images/field/{TREE}_{side}.jpg` path — no depth folder is written yet.
+Android storage/SAF behavior has been field-checked with an export shaped like
+`PalmAnnotate-Debug.zip`:
 `dataset/images/field`, `dataset/metadata`, `Output JSON`, and `Output TXT/field`
 are all populated as expected. For the full Android build, signing, SAF, and
 Orbbec notes, see [docs/android-build.md](docs/android-build.md).

@@ -12,7 +12,7 @@ python -m http.server 4173
 
 On web, click **Load Folder** and choose a dataset root containing `images/` and `labels/`.
 
-On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location.
+On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location. During side capture, a connected Orbbec USB camera appears in the **Camera** selector; choose **Orbbec USB camera** to use it, or keep **Device Camera** as fallback. Current Orbbec capture saves RGB JPEG only and does not write depth files yet.
 
 PalmAnnotate groups files by tree name and side number. A tree named `DAMIMAS_A21B_0001` should have files such as:
 
