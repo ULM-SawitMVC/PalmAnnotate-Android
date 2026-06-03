@@ -66,7 +66,7 @@ test('addTreeToSession appends pohon, dedupes by name, and advances nextId', asy
   assert.equal(after.nextId, 51);
 });
 
-test('removeTreeFromSession drops one pohon, updates counts, and never rewinds nextId', async () => {
+test('removeTreeFromSession drops one pohon, updates counts, and recomputes nextId from survivors', async () => {
   const { SessionStore } = loadStore();
   const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
   await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
@@ -76,20 +76,40 @@ test('removeTreeFromSession drops one pohon, updates counts, and never rewinds n
   assert.equal(before.trees.length, 2);
   assert.equal(before.nextId, 3);
 
-  const after = await SessionStore.removeTreeFromSession(s.id, 'DAMIMAS_A21B_0001');
-  assert.equal(after.trees.length, 1);
-  assert.equal(after.trees[0].name, 'DAMIMAS_A21B_0002');
-  assert.equal(after.nextId, 3, 'ids are never reused — counter stays put');
+  // Deleting a non-highest tree keeps the counter (0002 still occupies its id).
+  const afterLow = await SessionStore.removeTreeFromSession(s.id, 'DAMIMAS_A21B_0001');
+  assert.equal(afterLow.trees.length, 1);
+  assert.equal(afterLow.trees[0].name, 'DAMIMAS_A21B_0002');
+  assert.equal(afterLow.nextId, 3, 'highest remaining id is 2 → next is 3');
+
+  // Deleting the last remaining tree resets the counter back to 0001.
+  const afterAll = await SessionStore.removeTreeFromSession(s.id, 'DAMIMAS_A21B_0002');
+  assert.equal(afterAll.trees.length, 0);
+  assert.equal(afterAll.nextId, 1, 'no trees left → counter resets to 0001');
 
   // Reflected in the rolled-up stats and persisted across a read.
   const stats = await SessionStore.homeStats();
-  assert.equal(stats.totalPohon, 1);
+  assert.equal(stats.totalPohon, 0);
 
   // Removing an unknown name is a no-op (still returns the session, not null).
   const noop = await SessionStore.removeTreeFromSession(s.id, 'NOPE');
-  assert.equal(noop.trees.length, 1);
+  assert.equal(noop.trees.length, 0);
   // Bad session id degrades to null (non-throwing contract).
   assert.equal(await SessionStore.removeTreeFromSession('nope', 'X'), null);
+});
+
+test('removeTreeFromSession rewinds nextId when the highest tree is deleted', async () => {
+  const { SessionStore } = loadStore();
+  const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0002', treeId: 2, sideCount: 4 });
+  assert.equal((await SessionStore.getSession(s.id)).nextId, 3);
+
+  // Deleting the highest tree frees its id (its files are unlinked too), so the
+  // next capture refills 0002.
+  const after = await SessionStore.removeTreeFromSession(s.id, 'DAMIMAS_A21B_0002');
+  assert.equal(after.trees.length, 1);
+  assert.equal(after.nextId, 2, 'highest remaining id is 1 → next refills 2');
 });
 
 test('homeStats rolls sessions up into groups by variety+blok', async () => {

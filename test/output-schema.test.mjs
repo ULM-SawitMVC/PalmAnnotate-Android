@@ -117,6 +117,67 @@ test('generate() -> toSessionJSON() round-trips sides and links', () => {
   assert.equal(round.confirmedLinks[0].bboxIdA, 'b0');
 });
 
+test('generate() keeps the operator-recorded variety instead of truncating from the name', () => {
+  const OS = freshSchema();
+  // A custom "Other" variety with a space + digit. Deriving from the tree name
+  // (^[A-Za-z]+) would yield just "TENERA" — the real variety must survive.
+  const session = {
+    treeName: 'TENERA_MARIHAT_20260604_007', split: 'field',
+    sides: [
+      { sideIndex: 0, label: 'Side 1', imageWidth: 1000, imageHeight: 1000,
+        bboxes: [{ id: 'b0', classId: 0, className: 'B1', x1: 10, y1: 10, x2: 90, y2: 90 }] },
+      { sideIndex: 1, label: 'Side 2', imageWidth: 1000, imageHeight: 1000, bboxes: [] },
+    ],
+    confirmedLinks: [],
+  };
+  const datasetTree = {
+    name: 'TENERA_MARIHAT_20260604_007', split: 'field',
+    metadata: { variety: 'Tenera Marihat 2', blok: 'A21B' },
+    sides: [{ imageFile: { name: 'TENERA_MARIHAT_20260604_007_1.jpg' } }, { imageFile: null }],
+  };
+  const out = OS.generate(session, null, datasetTree);
+  assert.equal(out.metadata.variety, 'Tenera Marihat 2');
+});
+
+test('generate() falls back to name-derived variety when the tree carries no metadata', () => {
+  const OS = freshSchema();
+  const session = {
+    treeName: 'DAMIMAS_A21B_0001', split: 'train',
+    sides: [{ sideIndex: 0, label: 'Side 1', imageWidth: 1000, imageHeight: 1000, bboxes: [] },
+            { sideIndex: 1, label: 'Side 2', imageWidth: 1000, imageHeight: 1000, bboxes: [] }],
+    confirmedLinks: [],
+  };
+  // Folder-loaded trees (web) have no metadata field at all.
+  const datasetTree = { name: 'DAMIMAS_A21B_0001', split: 'train', sides: [{}, {}] };
+  const out = OS.generate(session, null, datasetTree);
+  assert.equal(out.metadata.variety, 'DAMIMAS');
+});
+
+test('generate() skips an empty cluster instead of crashing on the majority vote', () => {
+  const OS = freshSchema();
+  const session = {
+    treeName: 'DAMIMAS_A21B_0001', split: 'train',
+    sides: [
+      { sideIndex: 0, label: 'Side 1', imageWidth: 1000, imageHeight: 1000,
+        bboxes: [{ id: 'b0', classId: 1, className: 'B2', x1: 10, y1: 10, x2: 90, y2: 90 }] },
+      { sideIndex: 1, label: 'Side 2', imageWidth: 1000, imageHeight: 1000, bboxes: [] },
+    ],
+    confirmedLinks: [],
+  };
+  // A degenerate clusters map: one empty cluster (must be skipped) + one real one.
+  const result = {
+    clusters: new Map([
+      ['empty', []],
+      ['real', [{ _sideIndex: 0, id: 'b0', className: 'B2', x1: 10, y1: 10, x2: 90, y2: 90 }]],
+    ]),
+    uniqueCount: 1, rawCount: 1, linkedCount: 0, classCounts: { B2: 1 },
+  };
+  let out;
+  assert.doesNotThrow(() => { out = OS.generate(session, result, null); });
+  assert.equal(out.bunches.length, 1, 'only the non-empty cluster becomes a bunch');
+  assert.equal(out.bunches[0].class, 'B2');
+});
+
 test('toSessionJSON() throws on malformed input', () => {
   const OS = freshSchema();
   assert.throws(() => OS.toSessionJSON(null), /Invalid output JSON/);

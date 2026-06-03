@@ -554,7 +554,12 @@ const CaptureFlow = (() => {
         // Open the live stream into the video (reused across all targets).
         if (live && video) {
           try {
-            stopPreview = await source.openPreview(video);
+            const stop = await source.openPreview(video);
+            // If the operator cancelled (or switched source) while getUserMedia
+            // was resolving, finish() already ran with stopPreview still null —
+            // stop this now-orphaned stream so the camera doesn't stay live.
+            if (settled) { try { stop(); } catch (_) {} }
+            else { stopPreview = stop; }
           } catch (e) {
             console.info('[CaptureFlow] live preview unavailable, using one-shot capture:', e);
             live = false;

@@ -176,6 +176,9 @@ const OutputSchema = (() => {
     if (result && result.clusters) {
       let bunchId = 1;
       for (const members of result.clusters.values()) {
+        // A cluster should always have at least one member, but guard anyway so a
+        // malformed/empty cluster can't crash the whole save with a TypeError.
+        if (!Array.isArray(members) || members.length === 0) continue;
         // Majority-vote class
         const votes = {};
         for (const b of members) {
@@ -255,7 +258,16 @@ const OutputSchema = (() => {
     }
 
     // ── Full output ────────────────────────────────────────────────────────
-    const variety = _deriveVarietyFromTreeName(session.treeName);
+    // Prefer the variety the operator actually recorded (captured trees carry
+    // it on datasetTree.metadata) over re-deriving it from the tree name —
+    // deriving only sees a leading [A-Za-z]+ run, so any variety with a digit
+    // or space ("Tenera 2", a custom "Other" entry) would be silently
+    // truncated. Folder-loaded trees have no metadata, so fall back to the name.
+    const metaVariety = datasetTree && datasetTree.metadata &&
+      typeof datasetTree.metadata.variety === 'string'
+        ? datasetTree.metadata.variety.trim()
+        : '';
+    const variety = metaVariety || _deriveVarietyFromTreeName(session.treeName);
     return {
       version: 4,
       tree_id: session.treeName,

@@ -382,9 +382,12 @@ const SessionStore = (() => {
 
   /**
    * Remove one pohon (tree) from a session by name and persist. The
-   * auto-increment counter is intentionally NOT rewound — tree ids are never
-   * reused. On-disk files are handled by the caller (the storage adapter's
-   * deleteDatasetTree); this only updates the index.
+   * auto-increment counter is recomputed from the survivors —
+   * `nextId = (highest remaining treeId) + 1`, or 1 when no trees remain — so
+   * the next capture fills the lowest free id (delete the last tree → counter
+   * resets to 0001). Reusing a freed id is safe because the caller
+   * (SessionsUI._deleteTreeArtifacts) unlinks the tree's on-disk photos/labels
+   * in the same step, so a later capture can't collide with stale files.
    * @param {string} id
    * @param {string} treeName
    * @returns {Promise<object|null>} the updated session, or null if not found.
@@ -397,6 +400,12 @@ const SessionStore = (() => {
     const before = Array.isArray(session.trees) ? session.trees.length : 0;
     session.trees = (session.trees || []).filter(t => t && t.name !== treeName);
     if (session.trees.length !== before) {
+      let maxId = 0;
+      for (const t of session.trees) {
+        const n = Number(t && t.treeId);
+        if (Number.isFinite(n) && n > maxId) maxId = n;
+      }
+      session.nextId = maxId + 1;
       session.updatedAt = new Date().toISOString();
       sessions[idx] = session;
       await _setJSON(K_SESSIONS, sessions);
