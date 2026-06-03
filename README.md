@@ -94,11 +94,16 @@ stale files are deleted and native image URLs are cache-busted.
 
 ### On-device detector model
 
-Drop your exported single-class YOLO model at `models/ffb-detector.onnx` (or set
-`modelFile` in `models/detector.config.json` to your filename; see
-[models/README.md](models/README.md) for export flags). The next `npm run sync`
-copies `models/` into `www/` and the detector picks it up automatically — no
-native-code rebuild required unless Android sources changed.
+A trained model is **committed** at `models/ffb-detector.onnx` (~38 MB,
+Ultralytics YOLO26s, classes B1–B4), so a fresh clone builds a working,
+fully-offline detector with no extra downloads. Tuning lives in
+`models/detector.config.json` (`confThreshold`, `iouThreshold`, …).
+
+To swap in a different model, **replace that file keeping the name**
+`models/ffb-detector.onnx` (or point `modelFile` in `detector.config.json` at a
+new filename; see [models/README.md](models/README.md) for export flags). The
+next `npm run sync` copies `models/` into `www/` and the detector picks it up
+automatically — no native-code rebuild needed unless Android sources changed.
 
 ### Camera sources
 

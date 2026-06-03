@@ -29,6 +29,49 @@ slim onnxruntime-web wasm runtime) and then `cap sync` (copies `www/` into
 `android/app/src/main/assets/public` and updates native plugins). **Re-run it
 after any change to `js/`, `index.html`, `css/`, `assets/`, or `models/`.**
 
+## Build from a fresh clone (everything is bundled)
+
+A clean `git clone` contains **everything needed to build a working, fully
+offline app** — no extra asset downloads:
+
+- **Detection model** — `models/ffb-detector.onnx` (~38 MB, Ultralytics YOLO26s,
+  classes B1–B4) is committed. The APK builds without it (detection just reports
+  "unavailable"), but it is included so detection works out of the box.
+- **ONNX runtime** — fetched by `npm install` (`onnxruntime-web` dependency);
+  `scripts/build-www.mjs` vendors the wasm files into `www/vendor/onnxruntime/`.
+- **Orbbec USB camera SDK** — the wrapper AAR is vendored at
+  `android/app/libs/obsensor_v2.0.6_2026031801_release.aar` (committed). The
+  `OrbbecSDK-Android-Wrapper-*.zip` it was extracted from is **not** needed to
+  build and is git-ignored.
+
+End-to-end from nothing:
+
+```bash
+git clone https://github.com/ULM-SawitMVC/PalmAnnotate-Android.git
+cd PalmAnnotate-Android
+
+# Toolchain (once): JDK 17 + Android SDK (platform-android-34, build-tools 34,
+# platform-tools). Point Gradle at the SDK:
+#   echo "sdk.dir=/path/to/android-sdk" > android/local.properties
+# and export JAVA_HOME to a JDK 17 install.
+
+npm install                 # @capacitor/* + onnxruntime-web
+npm test                    # optional: Node test suite (should be all green)
+npm run sync                # build:www (vendors ORT) + cap sync -> android/
+
+cd android
+./gradlew assembleDebug     # Windows: gradlew.bat assembleDebug
+# APK -> android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+> **Heads-up — wasm execution provider:** onnxruntime-web 1.19's `ort.min.js`
+> loads the **JSEP** wasm variant for the wasm EP, the WebView is not
+> cross-origin isolated (no `SharedArrayBuffer`), and ORT loads its wasm proxy
+> via dynamic `import()` (which rejects bare relative paths). The detector and
+> `build-www.mjs` already account for all three (jsep files vendored,
+> `numThreads = 1`, absolute `wasmPaths`). See "APK size notes" below before
+> changing the vendored file list.
+
 ## Build a debug APK
 
 In Android Studio: open the `android/` folder, let Gradle sync, then **Run** on a
@@ -168,9 +211,12 @@ public mirror as well as app-storage files.
 android/app/libs/obsensor_v2.0.6_2026031801_release.aar
 ```
 
-The AAR came from `OrbbecSDK-Android-Wrapper-2.0.6.zip` and bundles the Java API,
-JNI libraries (`libOrbbecSDK.so`, `libobsensor_jni.so`, etc.), and extension
-assets. `android/app/build.gradle` includes it with:
+The AAR came from `OrbbecSDK-Android-Wrapper-2.0.6.zip` (downloadable from
+Orbbec's developer site / GitHub releases) and bundles the Java API, JNI
+libraries (`libOrbbecSDK.so`, `libobsensor_jni.so`, etc.), and extension assets.
+**The AAR is committed**, so the source zip is *not* required to build — it stays
+git-ignored. To update the SDK, drop a new wrapper AAR into `android/app/libs/`.
+`android/app/build.gradle` includes it with:
 
 ```gradle
 implementation fileTree(dir: 'libs', include: ['*.aar'])
@@ -245,15 +291,25 @@ The APK now contains three sizeable offline/runtime payloads when present:
    execution provider only (`executionProviders: ['wasm']` in
    `js/detect/detector.js`). `scripts/build-www.mjs` vendors only:
    - `ort.min.js`
-   - `ort-wasm-simd-threaded.wasm`
-   - `ort-wasm-simd-threaded.mjs`
+   - `ort-wasm-simd-threaded.jsep.wasm` (~25 MB)
+   - `ort-wasm-simd-threaded.jsep.mjs`
 
-   This trims roughly **~50MB** versus copying all of `onnxruntime-web/dist`.
-   If the detector's execution provider changes (for example WebGPU/JSEP), update
-   `ORT_WASM_EP_FILES` in `scripts/build-www.mjs`.
+   This trims roughly **~40MB** versus copying all of `onnxruntime-web/dist`.
+   **It must be the `.jsep.*` pair**, not the plain `ort-wasm-simd-threaded.*`:
+   onnxruntime-web 1.19's `ort.min.js` dynamically imports the jsep proxy for the
+   wasm EP, so vendoring the non-jsep files made the runtime fail with "no
+   available backend found" and silently disabled detection. If you change the
+   ORT version or execution provider, re-confirm which wasm files `ort.min.js`
+   actually requests (watch the WebView console / DevTools) and update
+   `ORT_WASM_EP_FILES` in `scripts/build-www.mjs` accordingly. The detector also
+   sets `ort.env.wasm.numThreads = 1` (no SharedArrayBuffer in the WebView) and
+   an absolute `ort.env.wasm.wasmPaths` (dynamic `import()` rejects bare paths).
 
-2. **YOLO model weights** — any local `models/*.onnx` is copied into `www/` and
-   then into the APK for fully offline detection. The weights stay gitignored.
+2. **YOLO model weights** — `models/ffb-detector.onnx` (~38 MB) is **committed**
+   (see `.gitignore`: `models/*.onnx` is ignored except this canonical file) so a
+   fresh clone builds a working offline detector. `scripts/build-www.mjs` copies
+   `models/` into `www/`, and `cap sync` bundles it into the APK. Swap models by
+   replacing that file (keep the name) and re-running `npm run sync`.
 
 3. **Orbbec SDK AAR** — `obsensor_v2.0.6_2026031801_release.aar` contributes the
    Orbbec Java API, native `.so` files, and SDK assets.

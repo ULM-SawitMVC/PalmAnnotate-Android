@@ -32,8 +32,11 @@ Damimas_Only/
 !.dev.vars.example
 !.env.example
 
-# On-device model weights (large; swap-in — folder + config are committed)
+# On-device model weights: the canonical detector model IS committed (large, but
+# it keeps a fresh clone buildable into a working offline app). Any other or
+# experimental .onnx stays ignored — swap by replacing models/ffb-detector.onnx.
 models/*.onnx
+!models/ffb-detector.onnx
 
 # Local Orbbec SDK release archives (the required AAR is vendored under android/app/libs/)
 OrbbecSDK-Android-Wrapper-*.zip
