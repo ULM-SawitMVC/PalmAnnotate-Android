@@ -6,8 +6,8 @@
  * Design (per advisor):
  *   - DETECT-ONLY: the model is single-class; we never trust/emit a real class.
  *     Every returned box defaults to classId 1 (B2) so the expert re-labels it.
- *   - OVER-DETECT: a LOW confThreshold + generous iouThreshold is preferred —
- *     deleting a spurious box is cheaper than drawing a missed one.
+ *   - OVER-DETECT: a LOW confThreshold is preferred so weak bunches are shown;
+ *     NMS stays fairly strict so duplicate/tumpang-tindih boxes are suppressed.
  *   - One model path works on both targets: web pulls ORT from a CDN; Android
  *     loads the runtime + wasm vendored into www/vendor/onnxruntime (OFFLINE).
  *
@@ -29,8 +29,8 @@ const Detector = (() => {
   const DEFAULT_CONFIG = {
     modelFile: 'ffb-detector.onnx',
     inputSize: 640,
-    confThreshold: 0.15,
-    iouThreshold: 0.6,
+    confThreshold: 0.05,
+    iouThreshold: 0.35,
     maxBoxes: 300,
     classAware: false,
   };
@@ -355,7 +355,7 @@ const Detector = (() => {
 
       const nc = attrs - 4;             // number of class scores (>=1)
       const classAware = !!cfg.classAware && nc > 1;
-      const conf = cfg.confThreshold;   // LOW → over-detect
+      const conf = cfg.confThreshold;   // LOW → more candidate boxes
       const raw = [];
 
       for (let i = 0; i < rows; i++) {

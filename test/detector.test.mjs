@@ -14,7 +14,7 @@ import { loadModule } from './_harness.mjs';
 
 const CONFIG = {
   modelFile: 'ffb-detector.onnx', inputSize: 640,
-  confThreshold: 0.15, iouThreshold: 0.6, maxBoxes: 300, classAware: false,
+  confThreshold: 0.05, iouThreshold: 0.35, maxBoxes: 300, classAware: false,
 };
 
 function fakeFetch(url) {
@@ -64,12 +64,12 @@ test('detect(): thresholds, un-letterboxes, NMS-dedups, forces detect-only class
   const data = new Float32Array(ATTRS * N); // channels-first [1,5,20]
   // A: strong box.                          -> kept  (det0)
   setChannelsFirst(data, N, 0, 320, 240, 100, 80, 0.9);
-  // B: heavily overlaps A (IoU ~0.8 > 0.6). -> suppressed by NMS
+  // B: heavily overlaps A (IoU ~0.8 > 0.35). -> suppressed by NMS
   setChannelsFirst(data, N, 1, 325, 245, 100, 80, 0.8);
   // C: separate box.                        -> kept  (det1)
   setChannelsFirst(data, N, 2, 100, 400, 60, 60, 0.5);
-  // D: below confThreshold (0.1 < 0.15).    -> dropped
-  setChannelsFirst(data, N, 3, 500, 300, 50, 50, 0.1);
+  // D: below confThreshold (0.04 < 0.05).   -> dropped
+  setChannelsFirst(data, N, 3, 500, 300, 50, 50, 0.04);
   // E: degenerate (<1px after un-letterbox).-> dropped
   setChannelsFirst(data, N, 4, 200, 200, 0.4, 0.4, 0.9);
 

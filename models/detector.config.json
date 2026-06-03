@@ -1,8 +1,8 @@
 {
   "modelFile": "ffb-detector.onnx",
   "inputSize": 640,
-  "confThreshold": 0.15,
-  "iouThreshold": 0.6,
+  "confThreshold": 0.05,
+  "iouThreshold": 0.35,
   "maxBoxes": 300,
   "classAware": false
 }

@@ -58,8 +58,8 @@ adds `models/*.onnx` to `.gitignore`. The **folder, `.gitkeep`, this README, and
 |-----------------|----------------------|---------|
 | `modelFile`     | `ffb-detector.onnx`  | Filename under `models/` to load. |
 | `inputSize`     | `640`                | Square letterbox size fed to the model; match the export `imgsz`. |
-| `confThreshold` | `0.15`               | **Minimum** score to keep a box. **Lower → more boxes (over-detect).** |
-| `iouThreshold`  | `0.6`                | Class-agnostic NMS IoU. **Higher → keeps more overlapping boxes (over-detect).** |
+| `confThreshold` | `0.05`               | **Minimum** score to keep a box. **Lower → more boxes (over-detect).** |
+| `iouThreshold`  | `0.35`               | Class-agnostic NMS IoU. **Lower → suppresses more overlapping/tumpang-tindih boxes.** |
 | `maxBoxes`      | `300`                | Hard cap on returned boxes after NMS. |
 | `classAware`    | `false`              | Keep `false` for detect-only. When `true` and the model has >1 class, the per-class max probability is used as the score (still relabeled to `B2`). |
 
@@ -68,8 +68,6 @@ adds `models/*.onnx` to `.gitignore`. The **folder, `.gitkeep`, this README, and
 To propose **more** candidate boxes (recall over precision):
 
 - **Lower** `confThreshold` (e.g. `0.10` or `0.05`) — admits weaker detections.
-- **Raise** `iouThreshold` (e.g. `0.7`) — NMS suppresses fewer overlapping boxes,
-  so clustered fruit are kept rather than merged.
+- **Lower** `iouThreshold` (e.g. `0.35`) — NMS suppresses more overlapping duplicate boxes.
 
-To propose **fewer**, cleaner boxes, do the opposite (raise `confThreshold`,
-lower `iouThreshold`).
+To propose **fewer** boxes overall, raise `confThreshold`. To allow more clustered/overlapping fruit boxes, raise `iouThreshold` slightly.
