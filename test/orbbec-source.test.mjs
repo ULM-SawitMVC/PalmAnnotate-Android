@@ -72,6 +72,44 @@ test('OrbbecSource capture opens native plugin and converts base64 frame to Blob
   assert.equal(await frame.blob.text(), 'jpeg-bytes');
 });
 
+test('OrbbecSource capture carries raw depth sidecar when native frame includes it', async () => {
+  const ctx = loadOrbbec({
+    plugin: {
+      async requestPermission() { return { granted: true }; },
+      async open() {},
+      async capture() {
+        return {
+          base64: Buffer.from('jpeg-bytes').toString('base64'),
+          width: 640,
+          height: 480,
+          format: 'jpeg',
+          depthBase64: Buffer.from([1, 0, 2, 0]).toString('base64'),
+          depthWidth: 640,
+          depthHeight: 480,
+          depthFormat: 'Y16',
+          depthValueScale: 0.1,
+          depthEncoding: 'uint16le',
+          depthUnit: 'mm',
+          depthAlignedTo: 'color',
+        };
+      },
+    },
+  });
+
+  const frame = await ctx.OrbbecSource.capture();
+  assert.equal(frame.depthBlob.type, 'application/octet-stream');
+  assert.deepEqual([...new Uint8Array(await frame.depthBlob.arrayBuffer())], [1, 0, 2, 0]);
+  assert.deepEqual(frame.depth, {
+    width: 640,
+    height: 480,
+    format: 'Y16',
+    encoding: 'uint16le',
+    valueScale: 0.1,
+    unit: 'mm',
+    alignedTo: 'color',
+  });
+});
+
 test('OrbbecSource capture rejects when USB permission is denied', async () => {
   await assert.rejects(
     () => loadOrbbec({

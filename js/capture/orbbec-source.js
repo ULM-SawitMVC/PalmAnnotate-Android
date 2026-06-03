@@ -6,9 +6,9 @@
  * Bridges the CaptureSource interface (see js/capture/capture-source.js) to the
  * native Capacitor plugin window.Capacitor.Plugins.Orbbec (OrbbecPlugin.kt).
  * The native plugin enumerates/request-permissions via Android USB-host APIs and
- * captures a color frame through Orbbec's Android SDK wrapper. This source is
- * registered when present but is never the default — the built-in device camera
- * stays the default source.
+ * captures a color frame plus a raw uint16 depth sidecar through Orbbec's
+ * Android SDK wrapper. RGB is still used for annotation; depth is persisted with
+ * the same tree/side stem for future RGB-D / 4-channel YOLO training.
  *
  * ─── CaptureSource interface ───────────────────────────────────────────────
  *   id        : 'orbbec'
@@ -105,15 +105,15 @@ const OrbbecSource = (() => {
   }
 
   /**
-   * Capture one color frame from the Orbbec camera.
+   * Capture one RGB frame and, when the native SDK provides it, its synchronized
+   * uint16 depth frame from the Orbbec camera.
    *
    * Opens the pipeline (native open()) then grabs a frame (native capture()),
    * converting the returned base64 JPEG into a Blob with pixel dimensions.
-   *
    * The capture flow treats a thrown error as a failed capture (distinct from
    * the null "user cancelled" return).
    *
-   * @returns {Promise<{blob:Blob, width:number, height:number}|null>}
+   * @returns {Promise<{blob:Blob, width:number, height:number, depthBlob?:Blob, depth?:object}|null>}
    */
   async function capture() {
     const Orbbec = _plugin();
@@ -150,7 +150,22 @@ const OrbbecSource = (() => {
       height = dims.height;
     }
 
-    return { blob, width, height };
+    const result = { blob, width, height, sourceId: id };
+    if (frame.depthBase64) {
+      const depthBlob = _base64ToBlob(frame.depthBase64, 'application/octet-stream');
+      result.depthBlob = depthBlob;
+      result.depth = {
+        width: frame.depthWidth || null,
+        height: frame.depthHeight || null,
+        format: frame.depthFormat || 'Y16',
+        encoding: frame.depthEncoding || 'uint16le',
+        valueScale: Number(frame.depthValueScale || 1),
+        unit: frame.depthUnit || 'mm',
+        alignedTo: frame.depthAlignedTo || 'color',
+      };
+    }
+
+    return result;
   }
 
   return { id, name, isAvailable, capture };

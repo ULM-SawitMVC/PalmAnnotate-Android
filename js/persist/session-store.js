@@ -183,6 +183,9 @@ const SessionStore = (() => {
         imageUri: (s && s.imageUri) || null,
         labelUri: (s && s.labelUri) || null,
       };
+      if (s && s.depthUri) out.depthUri = s.depthUri;
+      if (s && s.depthPath) out.depthPath = s.depthPath;
+      if (s && s.depth) out.depth = s.depth;
       if (s && s.cacheBust) out.cacheBust = s.cacheBust;
       return out;
     });

@@ -22,6 +22,7 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.orbbec.obsensor.ColorFrame
 import com.orbbec.obsensor.Config
+import com.orbbec.obsensor.DepthFrame
 import com.orbbec.obsensor.Device
 import com.orbbec.obsensor.DeviceChangedCallback
 import com.orbbec.obsensor.DeviceList
@@ -30,7 +31,9 @@ import com.orbbec.obsensor.OBContext
 import com.orbbec.obsensor.Pipeline
 import com.orbbec.obsensor.StreamProfileList
 import com.orbbec.obsensor.VideoStreamProfile
+import com.orbbec.obsensor.types.AlignMode
 import com.orbbec.obsensor.types.Format
+import com.orbbec.obsensor.types.FrameAggregateOutputMode
 import com.orbbec.obsensor.types.LogSeverity
 import com.orbbec.obsensor.types.SensorType
 import com.orbbec.obsensor.types.StreamType
@@ -44,11 +47,13 @@ import java.util.concurrent.Executors
  * USB-host discovery and permission are handled with Android's UsbManager. Frame
  * capture is backed by Orbbec's Android SDK wrapper AAR
  * (obsensor_v2.0.6_2026031801_release.aar in android/app/libs). The JS layer
- * receives one color frame per capture as base64 JPEG:
- *   { base64, width, height, format: "jpeg", sourceFormat }
+ * receives one color frame per capture as base64 JPEG plus, when available, the
+ * synchronized/aligned raw uint16 depth plane for future RGB-D / 4-channel YOLO:
+ *   { base64, width, height, format: "jpeg", sourceFormat,
+ *     depthBase64, depthWidth, depthHeight, depthFormat, depthValueScale }
  *
- * Depth capture can be added later on top of the same Pipeline; PalmAnnotate's
- * current capture flow consumes only the color JPEG.
+ * PalmAnnotate still annotates the RGB JPEG, but stores the depth sidecar with
+ * the same tree/side stem so later training can join RGB + D deterministically.
  */
 @CapacitorPlugin(name = "Orbbec")
 class OrbbecPlugin : Plugin() {
@@ -74,6 +79,19 @@ class OrbbecPlugin : Plugin() {
         val sourceFormat: String
     )
 
+    private data class CapturedDepth(
+        val bytes: ByteArray,
+        val width: Int,
+        val height: Int,
+        val sourceFormat: String,
+        val valueScale: Float
+    )
+
+    private data class CapturedRgbd(
+        val color: CapturedJpeg,
+        val depth: CapturedDepth?
+    )
+
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "PalmAnnotate-Orbbec").apply { isDaemon = true }
     }
@@ -84,6 +102,7 @@ class OrbbecPlugin : Plugin() {
     private var pipeline: Pipeline? = null
     private var selectedUid: String? = null
     private var streaming = false
+    private var depthStreaming = false
 
     private val deviceChangedCallback = object : DeviceChangedCallback {
         override fun onDeviceAttach(deviceList: DeviceList) {
@@ -271,13 +290,25 @@ class OrbbecPlugin : Plugin() {
         cameraExecutor.execute {
             try {
                 synchronized(stateLock) { openSdkLocked() }
-                val frame = captureJpeg()
+                val frame = captureRgbd()
                 val ret = JSObject()
-                ret.put("base64", Base64.encodeToString(frame.bytes, Base64.NO_WRAP))
-                ret.put("width", frame.width)
-                ret.put("height", frame.height)
+                ret.put("base64", Base64.encodeToString(frame.color.bytes, Base64.NO_WRAP))
+                ret.put("width", frame.color.width)
+                ret.put("height", frame.color.height)
                 ret.put("format", "jpeg")
-                ret.put("sourceFormat", frame.sourceFormat)
+                ret.put("sourceFormat", frame.color.sourceFormat)
+                val depth = frame.depth
+                ret.put("hasDepth", depth != null)
+                if (depth != null) {
+                    ret.put("depthBase64", Base64.encodeToString(depth.bytes, Base64.NO_WRAP))
+                    ret.put("depthWidth", depth.width)
+                    ret.put("depthHeight", depth.height)
+                    ret.put("depthFormat", depth.sourceFormat)
+                    ret.put("depthValueScale", depth.valueScale.toDouble())
+                    ret.put("depthEncoding", "uint16le")
+                    ret.put("depthUnit", "mm")
+                    ret.put("depthAlignedTo", "color")
+                }
                 call.resolve(ret)
             } catch (e: Exception) {
                 Log.e(TAG, "capture failed", e)
@@ -346,11 +377,17 @@ class OrbbecPlugin : Plugin() {
         var openedPipeline: Pipeline? = null
         var config: Config? = null
         var selectedProfile: VideoStreamProfile? = null
+        var selectedDepthProfile: VideoStreamProfile? = null
         var name = "Orbbec camera"
         var width = 0
         var height = 0
         var fps = 0
         var sourceFormat = "default"
+        var depthWidth = 0
+        var depthHeight = 0
+        var depthFps = 0
+        var depthFormat = "none"
+        var depthEnabled = false
 
         try {
             val count = deviceList.getDeviceCount()
@@ -373,6 +410,7 @@ class OrbbecPlugin : Plugin() {
 
             val colorSensor = openedDevice.getSensor(SensorType.COLOR)
             if (colorSensor == null) throw IllegalStateException("Orbbec device has no color sensor")
+            val depthSensor = openedDevice.getSensor(SensorType.DEPTH)
 
             openedPipeline = Pipeline(openedDevice)
             config = Config()
@@ -387,8 +425,44 @@ class OrbbecPlugin : Plugin() {
                 config.enableStream(SensorType.COLOR)
             }
 
+            if (depthSensor != null) {
+                try {
+                    selectedDepthProfile = chooseDepthProfile(openedPipeline)
+                    if (selectedDepthProfile != null) {
+                        depthWidth = selectedDepthProfile.getWidth()
+                        depthHeight = selectedDepthProfile.getHeight()
+                        depthFps = selectedDepthProfile.getFps()
+                        depthFormat = selectedDepthProfile.getFormat().name
+                        config.enableStream(selectedDepthProfile)
+                    } else {
+                        config.enableStream(SensorType.DEPTH)
+                        depthFormat = "default"
+                    }
+                    // Prefer D2C so the stored depth sidecar is geometrically useful
+                    // with the RGB JPEG for later RGB-D/4-channel YOLO training.
+                    try { config.setAlignMode(AlignMode.ALIGN_D2C_SW_MODE) } catch (e: Exception) {
+                        Log.w(TAG, "software D2C align unavailable; using raw depth geometry", e)
+                    }
+                    try { config.setDepthScaleRequire(true) } catch (_: Exception) {}
+                    try { config.setFrameAggregateOutputMode(FrameAggregateOutputMode.OB_FRAME_AGGREGATE_OUTPUT_ALL_TYPE_FRAME_REQUIRE) } catch (_: Exception) {}
+                    depthEnabled = true
+                } catch (e: Exception) {
+                    Log.w(TAG, "Depth stream setup failed; continuing RGB-only", e)
+                    safeClose(selectedDepthProfile, "selected depth profile")
+                    selectedDepthProfile = null
+                    depthWidth = 0
+                    depthHeight = 0
+                    depthFps = 0
+                    depthFormat = "none"
+                    depthEnabled = false
+                } finally {
+                    safeClose(depthSensor, "depth sensor")
+                }
+            }
+
             openedPipeline.start(config)
             streaming = true
+            depthStreaming = depthEnabled
             device = openedDevice
             pipeline = openedPipeline
             selectedUid = uid
@@ -404,8 +478,14 @@ class OrbbecPlugin : Plugin() {
                 .put("height", height)
                 .put("fps", fps)
                 .put("sourceFormat", sourceFormat)
+                .put("depthEnabled", depthEnabled)
+                .put("depthWidth", depthWidth)
+                .put("depthHeight", depthHeight)
+                .put("depthFps", depthFps)
+                .put("depthFormat", depthFormat)
         } finally {
             safeClose(selectedProfile, "selected color profile")
+            safeClose(selectedDepthProfile, "selected depth profile")
             safeClose(config, "config")
             safeClose(deviceList, "query deviceList")
             // These are non-null only if start/configuration failed before the
@@ -475,6 +555,46 @@ class OrbbecPlugin : Plugin() {
         return selected
     }
 
+    private fun chooseDepthProfile(pipeline: Pipeline): VideoStreamProfile? {
+        val profileList: StreamProfileList = pipeline.getStreamProfileList(SensorType.DEPTH)
+            ?: return null
+        val profiles = ArrayList<VideoStreamProfile>()
+        try {
+            for (i in 0 until profileList.getCount()) {
+                val profile: VideoStreamProfile = profileList.getProfile(i).`as`(StreamType.VIDEO)
+                val width = profile.getWidth()
+                val height = profile.getHeight()
+                val format = profile.getFormat()
+                if (width >= 320 && height >= 240 && isCapturableDepthFormat(format)) {
+                    profiles.add(profile)
+                } else {
+                    safeClose(profile, "unused depth profile")
+                }
+            }
+        } finally {
+            safeClose(profileList, "depth profileList")
+        }
+
+        if (profiles.isEmpty()) return null
+
+        profiles.sortWith(
+            compareBy<VideoStreamProfile> { depthFormatPriority(it.getFormat()) }
+                .thenBy { kotlin.math.abs(it.getWidth() - 1280) }
+                .thenByDescending { it.getFps() }
+                .thenByDescending { it.getWidth() * it.getHeight() }
+        )
+
+        val selected = profiles.first()
+        for (profile in profiles.drop(1)) {
+            safeClose(profile, "unselected depth profile")
+        }
+        Log.i(
+            TAG,
+            "Selected depth profile ${selected.getWidth()}x${selected.getHeight()}@${selected.getFps()} ${selected.getFormat()}"
+        )
+        return selected
+    }
+
     private fun closeSdkLocked() {
         val oldPipeline = pipeline
         val oldDevice = device
@@ -485,6 +605,7 @@ class OrbbecPlugin : Plugin() {
         obContext = null
         selectedUid = null
         streaming = false
+        depthStreaming = false
 
         safeStopAndClose(oldPipeline)
         safeClose(oldDevice, "device")
@@ -493,31 +614,41 @@ class OrbbecPlugin : Plugin() {
 
     // ── Frame capture / encoding ─────────────────────────────────────────────
 
-    private fun captureJpeg(): CapturedJpeg {
+    private fun captureRgbd(): CapturedRgbd {
         val activePipeline = synchronized(stateLock) {
             pipeline ?: throw IllegalStateException("Orbbec pipeline is not open")
         }
+        val wantDepth = synchronized(stateLock) { depthStreaming }
 
         var lastError: Exception? = null
         for (attempt in 0 until 3) {
             var frameSet: FrameSet? = null
             var colorFrame: ColorFrame? = null
+            var depthFrame: DepthFrame? = null
             try {
                 frameSet = activePipeline.waitForFrameSet(FRAME_TIMEOUT_MS)
                 if (frameSet == null) continue
                 colorFrame = frameSet.getColorFrame()
                 if (colorFrame == null) continue
-                return encodeColorFrame(colorFrame)
+                depthFrame = frameSet.getDepthFrame()
+                if (wantDepth && depthFrame == null) {
+                    Log.w(TAG, "capture attempt ${attempt + 1} had RGB but no depth frame")
+                    continue
+                }
+                val color = encodeColorFrame(colorFrame)
+                val depth = depthFrame?.let { encodeDepthFrame(it) }
+                return CapturedRgbd(color, depth)
             } catch (e: Exception) {
                 lastError = e
                 Log.w(TAG, "capture attempt ${attempt + 1} failed", e)
             } finally {
+                safeClose(depthFrame, "depth frame")
                 safeClose(colorFrame, "color frame")
                 safeClose(frameSet, "frameSet")
             }
         }
 
-        throw IllegalStateException(lastError?.message ?: "No Orbbec color frame received")
+        throw IllegalStateException(lastError?.message ?: "No Orbbec RGB-D frame received")
     }
 
     private fun encodeColorFrame(frame: ColorFrame): CapturedJpeg {
@@ -654,6 +785,26 @@ class OrbbecPlugin : Plugin() {
         return pixelsToJpeg(pixels, width, height)
     }
 
+    private fun encodeDepthFrame(frame: DepthFrame): CapturedDepth {
+        val width = frame.getWidth()
+        val height = frame.getHeight()
+        if (width <= 0 || height <= 0) throw IllegalStateException("Invalid Orbbec depth frame size")
+
+        val format = frame.getFormat()
+        val size = frame.getDataSize()
+        if (size <= 0) throw IllegalStateException("Empty Orbbec depth frame")
+
+        val raw = ByteArray(size)
+        val copied = frame.getData(raw)
+        if (copied < 0) throw IllegalStateException("Failed to copy Orbbec depth frame data")
+        val data = if (copied in 0 until raw.size) raw.copyOf(copied) else raw
+        val y16 = when (format) {
+            Format.Y16, Format.Y10, Format.Y11, Format.Y12 -> data
+            else -> throw IllegalStateException("Unsupported Orbbec depth frame format: $format")
+        }
+        return CapturedDepth(y16, width, height, format.name, frame.getValueScale())
+    }
+
     private fun pixelsToJpeg(pixels: IntArray, width: Int, height: Int): ByteArray {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         try {
@@ -710,6 +861,26 @@ class OrbbecPlugin : Plugin() {
             Format.RGBA, Format.BGRA -> 3
             Format.YUYV, Format.YUY2, Format.NV21, Format.NV12 -> 4
             Format.UYVY, Format.I420 -> 5
+            else -> 99
+        }
+    }
+
+    private fun isCapturableDepthFormat(format: Format): Boolean {
+        return when (format) {
+            Format.Y16,
+            Format.Y10,
+            Format.Y11,
+            Format.Y12 -> true
+            else -> false
+        }
+    }
+
+    private fun depthFormatPriority(format: Format): Int {
+        return when (format) {
+            Format.Y16 -> 0
+            Format.Y12 -> 1
+            Format.Y11 -> 2
+            Format.Y10 -> 3
             else -> 99
         }
     }

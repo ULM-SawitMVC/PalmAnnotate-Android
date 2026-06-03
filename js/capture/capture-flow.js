@@ -615,12 +615,51 @@ const CaptureFlow = (() => {
       if (saf) {
         try { await saf.writeImage(`dataset/${relPath}`, shots[i].blob); } catch (_) {}
       }
+
+      let depthFile = null;
+      let depthUri = null;
+      let depthPath = null;
+      let depthMeta = null;
+      if (shots[i].depthBlob) {
+        const depthFilename = `${treeName}_${sideNum}.raw`;
+        const depthRelPath = `depth/field/${depthFilename}`;
+        depthMeta = Object.assign({
+          file: depthFilename,
+          side: sideNum,
+          tree: treeName,
+          rgbFile: filename,
+        }, shots[i].depth || {});
+        try {
+          const depthPersisted = adapter.persistDatasetFile
+            ? await adapter.persistDatasetFile(depthRelPath, shots[i].depthBlob, `depth/field/${depthFilename}`)
+            : {};
+          depthUri = depthPersisted && depthPersisted.uri || null;
+          depthPath = depthPersisted && depthPersisted.path || null;
+          depthFile = { name: depthFilename };
+          await adapter.writeDatasetJson(`depth/field/${treeName}_${sideNum}.json`, depthMeta);
+        } catch (e) {
+          console.warn('[CaptureFlow] persist depth failed for', depthRelPath, e);
+          depthFile = null;
+          depthUri = null;
+          depthPath = null;
+          depthMeta = null;
+        }
+        if (saf && depthMeta) {
+          try { await saf.writeBlob(`dataset/${depthRelPath}`, shots[i].depthBlob); } catch (_) {}
+          try { await saf.writeJson(`dataset/depth/field/${treeName}_${sideNum}.json`, depthMeta); } catch (_) {}
+        }
+      }
+
       sides.push({
         imageFile: persisted.file || { name: filename },
         imageUri:  persisted.uri  || null,
         cacheBust: cacheBust + '_' + sideNum,
         labelFile: null,
         labelUri:  null,
+        depthFile,
+        depthUri,
+        depthPath,
+        depth: depthMeta,
       });
     }
 

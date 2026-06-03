@@ -78,7 +78,7 @@ Project configuration is in memory on the web; Android session/settings state is
 
 If the browser supports the File System Access API, output JSON and corrected labels are written directly to selected folders. On Android, the working store is app-specific external storage under `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate`; the optional SAF export folder mirrors captures, metadata, Output JSON, and Output TXT into a user-picked public folder. Manual JSON save can fall back to downloads on web; auto-save requires a writable output JSON target and never downloads silently.
 
-Android deletion is intentionally full-lifecycle: Delete Tree removes app-storage images, metadata, output JSON/TXT, autosave snapshot, captured registry entry, saved handle, in-memory tree entry, and SAF mirror files. Delete Session repeats that cleanup for every tree. Capture also pre-cleans stale artefacts before reusing the same tree id and appends cache-busting tokens to native image URLs to avoid stale WebView file-cache renders.
+Android deletion is intentionally full-lifecycle: Delete Tree removes app-storage images, Orbbec depth sidecars, metadata, output JSON/TXT, autosave snapshot, captured registry entry, saved handle, in-memory tree entry, and SAF mirror files. Delete Session repeats that cleanup for every tree. Capture also pre-cleans stale artefacts before reusing the same tree id and appends cache-busting tokens to native image URLs to avoid stale WebView file-cache renders.
 
 Navigation, loading, compute, and save operations run through a single queue. Saves use an immutable session snapshot and validate tree names, image filenames, label filenames, and per-side annotation counts before writing.
 

@@ -86,7 +86,7 @@ and mirrors captures/saves into the same PalmAnnotate-shaped tree:
 
 The SAF export folder is best-effort and additive; the app-storage copy remains
 the source of truth. Current Android cleanup semantics are intentionally strong:
-**Delete Tree** removes that tree's images, metadata, output JSON, output TXT,
+**Delete Tree** removes that tree's images, Orbbec depth sidecars, metadata, output JSON, output TXT,
 snapshots, registry entries, in-memory tree refs, and SAF mirror copies;
 **Delete Session** applies the same cleanup to every tree in the session before
 removing the session row. Reusing the same variety/block/tree id is safe because
@@ -114,9 +114,12 @@ wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`):
 Runtime Orbbec capture still needs testing on a physical Android device with the
 Gemini/Orbbec hardware attached. When plugged in, Orbbec appears as an optional
 **Camera** choice during side capture; the device camera remains the fallback.
-Current Orbbec capture saves RGB JPEG only through the normal
-`dataset/images/field/{TREE}_{side}.jpg` path — no depth folder is written yet.
-Android storage/SAF behavior has been field-checked with an export shaped like
+Current Orbbec capture annotates the RGB JPEG but also saves the depth sidecar
+with the same tree/side stem:
+`dataset/images/field/{TREE}_{side}.jpg`,
+`dataset/depth/field/{TREE}_{side}.raw`, and
+`dataset/depth/field/{TREE}_{side}.json`. Android storage/SAF behavior has been
+field-checked with an export shaped like
 `PalmAnnotate-Debug.zip`:
 `dataset/images/field`, `dataset/metadata`, `Output JSON`, and `Output TXT/field`
 are all populated as expected. For the full Android build, signing, SAF, and

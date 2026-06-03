@@ -137,9 +137,11 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
   `OrbbecSDK-Android-Wrapper-2.0.6.zip` and included with `implementation fileTree(dir: 'libs',
   include: ['*.aar'])`. The plugin's `open()` creates `OBContext`/`Pipeline`, `capture()` returns a
   base64 JPEG color frame, and `close()` releases SDK resources. Built-in camera remains the fallback;
-  when Orbbec is attached/available, the side-capture panel shows a Camera selector. Current Orbbec
-  persistence is RGB-only under `dataset/images/field/{TREE}_{side}.jpg` plus optional SAF mirror;
-  no depth folder/files are written yet. Orbbec runtime still needs real-device + camera validation.
+  when Orbbec is attached/available, the side-capture panel shows a Camera selector. Annotation still
+  uses RGB, but Orbbec persistence also writes the synchronized depth sidecar with the same stem:
+  `dataset/images/field/{TREE}_{side}.jpg`, `dataset/depth/field/{TREE}_{side}.raw`, and
+  `dataset/depth/field/{TREE}_{side}.json` plus optional SAF mirror. Orbbec runtime still needs
+  real-device + camera validation.
 - **Storage root = `Directory.External`** (`capacitor-adapter.js`): all dataset images/labels,
   metadata, Output JSON/TXT and session downloads live under
   `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/…`. This is the only location that,
@@ -147,7 +149,7 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
   (`convertFileSrc`) without a runtime permission. `Directory.Documents` was used first but fails
   under scoped storage on target SDK 34 (Android 13/14) — captured photos landed nowhere and showed
   "Image unavailable". Files are retrievable via USB/`adb` or the in-app **Download Session** export.
-  Delete Tree/Delete Session now removes app-storage images, metadata, Output JSON/TXT, snapshots,
+  Delete Tree/Delete Session now removes app-storage images, Orbbec depth sidecars, metadata, Output JSON/TXT, snapshots,
   registry entries, saved handles, in-memory tree refs, and SAF mirror files; native image URLs carry
   a `cacheBust` query so reusing the same variety/block/id cannot show a stale WebView-cached photo.
 - **Export folder (SAF):** `SafPlugin.kt` + `js/storage/saf-store.js` let the operator pick a public,

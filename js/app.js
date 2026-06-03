@@ -333,6 +333,10 @@ document.addEventListener('DOMContentLoaded', () => {
         sides: (t.sides || []).map((s, i) => ({
           imageFile: { name: `${t.name}_${i + 1}.jpg` }, labelFile: null,
           imageUri: s.imageUri || null, labelUri: s.labelUri || null,
+          depthFile: s.depthUri ? { name: `${t.name}_${i + 1}.raw` } : null,
+          depthUri: s.depthUri || null,
+          depthPath: s.depthPath || null,
+          depth: s.depth || null,
           cacheBust: s.cacheBust || null,
         })),
       });

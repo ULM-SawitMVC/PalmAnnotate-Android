@@ -12,7 +12,7 @@ python -m http.server 4173
 
 On web, click **Load Folder** and choose a dataset root containing `images/` and `labels/`.
 
-On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location. During side capture, a connected Orbbec USB camera appears in the **Camera** selector; choose **Orbbec USB camera** to use it, or keep **Device Camera** as fallback. Current Orbbec capture saves RGB JPEG only and does not write depth files yet.
+On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location. During side capture, a connected Orbbec USB camera appears in the **Camera** selector; choose **Orbbec USB camera** to use it, or keep **Device Camera** as fallback. Annotation uses the RGB image, while Orbbec depth is saved beside it with the same stem: `dataset/images/field/{TREE}_{side}.jpg`, `dataset/depth/field/{TREE}_{side}.raw`, and `dataset/depth/field/{TREE}_{side}.json`.
 
 PalmAnnotate groups files by tree name and side number. A tree named `DAMIMAS_A21B_0001` should have files such as:
 
@@ -84,7 +84,7 @@ When moving between trees, PalmAnnotate auto-saves only if the current tree has 
 
 ## 8. Delete Trees / Sessions On Android
 
-In the Sessions home, deleting a **tree** removes all files for that tree: side images, metadata JSON, Output JSON, Output TXT labels, autosave snapshot, captured registry entry, and the optional SAF mirror. Deleting a **session** applies the same cleanup to every tree before removing the session row.
+In the Sessions home, deleting a **tree** removes all files for that tree: side images, Orbbec depth sidecars, metadata JSON, Output JSON, Output TXT labels, autosave snapshot, captured registry entry, and the optional SAF mirror. Deleting a **session** applies the same cleanup to every tree before removing the session row.
 
 This means you can safely recreate the same variety + block + tree id; PalmAnnotate deletes stale files first and cache-busts native image URLs so the WebView does not show an old photo.
 

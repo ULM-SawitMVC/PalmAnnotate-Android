@@ -26,6 +26,7 @@
  *   async pickFolder()     -> {uri,name}|null   // launch system picker
  *   async clearFolder()                          // forget the export folder
  *   async writeImage(relPath, blob)  -> {ok,...} // mirror one image (best-effort)
+ *   async writeBlob(relPath, blob)   -> {ok,...} // mirror one binary sidecar
  *   async writeJson(relPath, obj)    -> {ok,...} // mirror one JSON (best-effort)
  *   async writeText(relPath, text)   -> {ok,...} // mirror one text file
  *   async deleteDatasetTree(treeName, sideCount)  // remove mirrored tree files
@@ -145,7 +146,7 @@ const SafStore = (() => {
    * Mirror one image Blob to <folder>/PalmAnnotate/<relPath>. Best-effort:
    * resolves {ok:false, skipped:true} when no folder is set, and never throws.
    */
-  async function writeImage(relPath, blob) {
+  async function writeBlob(relPath, blob, label) {
     const folder = await current();
     if (!folder) return { ok: false, skipped: true };
     const Saf = _plugin();
@@ -156,9 +157,13 @@ const SafStore = (() => {
       });
       return r || { ok: true };
     } catch (e) {
-      console.warn('[SafStore] writeImage failed for', relPath, e);
+      console.warn(`[SafStore] ${label || 'writeBlob'} failed for`, relPath, e);
       return { ok: false, error: (e && e.message) || String(e) };
     }
+  }
+
+  async function writeImage(relPath, blob) {
+    return writeBlob(relPath, blob, 'writeImage');
   }
 
   async function _writeUtf8(relPath, text, label) {
@@ -216,6 +221,10 @@ const SafStore = (() => {
     const paths = [];
     for (let i = 1; i <= n; i++) {
       paths.push(`dataset/images/field/${stem}_${i}.jpg`);
+      paths.push(`dataset/depth/field/${stem}_${i}.raw`);
+      paths.push(`dataset/depth/field/${stem}_${i}.bin`);
+      paths.push(`dataset/depth/field/${stem}_${i}.png`);
+      paths.push(`dataset/depth/field/${stem}_${i}.json`);
       paths.push(`dataset/labels/field/${stem}_${i}.txt`);
       paths.push(`Output TXT/field/${stem}_${i}.txt`);
     }
@@ -234,7 +243,7 @@ const SafStore = (() => {
     return { ok: true, removed };
   }
 
-  return { isSupported, current, pickFolder, clearFolder, writeImage, writeJson, writeText, deleteDatasetTree };
+  return { isSupported, current, pickFolder, clearFolder, writeImage, writeBlob, writeJson, writeText, deleteDatasetTree };
 })();
 
 window.SafStore = SafStore;

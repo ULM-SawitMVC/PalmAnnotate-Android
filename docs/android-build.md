@@ -198,14 +198,20 @@ USB permission dialog on first use. The selected source is remembered for the
 rest of the capture flow, but if the Orbbec is unplugged/unavailable the panel
 falls back to the device camera.
 
-Current Orbbec persistence is RGB-only: the plugin captures one color frame,
-encodes it as JPEG, and stores it through the normal PalmAnnotate image path
-`dataset/images/field/{TREE}_{side}.jpg` plus optional SAF mirror. The app does
-**not** currently save a depth frame or `dataset/depth/...` mirror. Depth support
-requires an explicit follow-up design because the annotation pipeline and YOLO
-labels consume RGB images only today; if enabled later, depth files should use the
-same stem as RGB, for example `dataset/depth/field/{TREE}_{side}.png` or `.bin`,
-and cleanup must delete them together with RGB/JSON/TXT.
+Current Orbbec persistence keeps the annotation pipeline RGB, but saves depth as
+a sidecar with the same tree/side stem for later RGB-D / 4-channel YOLO training:
+
+```text
+PalmAnnotate/dataset/images/field/{TREE}_{side}.jpg
+PalmAnnotate/dataset/depth/field/{TREE}_{side}.raw
+PalmAnnotate/dataset/depth/field/{TREE}_{side}.json
+```
+
+The `.raw` file is the SDK depth plane bytes (`uint16le` when the camera reports
+Y16/Y10/Y11/Y12 unpacked depth). The per-side depth JSON records width, height,
+format, value scale, unit, RGB filename, and alignment note. SAF mirrors the same
+files when an export folder is selected. Delete Tree/Delete Session delete depth
+sidecars together with RGB/JSON/TXT.
 
 Runtime validation still requires a physical Android device with the Orbbec/Gemini
 camera attached.
@@ -214,14 +220,15 @@ camera attached.
 
 Current behavior after device testing:
 
-- Capture writes the reliable app-storage image set and metadata first, then
-  mirrors to SAF when configured. If native app-storage image persistence does
-  not return an `imageUri`, capture aborts and no tree is recorded.
+- Capture writes the reliable app-storage RGB image set, Orbbec depth sidecars
+  when present, and metadata first, then mirrors to SAF when configured. If
+  native app-storage image persistence does not return an `imageUri`, capture
+  aborts and no tree is recorded.
 - Compute / Save Output Again writes `Output JSON/{TREE}.json` and
   `Output TXT/{split}/{TREE}_{side}.txt` to app storage and mirrors both to SAF.
-- Delete Tree removes that tree's app-storage images, metadata, Output JSON/TXT,
-  in-memory DatasetManager entry, saved output handle, autosave snapshot, captured
-  registry entry, and SAF mirror files.
+- Delete Tree removes that tree's app-storage images, depth sidecars, metadata,
+  Output JSON/TXT, in-memory DatasetManager entry, saved output handle, autosave
+  snapshot, captured registry entry, and SAF mirror files.
 - Delete Session runs the same cleanup for every tree, then removes the session.
 - Reusing the same variety/block/tree id is safe: stale files are pre-deleted and
   native image URLs include a cache-busting query string to avoid WebView file

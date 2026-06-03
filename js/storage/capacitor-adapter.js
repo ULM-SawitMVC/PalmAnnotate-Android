@@ -226,10 +226,15 @@ const CapacitorAdapter = (() => {
    * @returns {Promise<{uri?:string}>}
    */
   async function persistDatasetImage(relPath, blob) {
+    return persistDatasetFile(relPath, blob, 'images/field/captured.jpg');
+  }
+
+  /** Persist an arbitrary dataset sidecar Blob under PalmAnnotate/dataset/{relPath}. */
+  async function persistDatasetFile(relPath, blob, fallback) {
     const fs = _fs();
     if (!fs) throw new Error('Filesystem plugin unavailable.');
     await _ensureBase();
-    const path = DATASET + '/' + _safeRelPath(relPath, 'images/field/captured.jpg');
+    const path = DATASET + '/' + _safeRelPath(relPath, fallback || 'files/captured.bin');
     const base64 = await _blobToBase64(blob);
     await fs.writeFile({
       path,
@@ -238,7 +243,7 @@ const CapacitorAdapter = (() => {
       recursive: true,
     });
     const res = await fs.getUri({ directory: DIRECTORY, path });
-    return { uri: (res && res.uri) || null };
+    return { uri: (res && res.uri) || null, path };
   }
 
   /**
@@ -286,11 +291,15 @@ const CapacitorAdapter = (() => {
     const candidates = [];
     const imageSplits = ['field', 'train', 'val', 'test'];
     const imageExts = ['jpg', 'jpeg', 'png'];
+    const depthExts = ['raw', 'bin', 'png', 'json'];
     const labelSplits = ['field', 'train', 'val', 'test'];
     for (let i = 1; i <= n; i++) {
       for (const split of imageSplits) {
         for (const ext of imageExts) {
           candidates.push(DATASET + `/images/${split}/${stem}_${i}.${ext}`);
+        }
+        for (const ext of depthExts) {
+          candidates.push(DATASET + `/depth/${split}/${stem}_${i}.${ext}`);
         }
       }
       for (const split of labelSplits) {
@@ -464,7 +473,7 @@ const CapacitorAdapter = (() => {
     hasOutputDir, hasLabelsDir, outputDirName, labelsDirName,
     verifyAccess,
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
-    persistDatasetImage, writeDatasetJson, deleteDatasetTree,
+    persistDatasetImage, persistDatasetFile, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
   };
 })();
