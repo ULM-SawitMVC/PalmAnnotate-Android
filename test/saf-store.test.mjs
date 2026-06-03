@@ -42,6 +42,7 @@ function makeSaf(overrides = {}) {
     },
     async hasFolder(args) { calls.push(['hasFolder', args]); return { has: true, name: 'PalmExport' }; },
     async writeFile(args) { calls.push(['writeFile', args]); return { ok: true }; },
+    async deletePath(args) { calls.push(['deletePath', args]); return { ok: true, removed: /_1\.jpg$/.test(args.relPath) }; },
     async releaseFolder(args) { calls.push(['releaseFolder', args]); },
   };
   return Object.assign(base, overrides);
@@ -66,6 +67,7 @@ test('SafStore is unsupported on web and degrades to no-ops (never throws)', asy
   assert.equal(await SafStore.pickFolder(), null);
   assert.deepEqual(await SafStore.writeJson('dataset/x.json', { a: 1 }), { ok: false, skipped: true });
   assert.deepEqual(await SafStore.writeImage('dataset/x.jpg', new Blob(['x'])), { ok: false, skipped: true });
+  assert.deepEqual(await SafStore.deleteDatasetTree('TREE_0001', 4), { ok: false, skipped: true, removed: 0 });
 });
 
 test('pickFolder persists the chosen folder and current() re-verifies it', async () => {
@@ -109,6 +111,22 @@ test('writeImage / writeJson namespace under PalmAnnotate/ and carry the tree UR
   assert.equal(writes[1].relPath, 'PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_1.jpg');
   assert.equal(writes[1].encoding, 'base64');
   assert.equal(writes[1].data, 'ZmFrZQ==');
+});
+
+test('deleteDatasetTree removes mirrored tree files under PalmAnnotate/', async () => {
+  const { SafStore, saf } = loadSaf();
+  await SafStore.pickFolder();
+
+  const res = await SafStore.deleteDatasetTree('DAMIMAS_A21B_0001', 4);
+  assert.equal(res.ok, true);
+  assert.equal(res.removed, 1, 'provider-reported removed files are counted');
+
+  const deletes = saf.calls.filter(c => c[0] === 'deletePath').map(c => c[1].relPath);
+  assert.ok(deletes.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_1.jpg'));
+  assert.ok(deletes.includes('PalmAnnotate/dataset/images/field/DAMIMAS_A21B_0001_4.jpg'));
+  assert.ok(deletes.includes('PalmAnnotate/dataset/metadata/DAMIMAS_A21B_0001.json'));
+  assert.ok(deletes.includes('PalmAnnotate/Output JSON/DAMIMAS_A21B_0001.json'));
+  assert.ok(!deletes.some(p => p.endsWith('_5.jpg')), 'respects sideCount');
 });
 
 test('clearFolder forgets the folder and releases the native grant', async () => {

@@ -268,16 +268,15 @@ const SessionsUI = (() => {
     const del = _iconBtn('list-row__del', 'trash', 'Delete session');
     del.addEventListener('click', async (e) => {
       e.stopPropagation();
+      const pohonCount = Array.isArray(session.trees) ? session.trees.length : 0;
       const ok = await _confirm({
         title: 'Delete session?',
-        message: `"${title}" and its tree list will be removed from this device. `
-               + `Photos already saved to storage are kept.`,
+        message: `"${title}" and ${pohonCount} tree${pohonCount === 1 ? '' : 's'} will be removed from this device, including stored photos/outputs.`,
         confirmLabel: 'Delete',
         danger: true,
       });
       if (!ok) return;
-      const store = _store();
-      if (store) { try { await store.removeSession(session.id); } catch (_) {} }
+      await _deleteSession(session);
       _renderHome();
     });
     li.appendChild(del);
@@ -515,23 +514,58 @@ const SessionsUI = (() => {
     return li;
   }
 
-  // Remove a tree from a session: drop it from the session index + captured
-  // registry, then best-effort unlink its on-disk photos (native only).
-  async function _deleteTree(sessionId, tree) {
+  // Remove storage/index artefacts for a tree name. Kept separate from the
+  // session-index mutation so both Delete Tree and Delete Session can share the
+  // exact same cleanup path.
+  async function _deleteTreeArtifacts(tree) {
+    const name = tree && tree.name;
+    if (!name) return;
     const store = _store();
     if (store) {
-      try { await store.removeTreeFromSession(sessionId, tree.name); } catch (_) {}
-      try { if (store.removeCapturedTree) await store.removeCapturedTree(tree.name); } catch (_) {}
+      try { if (store.removeCapturedTree) await store.removeCapturedTree(name); } catch (_) {}
+      try { if (store.clearSnapshot) await store.clearSnapshot(name); } catch (_) {}
     }
+    try {
+      if (window.ProjectConfig && ProjectConfig.clearSavedHandle) ProjectConfig.clearSavedHandle(name);
+    } catch (_) {}
+    try {
+      if (window.DatasetManager && DatasetManager.removeByName) DatasetManager.removeByName(name);
+    } catch (_) {}
     try {
       const native = window.Storage && Storage.isNative && Storage.isNative();
       const adapter = native && Storage.active && Storage.active();
       if (adapter && typeof adapter.deleteDatasetTree === 'function') {
-        await adapter.deleteDatasetTree(tree.name, tree.sideCount);
+        await adapter.deleteDatasetTree(name, tree.sideCount);
       }
     } catch (e) {
       console.warn('[SessionsUI] deleteDatasetTree failed:', e);
     }
+    try {
+      if (window.SafStore && SafStore.deleteDatasetTree) await SafStore.deleteDatasetTree(name, tree.sideCount);
+    } catch (e) {
+      console.warn('[SessionsUI] SafStore.deleteDatasetTree failed:', e);
+    }
+  }
+
+  // Remove a tree from a session: drop it from the session index + captured
+  // registry, then best-effort unlink its on-disk photos/labels/output.
+  async function _deleteTree(sessionId, tree) {
+    const store = _store();
+    if (store) {
+      try { await store.removeTreeFromSession(sessionId, tree.name); } catch (_) {}
+    }
+    await _deleteTreeArtifacts(tree);
+  }
+
+  // Remove a whole session and all of its trees' local artefacts. This is the
+  // behavior operators expect when they recreate the same variety/block/id: no
+  // stale photos or output files are allowed to win later lookups.
+  async function _deleteSession(session) {
+    if (!session || !session.id) return;
+    const trees = Array.isArray(session.trees) ? session.trees.slice() : [];
+    for (const tree of trees) await _deleteTreeArtifacts(tree);
+    const store = _store();
+    if (store) { try { await store.removeSession(session.id); } catch (_) {} }
   }
 
   async function _addPohon(id, btn) {

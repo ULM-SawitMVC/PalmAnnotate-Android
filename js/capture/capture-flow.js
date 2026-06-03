@@ -524,6 +524,17 @@ const CaptureFlow = (() => {
     // in any file manager, alongside the reliable app-storage copy.
     const saf = (window.SafStore && SafStore.isSupported && SafStore.isSupported()) ? SafStore : null;
     const sides = [];
+    const cacheBust = `${metadata.timestamp || new Date().toISOString()}_${Date.now()}`;
+
+    // If the operator reuses the same variety/block/tree id, clear stale images,
+    // labels and prior output first. This avoids old files winning later loads
+    // when a new capture partially fails or the provider refuses overwrite.
+    if (adapter && typeof adapter.deleteDatasetTree === 'function') {
+      try { await adapter.deleteDatasetTree(treeName, shots.length); } catch (_) {}
+    }
+    if (saf && typeof saf.deleteDatasetTree === 'function') {
+      try { await saf.deleteDatasetTree(treeName, shots.length); } catch (_) {}
+    }
 
     for (let i = 0; i < shots.length; i++) {
       const sideNum = i + 1;
@@ -536,12 +547,16 @@ const CaptureFlow = (() => {
         console.warn('[CaptureFlow] persistDatasetImage failed for', relPath, e);
         persisted = {};
       }
+      if (window.Storage && Storage.isNative && Storage.isNative() && !persisted.uri) {
+        throw new Error('Captured photo could not be saved to app storage: ' + filename);
+      }
       if (saf) {
         try { await saf.writeImage(`dataset/${relPath}`, shots[i].blob); } catch (_) {}
       }
       sides.push({
-        imageFile: persisted.file || null,
+        imageFile: persisted.file || { name: filename },
         imageUri:  persisted.uri  || null,
+        cacheBust: cacheBust + '_' + sideNum,
         labelFile: null,
         labelUri:  null,
       });

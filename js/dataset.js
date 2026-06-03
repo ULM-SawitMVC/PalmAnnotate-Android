@@ -247,23 +247,39 @@ const DatasetManager = (() => {
   function getTrees() { return _trees; }
 
   /**
-   * Append a tree produced by the capture-first flow (CaptureFlow) to the
-   * in-memory tree list and make it current. The tree object already matches
-   * the shape _buildTrees emits ({ name, split, sides:[…] }, plus an optional
-   * `metadata` field), so it flows straight into ActiveSession.loadTree().
+   * Append/replace a tree produced by the capture-first flow (CaptureFlow) and
+   * make it current. Replacing by name is deliberate: if an operator deletes a
+   * session then captures the same variety/block/id again in the same app run,
+   * stale in-memory tree refs must not win DatasetManager.findByName().
    * @param {object} tree
-   * @returns {number} the new tree's index
+   * @returns {number} the selected tree index
    */
   function addCapturedTree(tree) {
+    const existing = tree && tree.name ? findByName(tree.name) : -1;
+    if (existing >= 0) {
+      _trees[existing] = tree;
+      _currentIndex = existing;
+      return existing;
+    }
     _trees.push(tree);
     _currentIndex = _trees.length - 1;
     return _currentIndex;
   }
 
+  /** Remove every in-memory tree with this name. Returns how many were removed. */
+  function removeByName(name) {
+    const before = _trees.length;
+    _trees = _trees.filter(t => t && t.name !== name);
+    const removed = before - _trees.length;
+    if (_trees.length === 0) _currentIndex = 0;
+    else if (_currentIndex >= _trees.length) _currentIndex = _trees.length - 1;
+    return removed;
+  }
+
   return {
     load, loadFromAdapter, imageUrlForSide, labelTextForSide,
     count, getTree, getIndex, goTo, next, prev, findByName, getTrees,
-    addCapturedTree,
+    addCapturedTree, removeByName,
   };
 })();
 

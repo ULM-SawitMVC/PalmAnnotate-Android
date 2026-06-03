@@ -27,6 +27,8 @@
  *   async clearFolder()                          // forget the export folder
  *   async writeImage(relPath, blob)  -> {ok,...} // mirror one image (best-effort)
  *   async writeJson(relPath, obj)    -> {ok,...} // mirror one JSON (best-effort)
+ *   async writeText(relPath, text)   -> {ok,...} // mirror one text file
+ *   async deleteDatasetTree(treeName, sideCount)  // remove mirrored tree files
  */
 const SafStore = (() => {
 
@@ -159,26 +161,80 @@ const SafStore = (() => {
     }
   }
 
-  /**
-   * Mirror one JSON object to <folder>/PalmAnnotate/<relPath>. Best-effort.
-   */
-  async function writeJson(relPath, obj) {
+  async function _writeUtf8(relPath, text, label) {
     const folder = await current();
     if (!folder) return { ok: false, skipped: true };
     const Saf = _plugin();
     try {
       const r = await Saf.writeFile({
         treeUri: folder.uri, relPath: ROOT + relPath,
-        data: JSON.stringify(obj, null, 2), encoding: 'utf8',
+        data: String(text == null ? '' : text), encoding: 'utf8',
       });
       return r || { ok: true };
     } catch (e) {
-      console.warn('[SafStore] writeJson failed for', relPath, e);
+      console.warn(`[SafStore] ${label} failed for`, relPath, e);
       return { ok: false, error: (e && e.message) || String(e) };
     }
   }
 
-  return { isSupported, current, pickFolder, clearFolder, writeImage, writeJson };
+  /**
+   * Mirror one JSON object to <folder>/PalmAnnotate/<relPath>. Best-effort.
+   */
+  async function writeJson(relPath, obj) {
+    return _writeUtf8(relPath, JSON.stringify(obj, null, 2), 'writeJson');
+  }
+
+  /** Mirror one text file to <folder>/PalmAnnotate/<relPath>. Best-effort. */
+  async function writeText(relPath, text) {
+    return _writeUtf8(relPath, text, 'writeText');
+  }
+
+  function _safeSegment(segment) {
+    return String(segment || '')
+      .trim()
+      .replace(/^[.]+|[.]+$/g, '')
+      .replace(/[^A-Za-z0-9._ -]+/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 160);
+  }
+
+  /**
+   * Best-effort removal of a mirrored tree from the chosen public SAF folder.
+   * Mirrors may not exist (folder not chosen, grant revoked, file absent), so
+   * this always resolves and reports the number of files the provider removed.
+   */
+  async function deleteDatasetTree(treeName, sideCount) {
+    const folder = await current();
+    if (!folder) return { ok: false, skipped: true, removed: 0 };
+    const Saf = _plugin();
+    if (!Saf || typeof Saf.deletePath !== 'function') {
+      return { ok: false, skipped: true, removed: 0 };
+    }
+    const stem = _safeSegment(treeName);
+    if (!stem) return { ok: false, removed: 0 };
+    const n = Math.max(1, Math.min(64, Math.floor(Number(sideCount) || 8)));
+    const paths = [];
+    for (let i = 1; i <= n; i++) {
+      paths.push(`dataset/images/field/${stem}_${i}.jpg`);
+      paths.push(`dataset/labels/field/${stem}_${i}.txt`);
+      paths.push(`Output TXT/field/${stem}_${i}.txt`);
+    }
+    paths.push(`dataset/metadata/${stem}.json`);
+    paths.push(`Output JSON/${stem}.json`);
+
+    let removed = 0;
+    for (const rel of paths) {
+      try {
+        const r = await Saf.deletePath({ treeUri: folder.uri, relPath: ROOT + rel });
+        if (r && r.removed) removed += 1;
+      } catch (e) {
+        console.warn('[SafStore] deletePath failed for', rel, e);
+      }
+    }
+    return { ok: true, removed };
+  }
+
+  return { isSupported, current, pickFolder, clearFolder, writeImage, writeJson, writeText, deleteDatasetTree };
 })();
 
 window.SafStore = SafStore;

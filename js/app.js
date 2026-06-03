@@ -330,9 +330,10 @@ document.addEventListener('DOMContentLoaded', () => {
         name: t.name,
         split: t.split || 'field',
         metadata: t.metadata || {},
-        sides: (t.sides || []).map(s => ({
-          imageFile: null, labelFile: null,
+        sides: (t.sides || []).map((s, i) => ({
+          imageFile: { name: `${t.name}_${i + 1}.jpg` }, labelFile: null,
           imageUri: s.imageUri || null, labelUri: s.labelUri || null,
+          cacheBust: s.cacheBust || null,
         })),
       });
     }
@@ -838,6 +839,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const method = saveResult.method === 'filesystem'
         ? 'output folder'
         : (saveResult.method === 'native' ? 'PalmAnnotate app storage' : 'download');
+      if (window.SafStore && SafStore.isSupported && SafStore.isSupported()) {
+        try { await SafStore.writeJson('Output JSON/' + filename, outputJson); } catch (_) {}
+      }
       if (!opts.silent) _showToast(`Saved: ${filename} (${method})`, 'success');
       console.log('[Output]', filename, '→', saveResult.method);
 
@@ -896,8 +900,13 @@ document.addEventListener('DOMContentLoaded', () => {
         continue;
       }
       const res = await FsOutput.saveLabelFile(filename, content, snapshot.split, { allowDownload: false });
-      if (res.ok) saved++;
-      else { failed++; console.warn('[Labels] failed:', filename, res.error); }
+      if (res.ok) {
+        saved++;
+        if (window.SafStore && SafStore.isSupported && SafStore.isSupported() && SafStore.writeText) {
+          const split = snapshot.split && snapshot.split !== 'unknown' ? snapshot.split : 'field';
+          try { await SafStore.writeText(`Output TXT/${split}/${filename}`, content); } catch (_) {}
+        }
+      } else { failed++; console.warn('[Labels] failed:', filename, res.error); }
     }
     if (saved > 0) {
       _showToast(`Saved ${saved} label .txt file(s) to the label folder`, 'success');

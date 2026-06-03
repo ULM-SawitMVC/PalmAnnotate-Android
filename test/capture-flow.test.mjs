@@ -5,12 +5,13 @@ import assert from 'node:assert';
 import { loadModule } from './_harness.mjs';
 import { makeDom, findByText, getByText, waitFor } from './dom-stub.mjs';
 
-function makeCaptureContext(shots) {
+function makeCaptureContext(shots, opts = {}) {
   const dom = makeDom();
   const writes = { images: [], metadata: [] };
   const adapter = {
     async persistDatasetImage(relPath, blob) {
       writes.images.push({ relPath, blob });
+      if (opts.persistNoUri) return {};
       return {
         uri: 'native://documents/PalmAnnotate/dataset/' + relPath,
         file: { name: relPath.split('/').pop(), relPath },
@@ -45,7 +46,7 @@ function makeCaptureContext(shots) {
       navigator: {},
       URL: URLStub,
       CaptureSources: { default: () => source },
-      Storage: { active: () => adapter },
+      Storage: { active: () => adapter, isNative: () => !!opts.native },
     },
   });
   return { ctx, dom, writes, urls };
@@ -96,6 +97,28 @@ test('CaptureFlow captures a multi-side field tree and persists it under dataset
   assert.equal(writes.metadata[0].data.variety, 'DAMIMAS');
   assert.equal(tree.sides[0].imageUri, 'native://documents/PalmAnnotate/dataset/' + writes.images[0].relPath);
   assert.equal(dom.document.body.children.length, 0, 'capture overlay is removed after completion');
+});
+
+test('CaptureFlow aborts native capture when app-storage photo persistence returns no uri', async () => {
+  const shots = [
+    { blob: new Blob(['side1'], { type: 'image/jpeg' }), width: 1000, height: 800 },
+    { blob: new Blob(['side2'], { type: 'image/jpeg' }), width: 1000, height: 800 },
+  ];
+  const { ctx, dom, writes } = makeCaptureContext(shots, { native: true, persistNoUri: true });
+
+  const promise = ctx.CaptureFlow.start({ sideCount: 2 });
+  dom.document.querySelector('select').value = 'DAMIMAS';
+  getByText(dom.document.body, 'button', 'Start Capture').click();
+  (await waitButton(dom.document.body, 'Capture')).click();
+  (await waitButton(dom.document.body, 'Use Photo')).click();
+  (await waitButton(dom.document.body, 'Capture')).click();
+  (await waitButton(dom.document.body, 'Use Photo')).click();
+
+  const tree = await promise;
+  assert.equal(tree, null, 'broken native persist must not record a reusable stale tree');
+  assert.equal(writes.images.length, 1, 'persist was attempted');
+  assert.equal(writes.metadata.length, 0, 'metadata is not written after image persist failure');
+  assert.equal(dom.document.body.children.length, 0, 'capture overlay is removed after failure');
 });
 
 test('CaptureFlow cancel from side capture leaves no dataset writes', async () => {

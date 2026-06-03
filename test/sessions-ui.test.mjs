@@ -22,11 +22,15 @@ function makeLocalStorage() {
 }
 
 // Boot SessionsUI + SessionStore into one shared context with a fresh DOM.
-function boot() {
+function boot(extra = {}) {
   const dom = makeDom();
   const quiet = { ...console, info() {}, warn() {} };
+  const globals = Object.assign(
+    { document: dom.document, localStorage: makeLocalStorage(), console: quiet },
+    extra.globals || {}
+  );
   const ctx = loadModule(['js/persist/session-store.js', 'js/sessions.js'], {
-    globals: { document: dom.document, localStorage: makeLocalStorage(), console: quiet },
+    globals,
   });
   const container = dom.document.createElement('div');
   dom.document.body.appendChild(container);
@@ -43,10 +47,10 @@ function boot() {
 
   ctx.SessionsUI.init({
     container,
-    hooks: {
+    hooks: Object.assign({
       capture: captureHook,
       openPohon: (name, sessionId) => { opened.push(name); openedWith.push({ name, sessionId }); },
-    },
+    }, extra.hooks || {}),
   });
 
   return { dom, container, SessionsUI: ctx.SessionsUI, SessionStore: ctx.SessionStore, opened, openedWith };
@@ -147,6 +151,47 @@ test('deleting a tree asks for confirmation first, then removes it', async () =>
   await waitFor(() => container.querySelector('.sheet__empty'));
   fresh = await SessionStore.getSession(s.id);
   assert.equal(fresh.trees.length, 0, 'confirmed delete drops the pohon from the session');
+});
+
+test('deleting a session removes all of its tree files and stale registries', async () => {
+  const deleted = [];
+  const removedFromMemory = [];
+  const clearedHandles = [];
+  const { dom, container, SessionsUI, SessionStore } = boot({
+    globals: {
+      Storage: {
+        isNative: () => true,
+        active: () => ({
+          async deleteDatasetTree(name, sideCount) { deleted.push({ name, sideCount }); return { ok: true, removed: 1 }; },
+        }),
+      },
+      DatasetManager: { removeByName(name) { removedFromMemory.push(name); return 1; } },
+      ProjectConfig: { clearSavedHandle(name) { clearedHandles.push(name); } },
+    },
+  });
+
+  const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B', sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
+  await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0002', treeId: 2, sideCount: 8 });
+  await SessionStore.addCapturedTree({ name: 'DAMIMAS_A21B_0001', sides: [] });
+  await SessionStore.addCapturedTree({ name: 'DAMIMAS_A21B_0002', sides: [] });
+  await SessionStore.saveSnapshot('DAMIMAS_A21B_0001', { dirty: true });
+
+  await SessionsUI.showHome();
+  container.querySelector('.list-row__del').click();
+  await waitFor(() => dom.document.body.querySelector('.pa-modal'));
+  dom.document.body.querySelector('.pa-modal__btn--danger').click();
+  await waitFor(() => deleted.length === 2);
+  assert.equal((await SessionStore.getSessions()).length, 0);
+
+  assert.deepEqual(deleted, [
+    { name: 'DAMIMAS_A21B_0001', sideCount: 4 },
+    { name: 'DAMIMAS_A21B_0002', sideCount: 8 },
+  ]);
+  assert.deepEqual(removedFromMemory, ['DAMIMAS_A21B_0001', 'DAMIMAS_A21B_0002']);
+  assert.deepEqual(clearedHandles, ['DAMIMAS_A21B_0001', 'DAMIMAS_A21B_0002']);
+  assert.deepEqual(await SessionStore.getCapturedRegistry(), []);
+  assert.equal(await SessionStore.loadSnapshot('DAMIMAS_A21B_0001'), null);
 });
 
 test('Start-Session form creates a session locked to the typed variety+block', async () => {

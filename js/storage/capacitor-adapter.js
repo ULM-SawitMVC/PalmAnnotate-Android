@@ -284,13 +284,19 @@ const CapacitorAdapter = (() => {
     await _ensureBase();
     const n = Math.max(1, Math.min(64, Math.floor(Number(sideCount) || 8)));
     const candidates = [];
+    const imageSplits = ['field', 'train', 'val', 'test'];
+    const imageExts = ['jpg', 'jpeg', 'png'];
+    const labelSplits = ['field', 'train', 'val', 'test'];
     for (let i = 1; i <= n; i++) {
-      // Captured trees use split 'field'; include 'train' in case a side was
-      // ever filed there, plus both label locations.
-      candidates.push(DATASET + `/images/field/${stem}_${i}.jpg`);
-      candidates.push(DATASET + `/images/train/${stem}_${i}.jpg`);
-      candidates.push(DATASET + `/labels/field/${stem}_${i}.txt`);
-      candidates.push(OUTPUT_TXT + `/field/${stem}_${i}.txt`);
+      for (const split of imageSplits) {
+        for (const ext of imageExts) {
+          candidates.push(DATASET + `/images/${split}/${stem}_${i}.${ext}`);
+        }
+      }
+      for (const split of labelSplits) {
+        candidates.push(DATASET + `/labels/${split}/${stem}_${i}.txt`);
+        candidates.push(OUTPUT_TXT + `/${split}/${stem}_${i}.txt`);
+      }
     }
     candidates.push(DATASET + `/metadata/${stem}.json`);
     candidates.push(OUTPUT_JSON + `/${stem}.json`);
@@ -381,7 +387,14 @@ const CapacitorAdapter = (() => {
    */
   function imageUrlFor(side) {
     if (!side || !side.imageUri) return null;
-    return window.Capacitor.convertFileSrc(side.imageUri);
+    const url = window.Capacitor.convertFileSrc(side.imageUri);
+    // WebView can cache file:///_capacitor_file_ URLs aggressively. Reusing the
+    // same tree id therefore reuses the same src URL and can show the old photo
+    // even after the file was deleted/overwritten. CaptureFlow stores a fresh
+    // cacheBust token per capture; append it as a harmless query string.
+    const bust = side.cacheBust || side.imageVersion || '';
+    if (!bust) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'v=' + encodeURIComponent(String(bust));
   }
 
   /**

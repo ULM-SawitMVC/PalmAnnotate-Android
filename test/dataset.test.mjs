@@ -122,3 +122,17 @@ test('addCapturedTree appends and selects the new tree', () => {
   assert.equal(DM.getTree().name, 'CAPTURED_0001');
   assert.equal(DM.findByName('CAPTURED_0001'), 1);
 });
+
+test('addCapturedTree replaces same-name stale trees and removeByName clears them', () => {
+  const DM = freshManager();
+  DM.addCapturedTree({ name: 'DAMIMAS_A21B_0001', split: 'field', sides: [{ imageUri: 'old' }] });
+  const idx = DM.addCapturedTree({ name: 'DAMIMAS_A21B_0001', split: 'field', sides: [{ imageUri: 'new' }] });
+
+  assert.equal(idx, 0);
+  assert.equal(DM.count(), 1, 'same tree name is replaced, not duplicated');
+  assert.equal(DM.getTree().sides[0].imageUri, 'new');
+
+  assert.equal(DM.removeByName('DAMIMAS_A21B_0001'), 1);
+  assert.equal(DM.count(), 0);
+  assert.equal(DM.findByName('DAMIMAS_A21B_0001'), -1);
+});

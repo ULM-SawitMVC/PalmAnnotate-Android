@@ -178,10 +178,14 @@ const SessionStore = (() => {
    */
   function _slimSides(sides) {
     if (!Array.isArray(sides)) return [];
-    return sides.map(s => ({
-      imageUri: (s && s.imageUri) || null,
-      labelUri: (s && s.labelUri) || null,
-    }));
+    return sides.map(s => {
+      const out = {
+        imageUri: (s && s.imageUri) || null,
+        labelUri: (s && s.labelUri) || null,
+      };
+      if (s && s.cacheBust) out.cacheBust = s.cacheBust;
+      return out;
+    });
   }
 
   /**

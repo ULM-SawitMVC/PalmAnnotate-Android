@@ -203,6 +203,51 @@ class SafPlugin : Plugin() {
         }
     }
 
+    // ── deletePath ────────────────────────────────────────────────────────────
+
+    /**
+     * Delete <treeUri>/<relPath> if it exists. Missing files resolve as
+     * { ok:true, removed:false } so callers can run broad cleanup sweeps.
+     */
+    @PluginMethod
+    fun deletePath(call: PluginCall) {
+        val treeUriStr = call.getString("treeUri")
+        val relPath = call.getString("relPath")
+
+        if (treeUriStr.isNullOrBlank() || relPath.isNullOrBlank()) {
+            call.reject("treeUri and relPath are required")
+            return
+        }
+
+        try {
+            val tree = DocumentFile.fromTreeUri(context, Uri.parse(treeUriStr))
+            if (tree == null) {
+                call.resolve(JSObject().put("ok", true).put("removed", false))
+                return
+            }
+            val segments = relPath.split('/').filter { it.isNotBlank() }
+            if (segments.isEmpty()) {
+                call.resolve(JSObject().put("ok", true).put("removed", false))
+                return
+            }
+
+            var node: DocumentFile = tree
+            for (i in 0 until segments.size - 1) {
+                val child = node.findFile(segments[i])
+                if (child == null || !child.isDirectory) {
+                    call.resolve(JSObject().put("ok", true).put("removed", false))
+                    return
+                }
+                node = child
+            }
+            val target = node.findFile(segments.last())
+            val removed = target?.delete() == true
+            call.resolve(JSObject().put("ok", true).put("removed", removed))
+        } catch (e: Exception) {
+            call.reject("deletePath failed: ${e.message}", e)
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     /** Human-readable folder name, falling back to the URI's last path segment. */
