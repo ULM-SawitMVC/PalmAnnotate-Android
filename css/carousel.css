@@ -399,3 +399,79 @@
     min-height: 44px;
   }
 }
+
+/* ============================================================================
+   Single-screen annotate chrome: compact topbar nav (Home / browse / tree
+   label / More) + bottom action row (Detect again / Next tree / Save & exit).
+   Only rendered when the host wires hooks (native field flow).
+   ========================================================================== */
+.crsl-topnav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.crsl-topbtn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0 0.6rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font-family: var(--f-body);
+  font-weight: 600;
+  font-size: 1rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.crsl-topbtn:active { transform: scale(0.96); }
+.crsl-topbtn--more { font-size: 0.85rem; }
+
+.crsl-treelabel {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Bottom action row. */
+.crsl-actionrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.crsl-action--detect { border-color: var(--c-border-hover); }
+.crsl-action--save {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+.crsl-action--next {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: #0c120c;
+  font-weight: 700;
+}
+.crsl-action--next:not(:disabled):active { transform: scale(0.97); }
+
+/* ── Native single-screen shell: hide the desktop tabs + header tree-nav so the
+   carousel fills the viewport. "More" reveals the tabs on demand. ─────────── */
+body.crsl-shell .tabs { display: none; }
+body.crsl-shell.crsl-show-tabs .tabs { display: flex; }
+body.crsl-shell .dataset-toolbar { display: none; }
+body.crsl-shell .editor-area { padding: 0; }
+body.crsl-shell #panel-carousel { padding: var(--space-sm); }
+body.crsl-shell .carousel-root { gap: var(--space-xs); }
+/* Give the image stage the lion's share of the screen. */
+body.crsl-shell .carousel-stage { flex: 1 1 auto; min-height: 52vh; }

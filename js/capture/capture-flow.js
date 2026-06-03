@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * CaptureFlow — the capture-first workflow (Phase 2).
+ * CaptureFlow — the capture-first workflow (Phase 2, reworked).
  *
  * An operator photographs ONE tree from N views (default 4), tagging the set
  * with metadata (variety, operator, timestamp, optional GPS). The accepted
@@ -9,10 +9,28 @@
  * datasetTree, which then flows into the existing annotation pipeline exactly
  * like a folder-loaded tree.
  *
+ * The reworked flow is friction-free:
+ *   - Session mode jumps STRAIGHT to a single embedded live-camera surface
+ *     (no pre-photo metadata screen): auto-ID is already known and GPS is
+ *     grabbed silently in the background; manual-ID sessions get a small inline
+ *     ID field on the camera surface.
+ *   - Each side is captured WITHOUT a per-side review popup — tap the shutter
+ *     and the surface advances to the next side, the camera stream staying live.
+ *   - After the last side, ONE swipe-review carousel shows every shot with a
+ *     per-shot Retake plus Save / Cancel.
+ *   - Freeform capture (no session) keeps a minimal variety/operator form, then
+ *     uses the exact same embedded camera + review.
+ *
+ * The camera streams INSIDE the app via CaptureSource.openPreview()/grab()
+ * (WebView getUserMedia). Sources without a live preview (e.g. Orbbec) fall back
+ * to a one-shot Capture button calling source.capture(); the rest of the flow is
+ * identical.
+ *
  * Public API:
  *   CaptureFlow.start(opts) -> Promise<datasetTree|null>
  *     opts:
  *       sideCount   : number   (default 4)
+ *       session     : {variety, blok, treeId, autoId, operator, sideCount}
  *       onProgress  : (step, total) => void   // fired as each side is accepted
  *       onTreeReady : (datasetTree) => void    // fired once before resolve
  *
@@ -21,9 +39,7 @@
  *     sides:[ { imageFile, imageUri, labelFile:null, labelUri:null } ] }
  *
  * All UI is built/removed here (appended to document.body) and styled via
- * css/capture.css. Capture sources come from CaptureSources; when an optional
- * USB source such as Orbbec is attached, the side-capture panel exposes a
- * camera selector instead of silently using the built-in camera.
+ * css/capture.css.
  */
 const CaptureFlow = (() => {
 
@@ -102,6 +118,14 @@ const CaptureFlow = (() => {
     return builtin || available[0];
   }
 
+  /** Whether a source can stream an in-page live preview. */
+  function _isLiveSource(src) {
+    return !!(src &&
+              typeof src.supportsLivePreview === 'function' && src.supportsLivePreview() &&
+              typeof src.openPreview === 'function' &&
+              typeof src.grab === 'function');
+  }
+
   /**
    * Build the canonical session-mode stem: `${VARIETY}_${BLOK}_${0001}`, e.g.
    * DAMIMAS_A21B_0001. Blok is sanitized so "A 21B" → "A21B". Side numbers and
@@ -139,10 +163,9 @@ const CaptureFlow = (() => {
   }
 
   /**
-   * Build the optional "Get GPS" field used by both the freeform and
-   * session-locked metadata forms. Returns the field element plus a getter for
-   * the last resolved position (or null). Best-effort and never throws — see
-   * _getPosition().
+   * Build the optional "Get GPS" field used by the freeform metadata form.
+   * Returns the field element plus a getter for the last resolved position (or
+   * null). Best-effort and never throws — see _getPosition().
    */
   function _buildGpsField() {
     let gps = null;
@@ -176,11 +199,12 @@ const CaptureFlow = (() => {
     return { field: gpsField, get: () => gps };
   }
 
-  // ── Step 1: metadata form ───────────────────────────────────────────────────
+  // ── Freeform metadata form (no session) ─────────────────────────────────────
 
   /**
    * Render the metadata form into `overlay` and resolve with a metadata object
-   * when the operator continues, or null if they cancel.
+   * when the operator continues, or null if they cancel. Only used for freeform
+   * capture; session mode jumps straight to the camera.
    * @returns {Promise<{variety,operator,timestamp,gps}|null>}
    */
   function _collectMetadata(overlay) {
@@ -272,88 +296,9 @@ const CaptureFlow = (() => {
     });
   }
 
-  // ── Step 1 (session mode): locked metadata for one pohon ────────────────────
-
-  /**
-   * Render the per-pohon panel when capture is driven by a session locked to a
-   * variety+blok. The variety/blok are shown as a read-only badge; only the
-   * tree id is collected (read-only when the session is in auto-ID mode, an
-   * editable number otherwise). Resolves with the metadata for this pohon, or
-   * null on cancel.
-   * @param {object} overlay
-   * @param {{variety, blok, treeId, autoId, operator}} session
-   * @returns {Promise<{variety,blok,treeId,operator,timestamp,gps}|null>}
-   */
-  function _collectLockedMetadata(overlay, session) {
-    return new Promise((resolve) => {
-      overlay.innerHTML = '';
-      const panel = _el('div', 'capture-panel capture-meta');
-
-      panel.appendChild(_el('h2', 'capture-title', 'New Tree'));
-
-      // Locked variety·blok badge.
-      const lock = _el('div', 'capture-lock');
-      lock.appendChild(_el('span', 'capture-lock__icon', '🔒'));
-      const lockText = _el('div', 'capture-lock__text');
-      lockText.appendChild(_el('span', 'capture-lock__variety', session.variety || ''));
-      lockText.appendChild(_el('span', 'capture-lock__blok',
-        session.blok ? `Block ${session.blok}` : 'No block'));
-      lock.appendChild(lockText);
-      panel.appendChild(lock);
-
-      const form = _el('div', 'capture-form');
-
-      // Tree id — auto (read-only) or manual (editable number).
-      const startId = Math.max(1, Math.floor(Number(session.treeId) || 1));
-      const idField = _el('label', 'capture-field');
-      idField.appendChild(_el('span', 'capture-field__label', 'Tree ID'));
-      const idInput = _el('input', 'capture-input' + (session.autoId ? ' capture-input--readonly' : ''));
-      idInput.type = session.autoId ? 'text' : 'number';
-      idInput.value = session.autoId ? _pad4(startId) : String(startId);
-      if (session.autoId) idInput.readOnly = true;
-      else { idInput.min = '1'; idInput.step = '1'; }
-      idField.appendChild(idInput);
-      form.appendChild(idField);
-
-      // GPS — best-effort, skippable (per pohon).
-      const gpsCtl = _buildGpsField();
-      form.appendChild(gpsCtl.field);
-
-      panel.appendChild(form);
-
-      const actions = _el('div', 'capture-actions');
-      const cancelBtn = _el('button', 'capture-btn capture-btn--ghost', 'Cancel');
-      cancelBtn.type = 'button';
-      const startBtn = _el('button', 'capture-btn capture-btn--primary', 'Start Capture');
-      startBtn.type = 'button';
-      actions.appendChild(cancelBtn);
-      actions.appendChild(startBtn);
-      panel.appendChild(actions);
-
-      overlay.appendChild(panel);
-
-      cancelBtn.addEventListener('click', () => resolve(null));
-      startBtn.addEventListener('click', () => {
-        let treeId = startId;
-        if (!session.autoId) {
-          const parsed = Math.floor(Number(idInput.value));
-          if (Number.isFinite(parsed) && parsed >= 1) treeId = parsed;
-        }
-        resolve({
-          variety: session.variety,
-          blok: session.blok,
-          treeId,
-          operator: session.operator || '',
-          timestamp: new Date().toISOString(),
-          gps: gpsCtl.get(),
-        });
-      });
-    });
-  }
-
   // Hard ceiling on how long we wait for a fix before giving up. A GPS cold
   // start outdoors can take a while; 15s balances "give it a real chance"
-  // against "don't trap the operator on the metadata form".
+  // against "don't trap the operator".
   const GPS_TIMEOUT_MS = 15000;
 
   /**
@@ -435,128 +380,282 @@ const CaptureFlow = (() => {
     return null;
   }
 
-  // ── Step 2: per-side capture + review ───────────────────────────────────────
-
   /**
-   * Render the "Side i / N" capture panel and drive one side to completion:
-   * capture → preview with Retake/Use. Resolves with the accepted blob, or null
-   * if the operator cancels the whole flow from this panel.
-   * @returns {Promise<{blob:Blob, width:number, height:number}|null>}
+   * Build the "Side i / N" progress header with a row of step dots. Dots are
+   * marked done from the `shots` array (an accepted shot per side) so the header
+   * reflects real progress, with the current side highlighted.
    */
-  function _captureSide(overlay, sideNum, sideCount) {
-    return new Promise((resolve) => {
-      let source = null;
-      let availableSources = [];
-
-      async function shoot() {
-        overlay.innerHTML = '';
-        const panel = _el('div', 'capture-panel capture-side');
-        panel.appendChild(_buildProgress(sideNum, sideCount));
-        panel.appendChild(_el('p', 'capture-subtitle',
-          'Frame the side, then capture.'));
-
-        availableSources = await _availableSources();
-        source = _chooseSource(availableSources);
-        if (!source) {
-          panel.appendChild(_el('p', 'capture-subtitle',
-            'No camera source is available.'));
-        } else if (availableSources.length > 1) {
-          const row = _el('label', 'capture-source');
-          row.appendChild(_el('span', 'capture-source__label', 'Camera'));
-          const select = document.createElement('select');
-          select.className = 'capture-source__select';
-          for (const src of availableSources) {
-            const opt = document.createElement('option');
-            opt.value = src.id;
-            opt.textContent = src.name || src.id;
-            opt.selected = src.id === source.id;
-            select.appendChild(opt);
-          }
-          select.addEventListener('change', () => {
-            _selectedSourceId = select.value;
-            source = _chooseSource(availableSources);
-          });
-          row.appendChild(select);
-          panel.appendChild(row);
-        } else {
-          panel.appendChild(_el('p', 'capture-source capture-source--single',
-            `Camera: ${source.name || source.id}`));
-        }
-
-        const actions = _el('div', 'capture-actions');
-        const cancelBtn = _el('button', 'capture-btn capture-btn--ghost', 'Cancel');
-        cancelBtn.type = 'button';
-        const shootBtn = _el('button', 'capture-btn capture-btn--primary', 'Capture');
-        shootBtn.type = 'button';
-        shootBtn.disabled = !source;
-        actions.appendChild(cancelBtn);
-        actions.appendChild(shootBtn);
-        panel.appendChild(actions);
-        overlay.appendChild(panel);
-
-        cancelBtn.addEventListener('click', () => resolve(null));
-        shootBtn.addEventListener('click', async () => {
-          shootBtn.disabled = true;
-          let result = null;
-          try {
-            result = await source.capture();
-          } catch (e) {
-            console.warn('[CaptureFlow] capture() failed:', e);
-            result = null;
-          }
-          shootBtn.disabled = false;
-          // null = the source's own UI was cancelled; stay on this side.
-          if (result) review(result);
-        });
-      }
-
-      function review(result) {
-        overlay.innerHTML = '';
-        const panel = _el('div', 'capture-panel capture-review');
-        panel.appendChild(_buildProgress(sideNum, sideCount));
-
-        const preview = _el('div', 'capture-preview');
-        const img = _el('img', 'capture-preview__img');
-        const url = URL.createObjectURL(result.blob);
-        img.src = url;
-        // Revoke the preview URL once the browser has decoded it.
-        img.addEventListener('load', () => URL.revokeObjectURL(url), { once: true });
-        preview.appendChild(img);
-        panel.appendChild(preview);
-
-        const actions = _el('div', 'capture-actions capture-actions--review');
-        const retakeBtn = _el('button', 'capture-btn capture-btn--outline', 'Retake');
-        retakeBtn.type = 'button';
-        const useBtn = _el('button', 'capture-btn capture-btn--primary', 'Use Photo');
-        useBtn.type = 'button';
-        actions.appendChild(retakeBtn);
-        actions.appendChild(useBtn);
-        panel.appendChild(actions);
-        overlay.appendChild(panel);
-
-        retakeBtn.addEventListener('click', () => shoot());
-        useBtn.addEventListener('click', () => resolve(result));
-      }
-
-      shoot();
-    });
-  }
-
-  /**
-   * Build the "Side i / N" progress header with a row of step dots.
-   */
-  function _buildProgress(sideNum, sideCount) {
+  function _buildProgress(sideNum, sideCount, shots) {
     const wrap = _el('div', 'capture-progress');
     wrap.appendChild(_el('h2', 'capture-title', `Side ${sideNum} / ${sideCount}`));
     const dots = _el('div', 'capture-progress__dots');
     for (let i = 1; i <= sideCount; i++) {
       const dot = _el('span', 'capture-dot');
-      if (i < sideNum) dot.classList.add('capture-dot--done');
+      if (shots && shots[i - 1]) dot.classList.add('capture-dot--done');
       else if (i === sideNum) dot.classList.add('capture-dot--active');
       dots.appendChild(dot);
     }
     wrap.appendChild(dots);
     return wrap;
+  }
+
+  // ── Step 2: embedded capture surface (popup-free) ───────────────────────────
+
+  /**
+   * Drive a set of side `targets` (e.g. [0,1,2,3] for the first pass, or [2] for
+   * a single retake) on ONE persistent capture surface. The live camera stream
+   * stays mounted across sides; tapping the shutter grabs a frame and advances
+   * to the next target immediately — no per-side confirm. Accepted shots are
+   * written into `shots[sideIndex]`.
+   *
+   * Resolves true when every target is captured, or false if the operator
+   * cancels. Sources without a live preview fall back to a Capture button that
+   * calls source.capture() per side.
+   *
+   * @returns {Promise<boolean>}
+   */
+  function _capturePass(overlay, shots, targets, sideCount, opts, ctl) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let busy = false;
+      let ti = 0;                 // index into targets
+      let source = null;
+      let available = [];
+      let live = false;
+      let stopPreview = null;
+      let video = null;
+      let progressHost = null;
+
+      function finish(val) {
+        if (settled) return;
+        settled = true;
+        if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
+        resolve(val);
+      }
+
+      function _renderProgress() {
+        if (!progressHost) return;
+        progressHost.innerHTML = '';
+        const sideNum = (targets[ti] != null ? targets[ti] : targets[targets.length - 1]) + 1;
+        progressHost.appendChild(_buildProgress(sideNum, sideCount, shots));
+      }
+
+      async function _capture() {
+        if (busy || settled) return;
+        busy = true;
+        let shot = null;
+        try {
+          if (live && video) shot = await source.grab(video);
+          else if (source) shot = await source.capture();
+        } catch (e) {
+          console.warn('[CaptureFlow] capture failed:', e);
+          shot = null;
+        }
+        busy = false;
+        // null = the source's own UI was cancelled / encode failed; stay here.
+        if (!shot) return;
+        const sideIndex = targets[ti];
+        if (ctl) shot.sideIndex = sideIndex;
+        shots[sideIndex] = shot;
+        ti++;
+        if (opts.onProgress) opts.onProgress(shots.filter(Boolean).length, sideCount);
+        if (ti >= targets.length) { finish(true); return; }
+        _renderProgress();
+      }
+
+      async function _buildSurface() {
+        overlay.innerHTML = '';
+        available = await _availableSources();
+        source = _chooseSource(available);
+        live = _isLiveSource(source);
+
+        const panel = _el('div', 'capture-panel capture-live');
+
+        // Top: side indicator + dots, plus optional source select / manual ID.
+        const top = _el('div', 'capture-live__top');
+        progressHost = _el('div', 'capture-live__progress');
+        top.appendChild(progressHost);
+
+        if (available.length > 1) {
+          const row = _el('label', 'capture-source capture-source--inline');
+          row.appendChild(_el('span', 'capture-source__label', 'Camera'));
+          const select = _el('select', 'capture-source__select');
+          for (const src of available) {
+            const opt = _el('option', null, src.name || src.id);
+            opt.value = src.id;
+            if (src.id === (source && source.id)) opt.selected = true;
+            select.appendChild(opt);
+          }
+          select.addEventListener('change', () => {
+            _selectedSourceId = select.value;
+            // Re-open the surface with the newly chosen source.
+            if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
+            _buildSurface();
+          });
+          row.appendChild(select);
+          top.appendChild(row);
+        }
+
+        // Manual-ID sessions: a small inline numeric ID field (auto-ID hides it).
+        if (ctl && ctl.manualIdEnabled) {
+          const idRow = _el('label', 'capture-source capture-source--inline');
+          idRow.appendChild(_el('span', 'capture-source__label', 'Tree ID'));
+          const idInput = _el('input', 'capture-source__select capture-idinput');
+          idInput.type = 'number';
+          idInput.min = '1';
+          idInput.step = '1';
+          idInput.value = String(ctl.manualId || 1);
+          const syncId = () => {
+            const parsed = Math.floor(Number(idInput.value));
+            if (Number.isFinite(parsed) && parsed >= 1) ctl.manualId = parsed;
+          };
+          idInput.addEventListener('change', syncId);
+          idInput.addEventListener('input', syncId);
+          // Keep a reference so the final tree id can be read at save time even
+          // if no change/input event fired (e.g. programmatic value set).
+          ctl.idEl = idInput;
+          idRow.appendChild(idInput);
+          top.appendChild(idRow);
+        }
+
+        panel.appendChild(top);
+
+        // Stage: live <video>, or a placeholder for one-shot sources (Orbbec).
+        const stage = _el('div', 'capture-live__stage');
+        if (live) {
+          video = _el('video', 'capture-live__video');
+        } else {
+          video = null;
+          stage.appendChild(_el('div', 'capture-live__placeholder',
+            source ? `Tap Capture (${source.name || source.id})` : 'No camera available'));
+        }
+        if (video) stage.appendChild(video);
+        panel.appendChild(stage);
+
+        // Controls — Cancel + the big Capture shutter. CSS positions the shutter
+        // on the right (tablet/landscape) or bottom (phone/portrait).
+        const controls = _el('div', 'capture-live__controls');
+        const cancelBtn = _el('button', 'capture-btn capture-btn--ghost capture-live__cancel', 'Cancel');
+        cancelBtn.type = 'button';
+        const shootBtn = _el('button', 'capture-btn capture-btn--primary capture-live__shoot', 'Capture');
+        shootBtn.type = 'button';
+        shootBtn.disabled = !source;
+        controls.appendChild(cancelBtn);
+        controls.appendChild(shootBtn);
+        panel.appendChild(controls);
+
+        overlay.appendChild(panel);
+
+        cancelBtn.addEventListener('click', () => finish(false));
+        shootBtn.addEventListener('click', () => _capture());
+
+        _renderProgress();
+
+        // Open the live stream into the video (reused across all targets).
+        if (live && video) {
+          try {
+            stopPreview = await source.openPreview(video);
+          } catch (e) {
+            console.info('[CaptureFlow] live preview unavailable, using one-shot capture:', e);
+            live = false;
+            stopPreview = null;
+            if (!settled) _buildSurface();
+          }
+        }
+      }
+
+      _buildSurface();
+    });
+  }
+
+  // ── Step 3: review every shot (swipe carousel + per-shot retake) ─────────────
+
+  /**
+   * Show all captured shots in a single swipeable strip. Each shot has a Retake
+   * control; the operator decides once at the end. Resolves with:
+   *   { action: 'save' }            — persist the tree
+   *   { action: 'cancel' }          — abort the whole capture
+   *   { action: 'retake', index }   — re-shoot one side, then return here
+   */
+  function _reviewAll(overlay, shots, sideCount) {
+    return new Promise((resolve) => {
+      overlay.innerHTML = '';
+      const urls = [];
+      const panel = _el('div', 'capture-panel capture-reviewall');
+
+      panel.appendChild(_el('h2', 'capture-title', 'Review photos'));
+      panel.appendChild(_el('p', 'capture-subtitle',
+        `Swipe through the ${sideCount} sides. Retake any, then save.`));
+
+      const strip = _el('div', 'capture-reviewall__strip');
+      for (let i = 0; i < sideCount; i++) {
+        const shot = shots[i];
+        const slide = _el('div', 'capture-reviewall__slide');
+        slide.appendChild(_el('span', 'capture-reviewall__badge', `Side ${i + 1}`));
+        const img = _el('img', 'capture-reviewall__img');
+        if (shot && shot.blob) {
+          const url = URL.createObjectURL(shot.blob);
+          urls.push(url);
+          img.src = url;
+        }
+        slide.appendChild(img);
+        const retake = _el('button', 'capture-btn capture-btn--outline capture-reviewall__retake', 'Retake');
+        retake.type = 'button';
+        retake.addEventListener('click', () => done({ action: 'retake', index: i }));
+        slide.appendChild(retake);
+        strip.appendChild(slide);
+      }
+      panel.appendChild(strip);
+
+      const actions = _el('div', 'capture-actions capture-actions--review');
+      const cancelBtn = _el('button', 'capture-btn capture-btn--ghost', 'Cancel');
+      cancelBtn.type = 'button';
+      const saveBtn = _el('button', 'capture-btn capture-btn--primary', 'Save');
+      saveBtn.type = 'button';
+      actions.appendChild(cancelBtn);
+      actions.appendChild(saveBtn);
+      panel.appendChild(actions);
+
+      overlay.appendChild(panel);
+
+      let settled = false;
+      function done(val) {
+        if (settled) return;
+        settled = true;
+        for (const u of urls) { try { URL.revokeObjectURL(u); } catch (_) {} }
+        resolve(val);
+      }
+      cancelBtn.addEventListener('click', () => done({ action: 'cancel' }));
+      saveBtn.addEventListener('click', () => done({ action: 'save' }));
+    });
+  }
+
+  /**
+   * Capture every side, then loop on the review carousel until the operator
+   * saves or cancels. Returns the accepted shots (length === sideCount) or null
+   * if the capture was cancelled before saving.
+   * @returns {Promise<Array|null>}
+   */
+  async function _captureAllSides(overlay, sideCount, opts, ctl) {
+    const shots = new Array(sideCount).fill(null);
+
+    // First pass over every side.
+    const range = [];
+    for (let i = 0; i < sideCount; i++) range.push(i);
+    const ok = await _capturePass(overlay, shots, range, sideCount, opts, ctl);
+    if (!ok) return null;
+
+    // Review / retake loop.
+    for (;;) {
+      const decision = await _reviewAll(overlay, shots, sideCount);
+      if (decision.action === 'save') return shots;
+      if (decision.action === 'cancel') return null;
+      if (decision.action === 'retake') {
+        // Re-shoot just this side; cancelling the retake returns to review
+        // (it must not throw away the other shots).
+        await _capturePass(overlay, shots, [decision.index], sideCount, opts, ctl);
+      }
+    }
   }
 
   /**
@@ -570,7 +669,7 @@ const CaptureFlow = (() => {
     overlay.appendChild(panel);
   }
 
-  // ── Step 3: persist + build the datasetTree ─────────────────────────────────
+  // ── Step 4: persist + build the datasetTree ─────────────────────────────────
 
   /**
    * Persist the accepted side blobs and metadata via the active storage
@@ -688,8 +787,9 @@ const CaptureFlow = (() => {
    * @param {number}   [opts.sideCount=4]
    * @param {object}   [opts.session]     {variety, blok, treeId, autoId, operator}
    *                                       When present, capture is locked to that
-   *                                       session: variety/blok come from it and
-   *                                       the tree is named VARIETY_BLOK_0001.
+   *                                       session: variety/blok come from it, the
+   *                                       metadata screen is skipped, and the tree
+   *                                       is named VARIETY_BLOK_0001.
    * @param {function} [opts.onProgress]  (step, total) => void
    * @param {function} [opts.onTreeReady] (datasetTree) => void
    * @returns {Promise<object|null>} the datasetTree, or null if cancelled.
@@ -703,26 +803,46 @@ const CaptureFlow = (() => {
     const overlay = _mountOverlay();
 
     try {
-      // (a) metadata — locked per-pohon form in session mode, full form otherwise.
-      const metadata = session
-        ? await _collectLockedMetadata(overlay, session)
-        : await _collectMetadata(overlay);
-      if (!metadata) { _teardown(overlay); return null; }
+      // (a) metadata. Freeform shows the form; session mode skips it and grabs
+      //     GPS silently in the background while the operator shoots.
+      let metadata;
+      let gpsPromise = null;
+      const ctl = { manualId: 1, manualIdEnabled: false };
 
-      // (b) filesystem-safe tree name.
-      //   session : ${VARIETY}_${BLOK}_${0001}
-      //   freeform: ${variety}_${YYYYMMDD}_${seq}
-      const treeName = session
-        ? _treeNameFor(metadata.variety, metadata.blok, metadata.treeId)
-        : `${_safe(metadata.variety)}_${_yyyymmdd(new Date())}_${_nextSeq()}`;
+      if (session) {
+        ctl.manualIdEnabled = !session.autoId;
+        ctl.manualId = Math.max(1, Math.floor(Number(session.treeId) || 1));
+        metadata = {
+          variety: session.variety,
+          blok: session.blok,
+          treeId: ctl.manualId,
+          operator: session.operator || '',
+          timestamp: new Date().toISOString(),
+          gps: null,
+        };
+        gpsPromise = _getPosition().catch(() => null);
+      } else {
+        metadata = await _collectMetadata(overlay);
+        if (!metadata) { _teardown(overlay); return null; }
+      }
 
-      // (c) capture each side, with retake/use review.
-      const shots = [];
-      for (let i = 1; i <= sideCount; i++) {
-        const shot = await _captureSide(overlay, i, sideCount);
-        if (!shot) { _teardown(overlay); return null; } // cancelled mid-flow
-        shots.push(shot);
-        if (onProgress) onProgress(i, sideCount);
+      // (b) capture every side (embedded, popup-free) + final review.
+      const shots = await _captureAllSides(overlay, sideCount, { onProgress }, ctl);
+      if (!shots) { _teardown(overlay); return null; } // cancelled
+
+      // (c) finalise tree name / id (manual ID may have been edited inline).
+      let treeName;
+      if (session) {
+        // Manual ID may have been typed inline; read the latest value.
+        if (ctl.idEl) {
+          const parsed = Math.floor(Number(ctl.idEl.value));
+          if (Number.isFinite(parsed) && parsed >= 1) ctl.manualId = parsed;
+        }
+        metadata.treeId = ctl.manualId;
+        treeName = _treeNameFor(metadata.variety, metadata.blok, metadata.treeId);
+        if (gpsPromise) { try { metadata.gps = await gpsPromise; } catch (_) {} }
+      } else {
+        treeName = `${_safe(metadata.variety)}_${_yyyymmdd(new Date())}_${_nextSeq()}`;
       }
 
       // (d) persist + build tree

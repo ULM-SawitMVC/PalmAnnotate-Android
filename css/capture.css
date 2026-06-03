@@ -406,3 +406,181 @@ select.capture-input {
     padding-right: clamp(var(--space-lg), 8vw, 96px);
   }
 }
+
+/* ============================================
+   Embedded capture surface (in-app live camera)
+   One persistent full-bleed video; no per-side
+   review popups. Capture button sits on the
+   RIGHT in landscape/tablet, BOTTOM in portrait.
+   ============================================ */
+.capture-live {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.capture-live__stage {
+  position: absolute;
+  inset: 0;
+}
+
+.capture-live__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.capture-live__placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--c-text-muted);
+  font-size: 1rem;
+}
+
+.capture-live__top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: calc(var(--space-md) + env(safe-area-inset-top))
+           calc(var(--space-md) + env(safe-area-inset-right))
+           var(--space-md)
+           calc(var(--space-md) + env(safe-area-inset-left));
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+  pointer-events: none;
+}
+.capture-live__top > * { pointer-events: auto; }
+
+.capture-live__progress .capture-title { font-size: 1.4rem; }
+.capture-live__progress .capture-progress { gap: var(--space-sm); }
+
+/* Inline source / tree-id controls in the top bar. */
+.capture-source--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.capture-source--inline .capture-source__select {
+  min-height: 44px;
+  width: auto;
+  min-width: 110px;
+}
+
+/* Controls layer: Cancel + the big Capture button. */
+.capture-live__controls {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.capture-live__shoot {
+  min-width: 128px;
+  min-height: 64px;
+  font-size: 1.05rem;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+.capture-live__cancel {
+  min-height: 56px;
+  color: var(--c-text);
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--c-border-hover);
+}
+
+/* Phone / portrait: controls along the bottom, shutter centered. */
+@media (orientation: portrait) {
+  .capture-live__controls {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    flex-direction: row;
+    justify-content: center;
+    padding: var(--space-lg);
+    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+  }
+  .capture-live__cancel { position: absolute; left: var(--space-lg); bottom: calc(var(--space-lg) + env(safe-area-inset-bottom)); }
+}
+
+/* Tablet / landscape: controls stacked on the right edge, shutter centered. */
+@media (orientation: landscape) {
+  .capture-live__controls {
+    top: 0;
+    bottom: 0;
+    right: 0;
+    flex-direction: column-reverse;
+    justify-content: center;
+    padding: var(--space-lg);
+    padding-right: calc(var(--space-lg) + env(safe-area-inset-right));
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.6), transparent);
+  }
+  .capture-live__cancel { position: absolute; top: calc(var(--space-lg) + env(safe-area-inset-top)); right: var(--space-lg); }
+}
+
+/* ============================================
+   End-of-capture review (swipe all shots)
+   ============================================ */
+.capture-reviewall {
+  max-width: 760px;
+}
+
+.capture-reviewall__strip {
+  display: flex;
+  gap: var(--space-md);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--space-sm);
+}
+
+.capture-reviewall__slide {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.capture-reviewall__badge {
+  font-family: var(--f-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--c-text-dim);
+}
+
+.capture-reviewall__img {
+  width: 100%;
+  max-height: 56vh;
+  object-fit: contain;
+  border-radius: var(--r-lg);
+  background: #000;
+  border: 1px solid var(--c-border);
+}
+
+.capture-reviewall__retake {
+  align-self: center;
+  min-width: 140px;
+}

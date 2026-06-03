@@ -194,6 +194,48 @@ test('web getUserMedia capture cancel stops stream and removes camera overlay', 
   assert.equal(document.querySelector('.capture-cam'), null);
 });
 
+test('supportsLivePreview reflects getUserMedia availability', () => {
+  const withGUM = loadCaptureSources({
+    navigator: { mediaDevices: { getUserMedia() {} } },
+  });
+  assert.equal(withGUM.BuiltinCameraSource.supportsLivePreview(), true);
+
+  const withoutGUM = loadCaptureSources({ navigator: {} });
+  assert.equal(withoutGUM.BuiltinCameraSource.supportsLivePreview(), false);
+});
+
+test('openPreview attaches a stream and the returned stop() releases every track', async () => {
+  const { document } = makeDom();
+  const stops = [];
+  const stream = { getTracks() { return [{ stop() { stops.push('track'); } }]; } };
+  const ctx = loadCaptureSources({
+    document,
+    navigator: { mediaDevices: { async getUserMedia() { return stream; } } },
+  });
+
+  const video = document.createElement('video');
+  const stop = await ctx.BuiltinCameraSource.openPreview(video, { video: true });
+  assert.equal(video.srcObject, stream, 'stream is attached to the video element');
+
+  stop();
+  assert.deepEqual(stops, ['track']);
+  assert.equal(video.srcObject, null, 'stream is detached on stop');
+});
+
+test('grab encodes the current video frame with its exact pixel size', async () => {
+  const { document } = makeDom();
+  const ctx = loadCaptureSources({ document, navigator: {} });
+
+  const video = document.createElement('video');
+  video.videoWidth = 1920;
+  video.videoHeight = 1080;
+  const shot = await ctx.BuiltinCameraSource.grab(video);
+
+  assert.equal(shot.width, 1920);
+  assert.equal(shot.height, 1080);
+  assert.ok(shot.blob, 'a frame blob is produced');
+});
+
 test('web file-input fallback returns the selected photo dimensions and cleans the hidden input', async () => {
   const { document } = makeDom();
   const originalCreateElement = document.createElement.bind(document);

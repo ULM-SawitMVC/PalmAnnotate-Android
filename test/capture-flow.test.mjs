@@ -33,6 +33,8 @@ function makeCaptureContext(shots, opts = {}) {
       return { ok: true, removed: 0 };
     },
   };
+  // A one-shot source (no live preview) — the embedded flow renders a Capture
+  // button per side and calls source.capture().
   const source = {
     id: 'test-camera',
     async capture() {
@@ -70,12 +72,17 @@ function waitButton(root, text) {
   return waitFor(() => findByText(root, 'button', text));
 }
 
-test('CaptureFlow captures a multi-side field tree and persists it under dataset paths', async () => {
+function waitTitle(root, text) {
+  return waitFor(() => findByText(root, 'h2', text));
+}
+
+test('CaptureFlow captures a multi-side field tree (popup-free) and persists it under dataset paths', async () => {
   const shots = [
     { blob: new Blob(['side1'], { type: 'image/jpeg' }), width: 1000, height: 800 },
     { blob: new Blob(['side2'], { type: 'image/jpeg' }), width: 1000, height: 800 },
   ];
   const { ctx, dom, writes } = makeCaptureContext(shots);
+  const body = dom.document.body;
   const progress = [];
   let readyTree = null;
 
@@ -85,14 +92,17 @@ test('CaptureFlow captures a multi-side field tree and persists it under dataset
     onTreeReady: tree => { readyTree = tree; },
   });
 
+  // Freeform metadata → start the embedded capture surface.
   dom.document.querySelector('select').value = 'DAMIMAS';
-  getByText(dom.document.body, 'button', 'Start Capture').click();
+  getByText(body, 'button', 'Start Capture').click();
 
-  (await waitButton(dom.document.body, 'Capture')).click();
-  (await waitButton(dom.document.body, 'Use Photo')).click();
+  // Side 1 → side 2 with NO per-side confirm; the indicator advances each shot.
+  (await waitButton(body, 'Capture')).click();
+  await waitTitle(body, 'Side 2 / 2');
+  (await waitButton(body, 'Capture')).click();
 
-  (await waitButton(dom.document.body, 'Capture')).click();
-  (await waitButton(dom.document.body, 'Use Photo')).click();
+  // Single end-of-capture review → Save.
+  (await waitButton(body, 'Save')).click();
 
   const tree = await promise;
   assert.ok(tree);
@@ -119,14 +129,15 @@ test('CaptureFlow aborts native capture when app-storage photo persistence retur
     { blob: new Blob(['side2'], { type: 'image/jpeg' }), width: 1000, height: 800 },
   ];
   const { ctx, dom, writes } = makeCaptureContext(shots, { native: true, persistNoUri: true });
+  const body = dom.document.body;
 
   const promise = ctx.CaptureFlow.start({ sideCount: 2 });
   dom.document.querySelector('select').value = 'DAMIMAS';
-  getByText(dom.document.body, 'button', 'Start Capture').click();
-  (await waitButton(dom.document.body, 'Capture')).click();
-  (await waitButton(dom.document.body, 'Use Photo')).click();
-  (await waitButton(dom.document.body, 'Capture')).click();
-  (await waitButton(dom.document.body, 'Use Photo')).click();
+  getByText(body, 'button', 'Start Capture').click();
+  (await waitButton(body, 'Capture')).click();
+  await waitTitle(body, 'Side 2 / 2');
+  (await waitButton(body, 'Capture')).click();
+  (await waitButton(body, 'Save')).click();
 
   const tree = await promise;
   assert.equal(tree, null, 'broken native persist must not record a reusable stale tree');
@@ -135,19 +146,52 @@ test('CaptureFlow aborts native capture when app-storage photo persistence retur
   assert.equal(dom.document.body.children.length, 0, 'capture overlay is removed after failure');
 });
 
-test('CaptureFlow cancel from side capture leaves no dataset writes', async () => {
+test('CaptureFlow cancel from the live capture surface leaves no dataset writes', async () => {
   const { ctx, dom, writes } = makeCaptureContext([
     { blob: new Blob(['unused']), width: 100, height: 100 },
   ]);
+  const body = dom.document.body;
 
   const promise = ctx.CaptureFlow.start({ sideCount: 4 });
-  getByText(dom.document.body, 'button', 'Start Capture').click();
-  await waitButton(dom.document.body, 'Capture');
-  getByText(dom.document.body, 'button', 'Cancel').click();
+  getByText(body, 'button', 'Start Capture').click();
+  await waitButton(body, 'Capture');
+  getByText(body, 'button', 'Cancel').click();
 
   const tree = await promise;
   assert.equal(tree, null);
   assert.deepEqual(writes.images, []);
   assert.deepEqual(writes.metadata, []);
   assert.equal(dom.document.body.children.length, 0, 'capture overlay is removed after cancel');
+});
+
+test('CaptureFlow review lets the operator retake one side before saving', async () => {
+  const shots = [
+    { blob: new Blob(['s1'], { type: 'image/jpeg' }), width: 100, height: 100 },
+    { blob: new Blob(['s2'], { type: 'image/jpeg' }), width: 100, height: 100 },
+    { blob: new Blob(['s1-retake'], { type: 'image/jpeg' }), width: 100, height: 100 },
+  ];
+  const { ctx, dom, writes } = makeCaptureContext(shots);
+  const body = dom.document.body;
+
+  const promise = ctx.CaptureFlow.start({ sideCount: 2 });
+  dom.document.querySelector('select').value = 'DAMIMAS';
+  getByText(body, 'button', 'Start Capture').click();
+
+  (await waitButton(body, 'Capture')).click();
+  await waitTitle(body, 'Side 2 / 2');
+  (await waitButton(body, 'Capture')).click();
+
+  // Review → retake side 1 → back to the live surface for that side only.
+  (await waitButton(body, 'Retake')).click();
+  (await waitButton(body, 'Capture')).click();
+
+  // Back at review → Save.
+  (await waitButton(body, 'Save')).click();
+
+  const tree = await promise;
+  assert.ok(tree);
+  assert.equal(tree.sides.length, 2);
+  // Three frames were grabbed (2 + 1 retake) but only 2 sides are persisted.
+  assert.equal(writes.images.length, 2);
+  assert.equal(shots.length, 0, 'all three queued frames were consumed');
 });

@@ -54,6 +54,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Camera for the in-app live-preview capture (WebView getUserMedia). The
+         capture flow streams the camera *inside* the app instead of launching
+         the OS camera activity; Capacitor's BridgeWebChromeClient only grants
+         the WebView's getUserMedia request once this runtime permission is
+         declared and allowed. Optional hardware so the app still installs on
+         camera-less devices (capture then falls back to the file picker). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
     <!-- Location for the optional GPS tag on captured tree sets. Without these
          the WebView's navigator.geolocation runtime request is auto-denied by
          Android (a permission not declared in the manifest can never be granted),

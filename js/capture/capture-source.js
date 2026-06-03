@@ -120,17 +120,86 @@ const BuiltinCameraSource = (() => {
 
   // ── Web capture (getUserMedia overlay → canvas) ─────────────────────────────
 
+  // Default high-res constraints for the embedded capture surface. The
+  // standalone _captureWeb() overlay passes a simpler constraint to preserve its
+  // long-standing contract (and its unit test).
+  const PREVIEW_CONSTRAINTS = {
+    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false,
+  };
+
+  function _hasGetUserMedia() {
+    return !!(navigator.mediaDevices &&
+              typeof navigator.mediaDevices.getUserMedia === 'function');
+  }
+
+  /**
+   * Whether this source can stream an in-page <video> preview. True wherever
+   * getUserMedia exists — the Capacitor WebView included, once the manifest
+   * CAMERA permission is granted. CaptureFlow uses this to choose between the
+   * embedded live surface and a one-shot capture() fallback.
+   * @returns {boolean}
+   */
+  function supportsLivePreview() {
+    return _hasGetUserMedia();
+  }
+
+  /**
+   * Attach a live camera stream to `videoEl`. Resolves with a stop() function
+   * that stops every track and detaches the stream. Throws when getUserMedia is
+   * unavailable or denied so the caller can fall back to capture().
+   * @returns {Promise<function():void>}
+   */
+  async function openPreview(videoEl, constraints) {
+    if (!_hasGetUserMedia()) throw new Error('getUserMedia unavailable');
+    const stream = await navigator.mediaDevices.getUserMedia(constraints || PREVIEW_CONSTRAINTS);
+    videoEl.setAttribute('playsinline', '');
+    videoEl.setAttribute('autoplay', '');
+    videoEl.muted = true;
+    videoEl.srcObject = stream;
+    if (typeof videoEl.play === 'function') {
+      // Some browsers need an explicit play() after attach.
+      try { await videoEl.play(); } catch (_) { /* autoplay attr usually covers this */ }
+    }
+    let stopped = false;
+    return function stop() {
+      if (stopped) return;
+      stopped = true;
+      try { for (const track of stream.getTracks()) track.stop(); } catch (_) {}
+      try { videoEl.srcObject = null; } catch (_) {}
+    };
+  }
+
+  /**
+   * Grab the current frame from a live <video> into a JPEG Blob with its exact
+   * pixel dimensions (no second decode needed downstream). Returns null when the
+   * frame could not be encoded.
+   * @returns {Promise<{blob:Blob, width:number, height:number}|null>}
+   */
+  async function grab(videoEl) {
+    const w = videoEl.videoWidth || 1280;
+    const h = videoEl.videoHeight || 720;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx2d = canvas.getContext('2d');
+    ctx2d.drawImage(videoEl, 0, 0, w, h);
+    const blob = await new Promise((resolve) => {
+      canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.92);
+    });
+    if (!blob) return null;
+    return { blob, width: w, height: h };
+  }
+
   /**
    * Open a full-screen camera overlay, stream the environment-facing camera,
    * and resolve with a captured frame when the operator taps the shutter.
    * Falls back to a hidden <input capture> element when getUserMedia is
-   * unavailable (older browsers / insecure contexts).
+   * unavailable (older browsers / insecure contexts). Built on openPreview/grab.
    * @returns {Promise<{blob:Blob, width:number, height:number}|null>}
    */
   async function _captureWeb() {
-    const hasGUM = !!(navigator.mediaDevices &&
-                      typeof navigator.mediaDevices.getUserMedia === 'function');
-    if (!hasGUM) return _captureFileInput();
+    if (!_hasGetUserMedia()) return _captureFileInput();
 
     let stream;
     try {
@@ -144,8 +213,9 @@ const BuiltinCameraSource = (() => {
     }
 
     return new Promise((resolve) => {
-      // Build the live-preview overlay. Everything is namespaced under
-      // .capture-cam-* so css/capture.css can style it without leaking.
+      // Build the live-preview overlay (inside the executor so the listeners are
+      // attached in the same tick the overlay first appears). Everything is
+      // namespaced under .capture-cam-* so css/capture.css can style it.
       const overlay = document.createElement('div');
       overlay.className = 'capture-overlay capture-cam';
 
@@ -197,24 +267,16 @@ const BuiltinCameraSource = (() => {
 
       cancelBtn.addEventListener('click', () => finish(null));
 
-      shutter.addEventListener('click', () => {
+      shutter.addEventListener('click', async () => {
         if (settled) return;
-        const w = video.videoWidth || 1280;
-        const h = video.videoHeight || 720;
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, w, h);
-        canvas.toBlob((blob) => {
-          if (!blob) { finish(null); return; }
-          // Frame dimensions are exactly the canvas — no second decode needed.
-          finish({ blob, width: w, height: h });
-        }, 'image/jpeg', 0.9);
+        const shot = await grab(video);
+        finish(shot);
       });
 
       // Begin playback (some browsers need an explicit play() after attach).
-      video.play().catch(() => { /* autoplay attr usually covers this */ });
+      if (typeof video.play === 'function') {
+        Promise.resolve(video.play()).catch(() => { /* autoplay attr usually covers this */ });
+      }
     });
   }
 
@@ -271,7 +333,7 @@ const BuiltinCameraSource = (() => {
     return _captureWeb();
   }
 
-  return { id, name, isAvailable, capture };
+  return { id, name, isAvailable, capture, supportsLivePreview, openPreview, grab };
 })();
 
 /**

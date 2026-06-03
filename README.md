@@ -23,17 +23,24 @@ annotation directly on a tablet/phone. Native is detected at runtime
 
 ### Field flow
 
-1. Start or resume a locked **Session** (variety + block), then add one tree at a
-   time.
-2. **Capture 4 views** of the tree (one per side). The built-in device camera is
-   the default capture source.
-3. The on-device **YOLO detector** can auto **over-detect** bunches across the
-   views (generous, all-`B2` suggestions). The model runs fully offline through
+1. Start or resume a locked **Session** (variety + block), then add a tree.
+2. **Capture 4 views** with the **in-app camera** — a live preview embedded in
+   the page (no OS camera screen / page change). The capture button sits on the
+   **right** on tablets (landscape) and along the **bottom** on phones
+   (portrait). Tap once per side and the surface advances to the next side
+   immediately — no per-shot confirmation. After the last side, **one swipe
+   review** lets you retake any side, then **Save**.
+3. The on-device **YOLO detector** auto **over-detects** bunches across the views
+   (generous, all-`B2`, detect-only). It runs fully offline through
    onnxruntime-web's `wasm` execution provider.
-4. **Annotate** in the swipe carousel: set each bunch's class and **cross-link**
-   duplicate detections on adjacent views so each physical bunch is counted once.
-5. Move on to the **next tree**. Session state, captured registry, and settings
-   persist through app restarts.
+4. **Annotate** on the single swipe **carousel** screen: set each bunch's class,
+   **delete** false positives, **cross-link** duplicate detections on adjacent
+   views, and **re-run detection** when needed. (The Annotation Editor /
+   Deduplication / Results tabs stay available behind the **More** button.)
+5. Tap **Next tree** to mark the current tree complete and jump straight into
+   capturing the next one, or **Save & exit** to store progress and return to the
+   session's tree list. Session state, captured registry, and settings persist
+   through app restarts.
 
 ### Dev loop
 
@@ -107,9 +114,15 @@ automatically — no native-code rebuild needed unless Android sources changed.
 
 ### Camera sources
 
-The **built-in device camera is still the default** capture source. The native
-**Orbbec USB (RGB-D) camera** plugin is now wired to the Orbbec Android SDK
-wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`):
+The **built-in device camera is still the default** capture source, and on
+Android it now streams **inside the app** via the WebView's `getUserMedia`
+(the manifest declares `android.permission.CAMERA`) — there is no jump to the OS
+camera activity. If getUserMedia is ever denied/unavailable the flow degrades to
+a one-shot file picker (web) or the Capacitor Camera plugin (native), so capture
+never breaks. The native **Orbbec USB (RGB-D) camera** plugin is wired to the
+Orbbec Android SDK wrapper AAR
+(`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`); it has no live
+preview, so its side capture uses a one-shot Capture button:
 
 - Android USB-host enumeration and runtime USB permission are real.
 - `open()` starts an Orbbec `OBContext`/`Pipeline` color stream.

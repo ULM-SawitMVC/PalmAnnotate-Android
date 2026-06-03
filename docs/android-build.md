@@ -203,6 +203,26 @@ primary app-storage capture flow. The native plugin also exposes `deletePath()`;
 `SafStore.deleteDatasetTree()` uses it so Delete Tree/Delete Session removes the
 public mirror as well as app-storage files.
 
+### In-app camera capture (WebView getUserMedia)
+
+The capture flow streams the camera **inside the app** — a live `<video>`
+preview embedded in the page, not the OS camera activity. This needs
+`android.permission.CAMERA` in `AndroidManifest.xml`: Capacitor 6's
+`BridgeWebChromeClient.onPermissionRequest` only grants the WebView's
+`getUserMedia` request once that runtime permission is declared and allowed
+(camera hardware itself is an optional `uses-feature`, so camera-less devices
+still install).
+
+Capture is **popup-free**: the operator taps the capture button once per side
+(positioned on the right in landscape/tablet, along the bottom in
+portrait/phone) and the surface advances to the next side with no per-shot
+review. After the last side, a single swipe review allows per-side retake before
+**Save**. The implementation lives in `js/capture/capture-source.js`
+(`supportsLivePreview()` / `openPreview()` / `grab()`) and
+`js/capture/capture-flow.js` (the embedded surface + review). If `getUserMedia`
+is unavailable or denied, capture falls back to the one-shot `capture()` path
+(file picker on web, Capacitor Camera plugin on native) so it never breaks.
+
 ### Orbbec USB camera SDK
 
 `OrbbecPlugin.kt` is wired to the Orbbec Android SDK wrapper AAR:
@@ -236,13 +256,16 @@ methods:
   to JPEG in Kotlin.
 - `close()` — stops and releases the pipeline, device, and SDK context.
 
-The built-in camera remains PalmAnnotate's safe default capture source. When an
-Orbbec USB camera is attached and `Orbbec.isAvailable()` reports a device, the
-side-capture panel shows a **Camera** selector with `Device Camera` and
-`Orbbec USB camera`; choose Orbbec before tapping **Capture**. Android may show a
-USB permission dialog on first use. The selected source is remembered for the
-rest of the capture flow, but if the Orbbec is unplugged/unavailable the panel
-falls back to the device camera.
+The built-in camera remains PalmAnnotate's safe default capture source and gets
+the embedded live preview described above. When an Orbbec USB camera is attached
+and `Orbbec.isAvailable()` reports a device, the embedded capture surface shows
+an inline **Camera** selector (`Device Camera` / `Orbbec USB camera`). Orbbec has
+no live preview, so selecting it switches the surface to a one-shot **Capture**
+button that grabs a frame per side via `OrbbecSource.capture()`; the rest of the
+flow (side-to-side advance, end-of-capture review, Save) is identical. Android
+may show a USB permission dialog on first use. The selected source is remembered
+for the rest of the capture flow, but if the Orbbec is unplugged/unavailable the
+surface falls back to the device camera.
 
 Current Orbbec persistence keeps the annotation pipeline RGB, but saves depth as
 a sidecar with the same tree/side stem for later RGB-D / 4-channel YOLO training:

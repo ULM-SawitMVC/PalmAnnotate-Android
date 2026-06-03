@@ -110,13 +110,22 @@ document.addEventListener('DOMContentLoaded', () => {
   function _enterEditorView() {
     if (homeView) homeView.classList.add('hidden');
     document.body.classList.remove('is-home');
+    // On touch devices the carousel is the whole annotate screen: hide the
+    // desktop tabs + header tree-nav (revealed on demand via the carousel's
+    // "More" button). CSS keys off body.crsl-shell.
+    if (_isTouchShell()) document.body.classList.add('crsl-shell');
     emptyState.classList.add('hidden');
     editorArea.classList.remove('hidden');
+  }
+
+  function _isTouchShell() {
+    return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
   }
 
   // Show the Sessions home and (re)render it.
   async function _showHome() {
     _activeSessionId = null;
+    document.body.classList.remove('crsl-shell', 'crsl-show-tabs');
     editorArea.classList.add('hidden');
     emptyState.classList.add('hidden');
     if (homeView) homeView.classList.remove('hidden');
@@ -130,6 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // the sessions home if the detail can't be rendered.
   async function _showSessionDetail(id) {
     if (!id || !(window.SessionsUI && SessionsUI.showDetail)) return _showHome();
+    document.body.classList.remove('crsl-shell', 'crsl-show-tabs');
     editorArea.classList.add('hidden');
     emptyState.classList.add('hidden');
     if (homeView) homeView.classList.remove('hidden');
@@ -241,6 +251,107 @@ document.addEventListener('DOMContentLoaded', () => {
     try { await _loadCurrentTree(); } finally { _setBusy(false); }
     _updateSaveCounter();
     await _autoDetectCurrentTree();
+  }
+
+  // ── Single-screen carousel: hooks + tree-capture loop (native field flow) ───
+
+  // Hooks the carousel renders into its compact topbar (Home / browse / More)
+  // and bottom action row (Detect again / Next tree / Save & exit).
+  function _carouselHooks() {
+    return {
+      onHome: () => _onHomeButton(),
+      onMore: () => _toggleMoreTabs(),
+      onBrowsePrev: () => _navigateTree('prev'),
+      onBrowseNext: () => _navigateTree('next'),
+      onDetect: () => _detectCurrentSide(),
+      onNextTree: () => _nextTreeFlow(),
+      onSaveExit: () => _saveAndExit(),
+      treeLabel: () => { const t = DatasetManager.getTree(); return t ? t.name : ''; },
+    };
+  }
+
+  function _initCarousel() {
+    if (!(window.CarouselUI && panelCarousel)) return;
+    CarouselUI.init(panelCarousel, { hooks: _carouselHooks() });
+  }
+
+  // The carousel "More" button reveals the legacy tabs (Annotation Editor /
+  // Deduplication / Results) for power users on the single annotate screen.
+  function _toggleMoreTabs() {
+    document.body.classList.toggle('crsl-show-tabs');
+  }
+
+  // Record a freshly-captured pohon into the owning session's index. The photos
+  // and the captured registry were already persisted by _capturePohon.
+  async function _recordPohonInSession(sessionId, tree) {
+    if (!sessionId || !window.SessionStore) return;
+    try {
+      await SessionStore.addTreeToSession(sessionId, {
+        name: tree.name, treeId: tree.treeId, sideCount: tree.sideCount,
+        metadata: tree.metadata, sides: tree.sides,
+      });
+    } catch (e) { console.warn('[NextTree] addTreeToSession failed:', e); }
+  }
+
+  // Capture the next pohon for the active session, then open it in the carousel.
+  async function _captureNextForSession(sessionId) {
+    if (!window.SessionStore) { await _startCapture(); return; }
+    let session = null;
+    try { session = await SessionStore.getSession(sessionId); } catch (_) {}
+    if (!session) { _showToast('Session unavailable; capture from the tree list.', 'error'); return; }
+    const tree = await _capturePohon(session);
+    if (!tree) return; // cancelled
+    await _recordPohonInSession(sessionId, tree);
+    _showToast(`Captured ${tree.name} (${tree.sides.length} views)`, 'success');
+    await _openPohonByName(tree.name, sessionId);
+  }
+
+  // "Next tree": compute & mark the current tree complete first (the chosen
+  // behavior — may surface the class-mismatch resolver), then jump straight into
+  // capturing the next tree and open it for annotation.
+  function _nextTreeFlow() {
+    return _enqueueOperation(async () => {
+      const session = ActiveSession.get();
+      if (session) {
+        const ok = await _resolveMismatchesIfAny();
+        if (!ok) { _showToast('Next tree cancelled: resolve class mismatches first.', 'info'); return; }
+        _setBusy(true, 'Saving...');
+        try {
+          const snapshot = _cloneSessionSnapshot();
+          if (snapshot) {
+            _lastResult = Results.compute(snapshot);
+            Results.render(_lastResult, resultsContainer);
+            exportButtons.classList.remove('hidden');
+            await _saveCurrentTreeOutput({ recompute: false, allowDirty: true, markConfirmed: true, snapshot });
+          }
+        } finally {
+          _setBusy(false);
+        }
+      }
+      if (_activeSessionId) await _captureNextForSession(_activeSessionId);
+      else await _startCapture();
+    });
+  }
+
+  // "Save & exit": persist the current tree's progress WITHOUT forcing mismatch
+  // resolution (so a tired operator can stop mid-tree), then return to the
+  // owning session's tree list (or the sessions home).
+  function _saveAndExit() {
+    return _enqueueOperation(async () => {
+      const session = ActiveSession.get();
+      if (session) {
+        _setBusy(true, 'Saving...');
+        try {
+          await _saveCurrentTreeOutput({ recompute: true, allowDirty: true, allowDownload: false });
+        } catch (e) {
+          console.warn('[SaveExit] save failed:', e);
+        } finally {
+          _setBusy(false);
+        }
+      }
+      if (_activeSessionId) await _showSessionDetail(_activeSessionId);
+      else await _showHome();
+    });
   }
 
   // ── Dataset loading ────────────────────────────────────────────────────────
@@ -697,7 +808,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (_activeTab() === 'results' && !resumed) { resultsContainer.innerHTML = ''; }
     // Rebuild the carousel for this tree when it is the visible tab.
     if (_activeTab() === 'carousel' && window.CarouselUI && panelCarousel) {
-      CarouselUI.init(panelCarousel);
+      _initCarousel();
     }
 
     // On touch devices, make the finger-first carousel the default surface the
@@ -1144,7 +1255,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (tabName === 'carousel' && window.CarouselUI && panelCarousel) {
       // Rebuild the carousel for the current session each time it is shown.
-      CarouselUI.init(panelCarousel);
+      _initCarousel();
     }
   }
 

@@ -177,6 +177,55 @@ test('CarouselUI links adjacent sides and removes the link from the touch list',
   assert.equal(calls.some(c => c.fn === 'removeConfirmedLink'), true);
 });
 
+test('CarouselUI renders host-hook chrome (Home/More + action row) and fires the hooks', async () => {
+  const { ctx, dom, container } = loadCarousel();
+  const fired = [];
+  ctx.CarouselUI.init(container, {
+    hooks: {
+      onHome: () => fired.push('home'),
+      onMore: () => fired.push('more'),
+      onBrowsePrev: () => fired.push('prev'),
+      onBrowseNext: () => fired.push('next'),
+      onDetect: () => fired.push('detect'),
+      onNextTree: () => fired.push('nexttree'),
+      onSaveExit: () => fired.push('saveexit'),
+      treeLabel: 'DAMIMAS_A21B_0001',
+    },
+  });
+  await waitForImageRender();
+
+  // Compact topbar: tree label + Home/browse buttons.
+  assert.equal(dom.document.querySelector('.crsl-treelabel').textContent, 'DAMIMAS_A21B_0001');
+  const nav = dom.document.querySelector('.crsl-topnav');
+  assert.ok(nav, 'compact topbar nav is rendered');
+  assert.equal(nav.querySelectorAll('.crsl-topbtn').length, 3,
+    'home + browse prev + browse next');
+
+  // Bottom action row: Detect again / Save & exit / Next tree.
+  assert.ok(dom.document.querySelector('.crsl-action--detect'));
+  assert.ok(dom.document.querySelector('.crsl-action--next'));
+  assert.ok(dom.document.querySelector('.crsl-action--save'));
+
+  dom.document.querySelector('.crsl-topbtn--home').click();
+  dom.document.querySelector('.crsl-topbtn--more').click();
+  dom.document.querySelector('.crsl-action--detect').click();
+  dom.document.querySelector('.crsl-action--next').click();
+  dom.document.querySelector('.crsl-action--save').click();
+  assert.deepEqual(fired, ['home', 'more', 'detect', 'nexttree', 'saveexit']);
+
+  // setTreeLabel updates the topbar label in place.
+  ctx.CarouselUI.setTreeLabel('DAMIMAS_A21B_0002');
+  assert.equal(dom.document.querySelector('.crsl-treelabel').textContent, 'DAMIMAS_A21B_0002');
+});
+
+test('CarouselUI without hooks renders no host chrome (web/desktop compatibility)', async () => {
+  const { dom } = loadCarousel();
+  await waitForImageRender();
+  assert.equal(dom.document.querySelector('.crsl-topnav'), null);
+  assert.equal(dom.document.querySelector('.crsl-actionrow'), null);
+  assert.equal(dom.document.querySelector('.crsl-topbtn--more'), null);
+});
+
 test('CarouselUI horizontal swipe changes side while vertical drag does not', async () => {
   const { dom } = loadCarousel();
   await waitForImageRender();

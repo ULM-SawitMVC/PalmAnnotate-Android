@@ -66,6 +66,14 @@ const CarouselUI = (() => {
   let _modeReviewBtn = null, _modeEditBtn = null;
   let _selInfoEl = null;   // selected-bbox readout
 
+  // Host hooks for the single-screen annotate shell (Home / browse / More in the
+  // topbar; Detect again / Next tree / Save & exit in the bottom action row).
+  // Empty when init() is called without opts (web/desktop, unit tests) — the
+  // hook-driven chrome simply isn't rendered then.
+  let _hooks = {};
+  let _treeLabelEl = null;  // compact tree-name label in the topbar
+  let _actionRowEl = null;  // bottom action row (Detect / Next tree / Save & exit)
+
   let _mode = MODE_REVIEW;
   let _sideIndex = 0;
   let _selectedId = null;  // selected bbox id (REVIEW mode)
@@ -189,7 +197,17 @@ const CarouselUI = (() => {
     _selInfoEl = document.createElement('div');
     _selInfoEl.className = 'crsl-sidelabel';
 
-    top.append(seg, _selInfoEl);
+    // Compact tree-nav (Home + browse prev/next + tree label) and a "More"
+    // toggle — only when the host wires hooks. This lets the carousel stand on
+    // its own as the single annotate screen on native without the desktop header.
+    const nav = _buildTopNav();
+    const moreBtn = _hooks.onMore
+      ? _crslBtn('crsl-topbtn crsl-topbtn--more', 'More', () => _hooks.onMore())
+      : null;
+    if (nav) top.appendChild(nav);
+    top.appendChild(seg);
+    top.appendChild(_selInfoEl);
+    if (moreBtn) top.appendChild(moreBtn);
 
     // Stage: clips the sliding track; hosts the swipe gesture surface.
     _stage = document.createElement('div');
@@ -245,6 +263,10 @@ const CarouselUI = (() => {
 
     bottom.append(_dotsEl, _thumbsEl, _classBar, _linksListEl);
 
+    // Bottom action row: Detect again / Save & exit / Next tree (host hooks).
+    _actionRowEl = _buildActionRow();
+    if (_actionRowEl) bottom.appendChild(_actionRowEl);
+
     container.append(top, _stage, bottom);
 
     // Swipe gestures live on the stage (REVIEW mode only; EDIT defers to editor).
@@ -252,6 +274,64 @@ const CarouselUI = (() => {
     _stage.addEventListener('pointermove', _onStageMove);
     _stage.addEventListener('pointerup', _onStageUp);
     _stage.addEventListener('pointercancel', _onStageCancel);
+  }
+
+  // ── Host-hook chrome (compact topbar nav + bottom action row) ───────────────
+
+  function _crslBtn(className, label, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = className;
+    b.textContent = label;
+    if (onClick) b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function _resolveTreeLabel() {
+    const t = _hooks.treeLabel;
+    if (typeof t === 'function') { try { return t() || ''; } catch (_) { return ''; } }
+    return t || '';
+  }
+
+  function _buildTopNav() {
+    if (!(_hooks.onHome || _hooks.onBrowsePrev || _hooks.onBrowseNext || _hooks.treeLabel)) {
+      return null;
+    }
+    const nav = document.createElement('div');
+    nav.className = 'crsl-topnav';
+    if (_hooks.onHome) {
+      nav.appendChild(_crslBtn('crsl-topbtn crsl-topbtn--home', '⌂', () => _hooks.onHome()));
+    }
+    if (_hooks.onBrowsePrev) {
+      nav.appendChild(_crslBtn('crsl-topbtn', '‹', () => _hooks.onBrowsePrev()));
+    }
+    _treeLabelEl = document.createElement('span');
+    _treeLabelEl.className = 'crsl-treelabel';
+    _treeLabelEl.textContent = _resolveTreeLabel();
+    nav.appendChild(_treeLabelEl);
+    if (_hooks.onBrowseNext) {
+      nav.appendChild(_crslBtn('crsl-topbtn', '›', () => _hooks.onBrowseNext()));
+    }
+    return nav;
+  }
+
+  function _buildActionRow() {
+    if (!(_hooks.onDetect || _hooks.onNextTree || _hooks.onSaveExit)) return null;
+    const row = document.createElement('div');
+    row.className = 'crsl-actionrow';
+    if (_hooks.onDetect) {
+      row.appendChild(_crslBtn('crsl-action crsl-action--detect', 'Detect again', () => _hooks.onDetect()));
+    }
+    const spacer = document.createElement('span');
+    spacer.className = 'crsl-classbar__spacer';
+    row.appendChild(spacer);
+    if (_hooks.onSaveExit) {
+      row.appendChild(_crslBtn('crsl-action crsl-action--save', 'Save & exit', () => _hooks.onSaveExit()));
+    }
+    if (_hooks.onNextTree) {
+      row.appendChild(_crslBtn('crsl-action crsl-action--next', 'Next tree', () => _hooks.onNextTree()));
+    }
+    return row;
   }
 
   function _buildClassBar() {
@@ -879,8 +959,11 @@ const CarouselUI = (() => {
 
   // Build DOM inside containerEl for the CURRENT session. Safe to call repeatedly
   // (re-binds to a new container / re-reads the session).
-  function init(containerEl) {
+  function init(containerEl, opts) {
     if (!containerEl) return;
+    _hooks = (opts && opts.hooks && typeof opts.hooks === 'object') ? opts.hooks : {};
+    _treeLabelEl = null;
+    _actionRowEl = null;
     _destroyEditor();
     _root = containerEl;
     _destroyed = false;
@@ -989,7 +1072,14 @@ const CarouselUI = (() => {
     _linkSource = null;
   }
 
-  return { init, show, refresh, goToSide, destroy };
+  // Update the compact topbar tree label (host calls this when the tree changes
+  // without a full re-init).
+  function setTreeLabel(text) {
+    _hooks.treeLabel = text;
+    if (_treeLabelEl) _treeLabelEl.textContent = _resolveTreeLabel();
+  }
+
+  return { init, show, refresh, goToSide, destroy, setTreeLabel };
 })();
 
 window.CarouselUI = CarouselUI;

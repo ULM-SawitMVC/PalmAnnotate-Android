@@ -62,6 +62,18 @@ test('Android manifest declares location permissions so capture GPS can be grant
   assert.match(manifest, /<uses-feature android:name="android\.hardware\.location\.gps" android:required="false" \/>/);
 });
 
+test('Android manifest declares CAMERA so the in-app live-preview capture can stream', () => {
+  // The reworked capture flow streams the camera INSIDE the app via WebView
+  // getUserMedia (no OS camera activity). Capacitor's BridgeWebChromeClient only
+  // grants the WebView's getUserMedia request once CAMERA is declared here; the
+  // hardware stays optional so camera-less devices still install (capture then
+  // falls back to the file picker / plugin).
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.CAMERA" \/>/);
+  assert.match(manifest, /<uses-feature android:name="android\.hardware\.camera" android:required="false" \/>/);
+});
+
 test('Android Orbbec USB camera integration is optional and registered', () => {
   const manifest = read('android/app/src/main/AndroidManifest.xml');
   const filter = read('android/app/src/main/res/xml/orbbec_usb_filter.xml');
