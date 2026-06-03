@@ -337,7 +337,14 @@ document.addEventListener('DOMContentLoaded', () => {
         })),
       });
     }
-    if (DatasetManager.count() > 0) _populateTreeSelect(DatasetManager.getTrees());
+    if (DatasetManager.count() > 0) {
+      _populateTreeSelect(DatasetManager.getTrees());
+      // Important after app restart: ProjectConfig saved handles are in-memory,
+      // while Output JSON/TXT files are on disk. Re-scan native output now so
+      // opening a session pohon resumes the saved JSON instead of starting from
+      // the raw captured photo again.
+      try { await _scanOutputDirectory(); } catch (e) { console.warn('[Restore] output scan failed:', e); }
+    }
   }
 
   // ── On-device detection (Phase 3) ────────────────────────────────────────
