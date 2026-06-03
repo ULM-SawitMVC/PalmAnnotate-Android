@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>PalmAnnotate</title>
   <!-- Fonts vendored locally for offline field use (no CDN). See css/fonts.css + assets/fonts/. -->
   <link rel="stylesheet" href="css/fonts.css">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/capture.css">
   <link rel="stylesheet" href="css/carousel.css">
+  <link rel="stylesheet" href="css/sessions.css">
 </head>
 <body>
 
@@ -42,6 +43,10 @@
         <!-- File inputs (visually hidden but still clickable from JS) -->
         <input type="file" id="input-folder" webkitdirectory multiple accept=".jpg,.jpeg,.png,.txt" class="sr-only" tabindex="-1" aria-hidden="true">
         <input type="file" id="input-session" accept=".json" class="sr-only" tabindex="-1" aria-hidden="true">
+
+        <button type="button" class="btn-icon btn-icon--sm" id="btn-home" title="Back to sessions home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </button>
 
         <button type="button" class="btn btn--outline btn--sm" id="btn-load-folder">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -78,6 +83,10 @@
 
   <!-- Main workspace -->
   <main class="workspace" id="workspace">
+
+    <!-- Sessions home (capture-first landing: stats, Sesi Baru, resume list).
+         Rendered by js/sessions.js (SessionsUI). Default view on launch. -->
+    <div class="home hidden" id="home-view"></div>
 
     <!-- Empty state -->
     <div class="empty-state" id="empty-state">
@@ -386,6 +395,7 @@ Del  delete selected bbox">?</button>
   <script src="js/capture/capture-flow.js"></script>
   <script src="js/detect/detector.js"></script>
   <script src="js/carousel/carousel-ui.js"></script>
+  <script src="js/sessions.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

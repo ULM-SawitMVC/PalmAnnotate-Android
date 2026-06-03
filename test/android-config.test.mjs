@@ -48,6 +48,18 @@ test('Android manifest remains orientation-flexible for phone and tablet aspect 
   assert.match(manifest, /<uses-permission android:name="android\.permission\.INTERNET" \/>/);
 });
 
+test('Android manifest declares location permissions so capture GPS can be granted', () => {
+  // Root cause of the "GPS Unavailable" bug: the WebView's navigator.geolocation
+  // runtime request is auto-denied for any permission not declared here, so the
+  // capture form could never obtain a fix. These declarations let the user grant
+  // location; GPS hardware itself stays optional (app still runs without it).
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.ACCESS_COARSE_LOCATION" \/>/);
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.ACCESS_FINE_LOCATION" \/>/);
+  assert.match(manifest, /<uses-feature android:name="android\.hardware\.location\.gps" android:required="false" \/>/);
+});
+
 test('Android Orbbec USB camera integration is optional and registered', () => {
   const manifest = read('android/app/src/main/AndroidManifest.xml');
   const filter = read('android/app/src/main/res/xml/orbbec_usb_filter.xml');

@@ -40,6 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const emptyState       = document.getElementById('empty-state');
   const editorArea       = document.getElementById('editor-area');
+  const homeView         = document.getElementById('home-view');
+  const btnHome          = document.getElementById('btn-home');
 
   const tabs             = document.querySelectorAll('.tab');
   const panels           = document.querySelectorAll('.tab-panel');
@@ -91,6 +93,75 @@ document.addEventListener('DOMContentLoaded', () => {
   let _loadSeq = 0;
   let _opQueue = Promise.resolve();
   const _savedSnapshotSignatures = new Map();
+
+  // ── View routing: Sessions home ⇄ annotation editor ─────────────────────────
+  // The capture-first landing is the Sessions home (stats + resumable sessions),
+  // rendered by SessionsUI into #home-view. Loading a folder, a session JSON, or
+  // opening a pohon switches to the annotation editor; the header Home button
+  // returns to the sessions home.
+
+  // Show the annotation workspace (hide home + empty-state).
+  function _enterEditorView() {
+    if (homeView) homeView.classList.add('hidden');
+    document.body.classList.remove('is-home');
+    emptyState.classList.add('hidden');
+    editorArea.classList.remove('hidden');
+  }
+
+  // Show the Sessions home and (re)render it.
+  async function _showHome() {
+    editorArea.classList.add('hidden');
+    emptyState.classList.add('hidden');
+    if (homeView) homeView.classList.remove('hidden');
+    document.body.classList.add('is-home');
+    if (window.SessionsUI) {
+      try { await SessionsUI.showHome(); } catch (e) { console.warn('[Home] render failed:', e); }
+    }
+  }
+
+  // Photograph one pohon for a session (locked variety+blok, auto/manual id).
+  // Mirrors _startCapture's persistence but returns the tree to SessionsUI so it
+  // can record it in the session index. Returns the datasetTree or null.
+  async function _capturePohon(session) {
+    const tree = await CaptureFlow.start({
+      sideCount: session.sideCount,
+      session: {
+        variety: session.variety,
+        blok: session.blok,
+        treeId: session.nextId,
+        autoId: session.autoId,
+        sideCount: session.sideCount,
+        operator: session.operator || '',
+      },
+    });
+    if (!tree) return null;
+    DatasetManager.addCapturedTree(tree);
+    // Persist the flat captured-tree registry so the pohon survives a restart
+    // (image files already live on disk; the session index references by name).
+    if (Storage.isNative() && window.SessionStore) {
+      SessionStore.addCapturedTree({
+        name: tree.name, split: tree.split, metadata: tree.metadata, sides: tree.sides,
+      }).catch(e => console.warn('[Capture] persist registry failed:', e));
+    }
+    return tree;
+  }
+
+  // Open a captured pohon (by tree name) in the annotation pipeline.
+  async function _openPohonByName(name) {
+    const idx = DatasetManager.findByName(name);
+    if (idx === -1) {
+      _showToast('Pohon not found in dataset — capture it again', 'error');
+      return;
+    }
+    _enterEditorView();
+    treeNav.classList.remove('hidden');
+    _populateTreeSelect(DatasetManager.getTrees());
+    DatasetManager.goTo(idx);
+    _setBusy(true, 'Loading...');
+    try { await _loadCurrentTree(); } finally { _setBusy(false); }
+    _updateSaveCounter();
+    await _autoDetectCurrentTree();
+  }
 
   // ── Dataset loading ────────────────────────────────────────────────────────
 
@@ -169,8 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Show the workspace + tree nav and load the captured tree through the
       // same render path used after a folder load.
-      emptyState.classList.add('hidden');
-      editorArea.classList.remove('hidden');
+      _enterEditorView();
       treeNav.classList.remove('hidden');
       _populateTreeSelect(DatasetManager.getTrees());
       DatasetManager.goTo(idx);
@@ -196,12 +266,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Restore on-device captured trees from the persistent registry so they
   // survive an app restart (native only — the image files persist on disk).
+  // This only repopulates DatasetManager so a pohon can be reopened by name
+  // from the Sessions home; it does NOT switch into the editor (the home is the
+  // landing view — see _bootView).
   async function _restoreCapturedTrees() {
     if (!Storage.isNative() || !window.SessionStore) return;
     let registry = [];
     try { registry = await SessionStore.getCapturedRegistry(); } catch (_) { registry = []; }
     if (!registry.length) return;
-    let added = 0;
     for (const t of registry) {
       if (DatasetManager.findByName(t.name) !== -1) continue; // already present
       DatasetManager.addCapturedTree({
@@ -213,17 +285,8 @@ document.addEventListener('DOMContentLoaded', () => {
           imageUri: s.imageUri || null, labelUri: s.labelUri || null,
         })),
       });
-      added++;
     }
-    if (DatasetManager.count() === 0) return;
-    emptyState.classList.add('hidden');
-    editorArea.classList.remove('hidden');
-    treeNav.classList.remove('hidden');
-    _populateTreeSelect(DatasetManager.getTrees());
-    DatasetManager.goTo(0);
-    _setBusy(true, 'Loading...');
-    try { await _loadCurrentTree(); } finally { _setBusy(false); }
-    if (added > 0) _showToast(`Restored ${added} captured tree(s) from last session`, 'info');
+    if (DatasetManager.count() > 0) _populateTreeSelect(DatasetManager.getTrees());
   }
 
   // ── On-device detection (Phase 3) ────────────────────────────────────────
@@ -487,8 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadToken = ++_loadSeq;
     const tree = DatasetManager.getTree();
     if (!tree) return;
-    emptyState.classList.add('hidden');
-    editorArea.classList.remove('hidden');
+    _enterEditorView();
 
     await ActiveSession.loadTree(tree);
     if (loadToken !== _loadSeq || DatasetManager.getTree() !== tree) return;
@@ -889,6 +951,21 @@ document.addEventListener('DOMContentLoaded', () => {
   btnLoadSession.addEventListener('click', () => inputSession.click());
   if (btnCaptureTree)     btnCaptureTree.addEventListener('click', () => _startCapture());
   if (btnCaptureTreeHero) btnCaptureTreeHero.addEventListener('click', () => _startCapture());
+  if (btnHome)            btnHome.addEventListener('click', () => _showHome());
+
+  // Wire the Sessions home/start/detail shell (capture-first landing).
+  if (window.SessionsUI && homeView) {
+    SessionsUI.init({
+      container: homeView,
+      hooks: {
+        capture: (session) => _capturePohon(session),
+        openPohon: (name) => _openPohonByName(name),
+        loadFolder: () => _triggerLoadFolder(),
+        loadSessionJson: () => inputSession.click(),
+        toast: (msg, type) => _showToast(msg, type),
+      },
+    });
+  }
 
   inputSession.addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -918,8 +995,7 @@ document.addEventListener('DOMContentLoaded', () => {
       DatasetManager.goTo(treeIdx);
       _updateTreeCounter();
       const tree = DatasetManager.getTree();
-      emptyState.classList.add('hidden');
-      editorArea.classList.remove('hidden');
+      _enterEditorView();
       await ActiveSession.fromJSON(sessionJson, tree);
 
 
@@ -1475,7 +1551,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Restore any on-device captured trees from a prior session (native only).
-  _restoreCapturedTrees();
+  // Boot: repopulate captured pohon (native), then land on the Sessions home.
+  async function _bootView() {
+    try { await _restoreCapturedTrees(); } catch (e) { console.warn('[Boot] restore failed:', e); }
+    await _showHome();
+  }
+  _bootView();
 
 });

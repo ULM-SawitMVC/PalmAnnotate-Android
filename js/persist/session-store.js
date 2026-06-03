@@ -33,6 +33,7 @@ const SessionStore = (() => {
   const NS               = 'palmannotate.';
   const K_SETTINGS       = NS + 'settings';
   const K_CAPTURED       = NS + 'capturedRegistry';
+  const K_SESSIONS       = NS + 'sessions';
   const SNAPSHOT_PREFIX  = NS + 'snapshot.';
 
   /**
@@ -45,7 +46,7 @@ const SessionStore = (() => {
 
   // All keys this module owns, used by clearAll(). Snapshot keys are discovered
   // dynamically (they're per-tree), so they're handled separately there.
-  const FIXED_KEYS = [K_SETTINGS, K_CAPTURED];
+  const FIXED_KEYS = [K_SETTINGS, K_CAPTURED, K_SESSIONS];
 
   // ── Backend selection ───────────────────────────────────────────────────────
 
@@ -219,6 +220,193 @@ const SessionStore = (() => {
     return next;
   }
 
+  // ── Sessions / groups index ─────────────────────────────────────────────────
+  //
+  // A "session" (Sesi Pendataan) is one capture run, locked to a single
+  // variety+blok. It holds the list of pohon (trees) captured during that run.
+  // A "group" is the (variety, blok) identity that a session belongs to:
+  // DAMIMAS·A21B and DAMIMAS·A21A are different groups; two sessions on the same
+  // variety+blok roll up into ONE group. This index is what powers the home
+  // screen's stats + resumable-session list across app restarts. Image/label
+  // files still live on disk under Documents/PalmAnnotate/dataset; the trees here
+  // carry only the persistable refs needed to reopen them.
+
+  let _sidCounter = 0;
+
+  /**
+   * Normalize a variety/blok token for the group key: uppercase, keep only
+   * A-Z0-9 so "A 21b" and "A21B" collapse to the same group.
+   */
+  function _normToken(s) {
+    return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  /**
+   * Stable group key for a (variety, blok) pair.
+   */
+  function groupKeyFor(variety, blok) {
+    return _normToken(variety) + '__' + _normToken(blok);
+  }
+
+  /**
+   * Generate a unique-enough session id. Date-stamped plus a per-process counter
+   * so two sessions created in the same millisecond don't collide.
+   */
+  function _sid(variety, blok) {
+    _sidCounter += 1;
+    return 'sess_' + Date.now() + '_' + _sidCounter + '_' + _normToken(variety) + '_' + _normToken(blok);
+  }
+
+  /**
+   * The full sessions index, newest-updated first.
+   * @returns {Promise<Array>} sessions, or [] when none/unreadable.
+   */
+  async function getSessions() {
+    const v = await _getJSON(K_SESSIONS, []);
+    if (!Array.isArray(v)) return [];
+    // Newest activity first; `seq` (creation order) breaks ties when two
+    // sessions share an updatedAt down to the millisecond.
+    return v.slice().sort((a, b) => {
+      const t = String((b && b.updatedAt) || '').localeCompare(String((a && a.updatedAt) || ''));
+      if (t !== 0) return t;
+      return (Number((b && b.seq) || 0) - Number((a && a.seq) || 0));
+    });
+  }
+
+  /**
+   * One session by id, or null.
+   * @param {string} id
+   * @returns {Promise<object|null>}
+   */
+  async function getSession(id) {
+    if (!id) return null;
+    const sessions = await getSessions();
+    return sessions.find(s => s && s.id === id) || null;
+  }
+
+  /**
+   * Create and persist a new session locked to variety+blok.
+   * @param {{variety:string, blok:string, sideCount?:number, autoId?:boolean, operator?:string}} opts
+   * @returns {Promise<object>} the created session.
+   */
+  async function createSession(opts = {}) {
+    const variety = String(opts.variety || '').trim() || 'UNKNOWN';
+    const blok = String(opts.blok || '').trim();
+    const now = new Date().toISOString();
+    const session = {
+      id: _sid(variety, blok),
+      seq: _sidCounter,
+      variety,
+      blok,
+      groupKey: groupKeyFor(variety, blok),
+      sideCount: Math.max(2, Number(opts.sideCount) || 4),
+      autoId: opts.autoId !== false,
+      operator: String(opts.operator || '').trim(),
+      nextId: 1,
+      createdAt: now,
+      updatedAt: now,
+      trees: [],
+    };
+    const sessions = await getSessions();
+    sessions.push(session);
+    await _setJSON(K_SESSIONS, sessions);
+    return session;
+  }
+
+  /**
+   * Shallow-merge a patch into a session (cannot change id) and persist.
+   * @param {string} id
+   * @param {object} patch
+   * @returns {Promise<object|null>} the updated session, or null if not found.
+   */
+  async function updateSession(id, patch) {
+    const sessions = await getSessions();
+    const idx = sessions.findIndex(s => s && s.id === id);
+    if (idx === -1) return null;
+    const merged = Object.assign({}, sessions[idx],
+      (patch && typeof patch === 'object' && !Array.isArray(patch)) ? patch : {},
+      { id: sessions[idx].id, updatedAt: new Date().toISOString() });
+    // Keep the group key consistent if variety/blok changed.
+    merged.groupKey = groupKeyFor(merged.variety, merged.blok);
+    sessions[idx] = merged;
+    await _setJSON(K_SESSIONS, sessions);
+    return merged;
+  }
+
+  /**
+   * Append a pohon (tree) to a session, dedupe by name, bump the auto-increment
+   * counter, and persist. Only the persistable side refs are kept.
+   * @param {string} id
+   * @param {{name, treeId?, sideCount?, metadata?, sides?}} tree
+   * @returns {Promise<object|null>} the updated session, or null if not found.
+   */
+  async function addTreeToSession(id, tree) {
+    const sessions = await getSessions();
+    const idx = sessions.findIndex(s => s && s.id === id);
+    if (idx === -1) return null;
+    if (!tree || !tree.name) {
+      console.warn('[SessionStore] addTreeToSession: missing tree name, ignored');
+      return sessions[idx];
+    }
+    const session = sessions[idx];
+    const treeIdNum = Number(tree.treeId);
+    const entry = {
+      name: tree.name,
+      treeId: Number.isFinite(treeIdNum) ? treeIdNum : (session.trees.length + 1),
+      sideCount: Math.max(2, Number(tree.sideCount) || session.sideCount || 4),
+      metadata: tree.metadata || {},
+      sides: _slimSides(tree.sides),
+    };
+    session.trees = (session.trees || []).filter(t => t && t.name !== entry.name);
+    session.trees.push(entry);
+    // Auto-increment counter always advances past the highest id used so the
+    // next "+ Pohon" never reuses an id, even after manual entries.
+    session.nextId = Math.max(Number(session.nextId) || 1, entry.treeId + 1);
+    session.updatedAt = new Date().toISOString();
+    sessions[idx] = session;
+    await _setJSON(K_SESSIONS, sessions);
+    return session;
+  }
+
+  /**
+   * Remove a session from the index by id and persist. Does NOT delete the
+   * on-disk image/label files (those are the dataset of record).
+   * @param {string} id
+   * @returns {Promise<Array>} the updated sessions list.
+   */
+  async function removeSession(id) {
+    const sessions = await getSessions();
+    const next = sessions.filter(s => s && s.id !== id);
+    if (next.length !== sessions.length) await _setJSON(K_SESSIONS, next);
+    return next;
+  }
+
+  /**
+   * Derived home-screen stats. Groups roll sessions up by (variety, blok).
+   * @returns {Promise<{totalPohon:number, totalGroups:number, totalSessions:number, groups:Array}>}
+   */
+  async function homeStats() {
+    const sessions = await getSessions();
+    const groups = new Map(); // groupKey → { groupKey, variety, blok, pohon, sessions }
+    let totalPohon = 0;
+    for (const s of sessions) {
+      if (!s) continue;
+      const pohon = Array.isArray(s.trees) ? s.trees.length : 0;
+      totalPohon += pohon;
+      const key = s.groupKey || groupKeyFor(s.variety, s.blok);
+      const g = groups.get(key) || { groupKey: key, variety: s.variety, blok: s.blok, pohon: 0, sessions: 0 };
+      g.pohon += pohon;
+      g.sessions += 1;
+      groups.set(key, g);
+    }
+    return {
+      totalPohon,
+      totalGroups: groups.size,
+      totalSessions: sessions.length,
+      groups: Array.from(groups.values()).sort((a, b) => b.pohon - a.pohon),
+    };
+  }
+
   // ── In-progress annotation snapshots (optional autosave) ─────────────────────
 
   /**
@@ -293,6 +481,9 @@ const SessionStore = (() => {
     getSettings, setSettings,
     // captured-tree registry
     getCapturedRegistry, addCapturedTree, removeCapturedTree,
+    // sessions / groups
+    getSessions, getSession, createSession, updateSession, addTreeToSession,
+    removeSession, homeStats, groupKeyFor,
     // snapshots
     saveSnapshot, loadSnapshot, clearSnapshot,
     // bulk

@@ -9,7 +9,7 @@
     "sync": "npm run build:www && cap sync",
     "android": "npm run sync && cap open android",
     "serve": "npm run build:www && cd www && python -m http.server 4173",
-    "test": "node --test \"test/*.mjs\""
+    "test": "node --test --test-concurrency=1 \"test/*.mjs\""
   },
   "devDependencies": {
     "@capacitor/cli": "^6.0.0"

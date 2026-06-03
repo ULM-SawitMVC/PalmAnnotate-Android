@@ -1,0 +1,414 @@
+/* ============================================================================
+   Sessions — Home / Start-Session / Session-Detail surfaces (Phase 1).
+
+   The capture-first flow the field crews use: a Home with running stats and a
+   resumable-session list, a Start-Session form that locks variety+blok, and a
+   per-session screen listing the pohon captured in that run.
+
+   Styled with the app's existing dark theme tokens (css/style.css :root) so it
+   feels native to the rest of PalmAnnotate. Phone-first; a tablet refinement at
+   the bottom centres and widens the column. Deep 9:16 visual polish lands in
+   Phase 2.
+   ========================================================================== */
+
+#home-view.home {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.home__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: var(--space-lg);
+  padding-bottom: calc(var(--space-2xl) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+/* ── Hero ──────────────────────────────────────────────────────────────── */
+
+.home__hero { text-align: left; }
+.home__hero h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--c-text);
+  margin: 0;
+}
+.home__hero p {
+  margin: 0.25rem 0 0;
+  color: var(--c-text-muted);
+  font-size: 0.95rem;
+}
+
+/* ── Stat cards ────────────────────────────────────────────────────────── */
+
+.home__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+.home__stats--three { grid-template-columns: 1fr 1fr 1fr; }
+
+.stat-card {
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 18px;
+  padding: var(--space-lg) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  text-align: center;
+}
+.stat-card__num {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--c-accent);
+  font-variant-numeric: tabular-nums;
+}
+.stat-card--gold .stat-card__num { color: var(--c-gold); }
+.stat-card--emerald .stat-card__num { color: var(--c-emerald); }
+.stat-card__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-text-muted);
+}
+.stat-card--sm { padding: var(--space-md) var(--space-sm); }
+.stat-card--sm .stat-card__num { font-size: 1.4rem; }
+
+/* ── Primary call-to-action buttons ───────────────────────────────────── */
+
+.home__primary,
+.sheet__cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 56px;
+  border: none;
+  border-radius: 16px;
+  background: var(--c-accent);
+  color: #0c120c;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.home__primary:hover,
+.sheet__cta:hover { filter: brightness(1.05); }
+
+/* ── Section headings ─────────────────────────────────────────────────── */
+
+.home__section-title,
+.sheet__list-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-text-dim);
+  margin: 0 0 var(--space-sm);
+}
+
+/* ── Session / pohon list rows ────────────────────────────────────────── */
+
+.session-list,
+.pohon-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.list-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-sm);
+}
+.list-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-align: left;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  padding: var(--space-md);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.list-row__main:hover { border-color: var(--c-border-hover); background: var(--c-surface-raised); }
+.list-row__title {
+  font-weight: 600;
+  color: var(--c-text);
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-row__meta {
+  font-size: 0.82rem;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.list-row__badge {
+  align-self: flex-start;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-accent);
+  background: var(--c-accent-dim);
+  border-radius: 8px;
+  padding: 0.15rem 0.45rem;
+}
+.list-row__del {
+  flex: 0 0 auto;
+  width: 48px;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--c-text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.list-row__del:hover { color: var(--c-red); border-color: var(--c-red); }
+.list-row__del svg { width: 18px; height: 18px; }
+
+/* ── Empty hints ──────────────────────────────────────────────────────── */
+
+.home__empty,
+.sheet__empty {
+  border: 1px dashed var(--c-border);
+  border-radius: 14px;
+  padding: var(--space-lg);
+  text-align: center;
+  color: var(--c-text-muted);
+  font-size: 0.9rem;
+}
+
+/* ── Secondary (load folder / session) ────────────────────────────────── */
+
+.home__secondary {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: auto;
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--c-border);
+}
+.home__secondary .link-btn { flex: 1; }
+
+.link-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 48px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--c-text); border-color: var(--c-border-hover); }
+.link-btn svg { width: 18px; height: 18px; }
+
+/* ── Sheet header (start / detail) ────────────────────────────────────── */
+
+.sheet__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+.sheet__top h1 {
+  flex: 1;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--c-text);
+}
+.sheet__icon-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--c-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sheet__icon-btn:hover { border-color: var(--c-border-hover); }
+.sheet__icon-btn svg { width: 20px; height: 20px; }
+
+.sheet__banner {
+  background: var(--c-accent-dim);
+  border: 1px solid rgba(184, 224, 74, 0.25);
+  border-radius: 14px;
+  padding: var(--space-md);
+  color: var(--c-text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+/* ── Lock badge (session locked to variety+blok) ──────────────────────── */
+
+.lock-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 16px;
+  padding: var(--space-md) var(--space-lg);
+}
+.lock-badge__icon {
+  font-size: 1.3rem;
+  filter: grayscale(0.2);
+}
+.lock-badge__text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.lock-badge__title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.lock-badge__sub {
+  font-size: 0.78rem;
+  color: var(--c-text-muted);
+}
+
+/* ── Form card ────────────────────────────────────────────────────────── */
+
+.form-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 18px;
+  padding: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.field { display: flex; flex-direction: column; gap: 0.35rem; }
+.field > label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--c-text-muted);
+}
+.field input,
+.field select {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 1rem;
+  padding: 0 var(--space-md);
+  font-family: inherit;
+}
+.field input:focus,
+.field select:focus { outline: none; border-color: var(--c-accent); }
+
+/* ── Toggle (Mode ID Otomatis) ────────────────────────────────────────── */
+
+.toggle-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  background: var(--c-accent-dim);
+  border: 1px solid rgba(184, 224, 74, 0.25);
+  border-radius: 14px;
+  padding: var(--space-md);
+}
+.toggle-card__text { flex: 1; display: flex; flex-direction: column; gap: 0.1rem; }
+.toggle-card__text strong { color: var(--c-text); font-size: 0.95rem; }
+.toggle-card__text span { color: var(--c-text-muted); font-size: 0.8rem; }
+
+.switch { position: relative; flex: 0 0 auto; width: 52px; height: 30px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch__slider {
+  position: absolute;
+  inset: 0;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+.switch__slider::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: var(--c-text-muted);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.switch input:checked + .switch__slider { background: var(--c-accent); border-color: var(--c-accent); }
+.switch input:checked + .switch__slider::before { transform: translateX(22px); background: #0c120c; }
+
+/* ── Touch feedback ───────────────────────────────────────────────────── */
+
+@media (pointer: coarse) {
+  .home__primary:active,
+  .sheet__cta:active,
+  .list-row__main:active,
+  .link-btn:active { transform: scale(0.98); }
+}
+
+/* ── Tablet 3:2 refinement — centre & widen the column ────────────────── */
+
+@media (pointer: coarse) and (min-width: 720px) {
+  .home__scroll {
+    max-width: 720px;
+    margin: 0 auto;
+    width: 100%;
+    padding: var(--space-xl);
+  }
+  .home__hero h1 { font-size: 2rem; }
+  .stat-card__num { font-size: 2.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home__primary, .sheet__cta, .list-row__main, .link-btn,
+  .switch__slider, .switch__slider::before { transition: none; }
+}
+
+/* ── Header routing: reflect the active view ───────────────────────────── */
+
+/* "Back to sessions" Home button: only in the editor, never on the home. */
+#btn-home { display: none; }
+body:not(.is-home) #btn-home { display: inline-flex; }
+
+/* On the Sessions home the in-page actions replace the header's dataset
+   toolbar, so hide the duplicates. */
+.is-home #btn-load-folder,
+.is-home #btn-load-session,
+.is-home #tree-nav { display: none; }
+
+/* Freeform header capture is superseded by the session-locked flow. The
+   element + handler stay (guard tests reference them); it's just not shown. */
+#btn-capture-tree { display: none; }

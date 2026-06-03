@@ -96,7 +96,7 @@ test('Android load/save flow is platform-aware instead of using web-only folder 
 test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(
     html,
-    /<meta name="viewport" content="width=device-width, initial-scale=1\.0">/
+    /<meta name="viewport" content="width=device-width, initial-scale=1\.0, viewport-fit=cover">/
   );
   assert.doesNotMatch(html, /maximum-scale|user-scalable\s*=\s*no/i);
 
@@ -104,6 +104,10 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(app, /_activateTab\('carousel'\)/);
 
   assert.match(style, /min-height:\s*100dvh/);
+  // Notch / cutout safety: viewport opts into the display cutout and the shell
+  // pads itself with the safe-area insets so 9:16 phones don't clip content.
+  assert.match(style, /env\(safe-area-inset-top\)/);
+  assert.match(style, /env\(safe-area-inset-bottom\)/);
   assert.match(style, /\.editor-canvas,\s*\.dedup-canvas \{ touch-action: none; \}/);
   assert.match(carousel, /\.carousel-canvas[\s\S]*touch-action:\s*none/);
   assert.match(carousel, /\.carousel-stage[\s\S]*touch-action:\s*pan-y/);
@@ -127,6 +131,39 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(style, /@media \(pointer: coarse\) and \(min-aspect-ratio: 3 \/ 2\) and \(max-width: 1280px\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)/);
   assert.match(carousel, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)[\s\S]*\.crsl-thumb[\s\S]*width:\s*56px/);
+});
+
+test('capture-first session shell is present and wired (home ⇄ editor routing)', () => {
+  // index.html ships the home container, the header Home button, and loads the
+  // Sessions stylesheet + controller.
+  assert.match(html, /<div class="home hidden" id="home-view">/);
+  assert.match(html, /id="btn-home"/);
+  assert.match(html, /<link rel="stylesheet" href="css\/sessions\.css">/);
+  assert.match(html, /<script src="js\/sessions\.js"><\/script>/);
+  // sessions.js must load before app.js (app wires SessionsUI on boot).
+  assert.ok(
+    html.indexOf('js/sessions.js') < html.indexOf('js/app.js'),
+    'sessions.js loads before app.js'
+  );
+
+  // app.js routes between the Sessions home and the annotation editor, and
+  // exposes the capture/open hooks SessionsUI calls.
+  assert.match(app, /function _enterEditorView\(\)/);
+  assert.match(app, /async function _showHome\(\)/);
+  assert.match(app, /async function _capturePohon\(session\)/);
+  assert.match(app, /async function _openPohonByName\(name\)/);
+  assert.match(app, /CaptureFlow\.start\(\{[\s\S]*session: \{[\s\S]*treeId: session\.nextId/);
+  assert.match(app, /SessionsUI\.init\(\{[\s\S]*capture: \(session\) => _capturePohon\(session\)/);
+  assert.match(app, /openPohon: \(name\) => _openPohonByName\(name\)/);
+  assert.match(app, /if \(btnHome\)\s+btnHome\.addEventListener\('click', \(\) => _showHome\(\)\)/);
+  // Boot lands on the home view rather than auto-entering the editor.
+  assert.match(app, /async function _bootView\(\)[\s\S]*_restoreCapturedTrees\(\)[\s\S]*_showHome\(\)/);
+
+  // sessions.css carries the home/start/detail surfaces and header routing.
+  const sessions = readFileSync(new URL('../css/sessions.css', import.meta.url), 'utf8');
+  assert.match(sessions, /#home-view\.home/);
+  assert.match(sessions, /body:not\(\.is-home\) #btn-home/);
+  assert.match(sessions, /\.is-home #btn-load-folder/);
 });
 
 test('dedup help and global shortcuts are exposed for keyboard and touch operators', () => {

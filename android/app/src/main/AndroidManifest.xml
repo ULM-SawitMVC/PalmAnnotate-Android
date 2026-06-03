@@ -53,4 +53,17 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Location for the optional GPS tag on captured tree sets. Without these
+         the WebView's navigator.geolocation runtime request is auto-denied by
+         Android (a permission not declared in the manifest can never be granted),
+         which surfaces in the capture form as "GPS Unavailable". COARSE is enough
+         for a tree-plot tag; FINE improves accuracy when the user allows it.
+         Both are optional at runtime — the capture flow degrades to no-GPS. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- GPS hardware is not required; devices without it still install and run
+         (capture simply omits the location tag). -->
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

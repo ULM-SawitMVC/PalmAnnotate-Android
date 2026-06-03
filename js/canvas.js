@@ -104,7 +104,10 @@ const CanvasRenderer = {
 
       // Label: include track ID if available
       const trackPrefix = det.trackId !== undefined ? `#${det.trackId} ` : '';
-      const label = `${trackPrefix}${name} ${(conf * 100).toFixed(1)}%`;
+      // Confidence is optional (manually-drawn boxes have none). Only append a
+      // percentage when conf is a real number, otherwise we'd render "NaN%".
+      const confSuffix = Number.isFinite(conf) ? ` ${(conf * 100).toFixed(1)}%` : '';
+      const label = `${trackPrefix}${name}${confSuffix}`;
       const fontSize = Math.max(12, Math.min(canvasWidth, canvasHeight) * 0.018);
       ctx.font = `bold ${fontSize}px sans-serif`;
       const textMetrics = ctx.measureText(label);
