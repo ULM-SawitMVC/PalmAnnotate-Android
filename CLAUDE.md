@@ -145,12 +145,17 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
   (`convertFileSrc`) without a runtime permission. `Directory.Documents` was used first but fails
   under scoped storage on target SDK 34 (Android 13/14) — captured photos landed nowhere and showed
   "Image unavailable". Files are retrievable via USB/`adb` or the in-app **Download Session** export.
+  Delete Tree/Delete Session now removes app-storage images, metadata, Output JSON/TXT, snapshots,
+  registry entries, saved handles, in-memory tree refs, and SAF mirror files; native image URLs carry
+  a `cacheBust` query so reusing the same variety/block/id cannot show a stale WebView-cached photo.
 - **Export folder (SAF):** `SafPlugin.kt` + `js/storage/saf-store.js` let the operator pick a public,
-  browsable folder (Documents / SD card / USB-OTG) via the system picker. When set, each captured
-  tree's photos + metadata are **mirrored** into `<chosen>/PalmAnnotate/dataset/…` (best-effort, on
-  top of the reliable app-external working store — never replaces it). The chosen tree URI is
-  remembered in SessionStore settings (`safFolderUri`/`safFolderName`) and re-verified each use; the
-  picker UI is the "Export folder" row on the Sessions home (native only).
+  browsable folder (Documents / SD card / USB-OTG) via the system picker. When set, captures and
+  saves are **mirrored** into `<chosen>/PalmAnnotate/…` (best-effort, on top of the reliable
+  app-external working store — never replaces it): `dataset/images/field/`, `dataset/metadata/`,
+  `Output JSON/`, and `Output TXT/field/`. The chosen tree URI is remembered in SessionStore settings
+  (`safFolderUri`/`safFolderName`) and re-verified each use; the picker UI is the "Export folder" row
+  on the Sessions home (native only). `deletePath()` + `SafStore.deleteDatasetTree()` remove mirrored
+  files during Delete Tree/Delete Session.
 - `AndroidManifest.xml` permissions: `INTERNET` + `ACCESS_COARSE/FINE_LOCATION` (for capture GPS).
   **Any runtime permission the WebView requests must be declared here or Android auto-denies it.**
 - Installed Capacitor plugins (`capacitor.plugins.json`): filesystem, camera, preferences.

@@ -38,6 +38,9 @@ models/*.onnx
 # Local Orbbec SDK release archives (the required AAR is vendored under android/app/libs/)
 OrbbecSDK-Android-Wrapper-*.zip
 
+# Local Android export/debug bundles from device testing
+PalmAnnotate-Debug*.zip
+
 # Capacitor / Node (commit android/ source, ignore build artifacts)
 node_modules/
 www/

@@ -144,15 +144,21 @@ or the in-app **Download Session** export.
 For user-browsable copies, `SafPlugin.kt` implements a native
 `ACTION_OPEN_DOCUMENT_TREE` folder picker and persists the grant with
 `takePersistableUriPermission`. The Sessions home **Export folder** row stores
-that tree URI in `SessionStore`; captures and session downloads are mirrored
-(best-effort) under:
+that tree URI in `SessionStore`; captures, Compute output, and Save Output Again
+are mirrored (best-effort) under:
 
 ```text
-<chosen folder>/PalmAnnotate/dataset/...
+<chosen folder>/PalmAnnotate/
+  dataset/images/field/{TREE}_{side}.jpg
+  dataset/metadata/{TREE}.json
+  Output JSON/{TREE}.json
+  Output TXT/field/{TREE}_{side}.txt
 ```
 
 SAF is additive: failure to mirror into the public folder must not break the
-primary app-storage capture flow.
+primary app-storage capture flow. The native plugin also exposes `deletePath()`;
+`SafStore.deleteDatasetTree()` uses it so Delete Tree/Delete Session removes the
+public mirror as well as app-storage files.
 
 ### Orbbec USB camera SDK
 
@@ -187,6 +193,26 @@ methods:
 The built-in camera remains PalmAnnotate's default capture source. The Orbbec
 source is registered as an optional `CaptureSource`; runtime validation still
 requires a physical Android device with the Orbbec/Gemini camera attached.
+
+### Verified Android file lifecycle
+
+Current behavior after device testing:
+
+- Capture writes the reliable app-storage image set and metadata first, then
+  mirrors to SAF when configured. If native app-storage image persistence does
+  not return an `imageUri`, capture aborts and no tree is recorded.
+- Compute / Save Output Again writes `Output JSON/{TREE}.json` and
+  `Output TXT/{split}/{TREE}_{side}.txt` to app storage and mirrors both to SAF.
+- Delete Tree removes that tree's app-storage images, metadata, Output JSON/TXT,
+  in-memory DatasetManager entry, saved output handle, autosave snapshot, captured
+  registry entry, and SAF mirror files.
+- Delete Session runs the same cleanup for every tree, then removes the session.
+- Reusing the same variety/block/tree id is safe: stale files are pre-deleted and
+  native image URLs include a cache-busting query string to avoid WebView file
+  cache reuse.
+- A representative debug export (`PalmAnnotate-Debug.zip`) contains the expected
+  folders: `dataset/images/field`, `dataset/metadata`, `Output JSON`, and
+  `Output TXT/field`.
 
 ## APK size notes
 

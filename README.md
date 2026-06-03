@@ -74,14 +74,23 @@ Android keeps the reliable working store in app-specific external storage:
 This path is readable by the app/WebView without scoped-storage permission
 failures. For operator-browsable copies, use the **Export folder** row on the
 Sessions home screen: it opens Android's Storage Access Framework folder picker
-and mirrors captures/downloaded session JSON into:
+and mirrors captures/saves into the same PalmAnnotate-shaped tree:
 
 ```text
-<chosen public folder>/PalmAnnotate/dataset/...
+<chosen public folder>/PalmAnnotate/
+  dataset/images/field/{TREE}_{side}.jpg
+  dataset/metadata/{TREE}.json
+  Output JSON/{TREE}.json
+  Output TXT/field/{TREE}_{side}.txt
 ```
 
 The SAF export folder is best-effort and additive; the app-storage copy remains
-the source of truth.
+the source of truth. Current Android cleanup semantics are intentionally strong:
+**Delete Tree** removes that tree's images, metadata, output JSON, output TXT,
+snapshots, registry entries, in-memory tree refs, and SAF mirror copies;
+**Delete Session** applies the same cleanup to every tree in the session before
+removing the session row. Reusing the same variety/block/tree id is safe because
+stale files are deleted and native image URLs are cache-busted.
 
 ### On-device detector model
 
@@ -103,7 +112,10 @@ wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`):
 - `close()` releases the pipeline/device/context.
 
 Runtime Orbbec capture still needs testing on a physical Android device with the
-Gemini/Orbbec hardware attached. For the full Android build, signing, SAF, and
+Gemini/Orbbec hardware attached. Android storage/SAF behavior has been field-
+checked with an export shaped like `PalmAnnotate-Debug.zip`:
+`dataset/images/field`, `dataset/metadata`, `Output JSON`, and `Output TXT/field`
+are all populated as expected. For the full Android build, signing, SAF, and
 Orbbec notes, see [docs/android-build.md](docs/android-build.md).
 
 ## Output Schema
