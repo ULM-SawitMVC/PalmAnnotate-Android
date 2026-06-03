@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PalmAnnotate</title>
+  <!-- Fonts vendored locally for offline field use (no CDN). See css/fonts.css + assets/fonts/. -->
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/capture.css">
+  <link rel="stylesheet" href="css/carousel.css">
+</head>
+<body>
+
+  <!-- Ambient background -->
+  <div class="bg-grain"></div>
+  <div class="bg-glow bg-glow--1"></div>
+  <div class="bg-glow bg-glow--2"></div>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header__inner header__inner--wide">
+      <div class="header__brand">
+        <div class="header__logo">
+          <svg viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M16 6C16 6 20 10 20 16C20 22 16 26 16 26" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M16 6C16 6 12 10 12 16C12 22 16 26 16 26" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M6 16H26" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M7.5 11H24.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+            <path d="M7.5 21H24.5" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.5"/>
+          </svg>
+        </div>
+        <div class="header__text">
+          <span class="header__title">PalmAnnotate</span>
+          <span class="header__sub">Oil Palm - Offline</span>
+        </div>
+      </div>
+
+      <!-- Dataset toolbar -->
+      <div class="dataset-toolbar" id="dataset-toolbar">
+        <!-- File inputs (visually hidden but still clickable from JS) -->
+        <input type="file" id="input-folder" webkitdirectory multiple accept=".jpg,.jpeg,.png,.txt" class="sr-only" tabindex="-1" aria-hidden="true">
+        <input type="file" id="input-session" accept=".json" class="sr-only" tabindex="-1" aria-hidden="true">
+
+        <button type="button" class="btn btn--outline btn--sm" id="btn-load-folder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Load Folder
+        </button>
+
+        <button type="button" class="btn btn--ghost btn--sm" id="btn-load-session" title="Load a saved output JSON to continue work">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          Load Session
+        </button>
+
+        <button type="button" class="btn btn--accent btn--sm" id="btn-capture-tree" title="Capture a new tree (4 photos) with the camera">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Capture
+        </button>
+
+        <div class="tree-nav hidden" id="tree-nav">
+          <button class="btn-icon btn-icon--sm" id="btn-prev-tree" title="Previous tree [">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <select class="tree-select" id="tree-select" title="Select tree"></select>
+          <span class="tree-meta tree-meta--split" id="tree-split" aria-live="polite"></span>
+          <span class="tree-meta tree-meta--sides" id="tree-sides" aria-live="polite"></span>
+          <span class="tree-save-status hidden" id="tree-save-status" title="Save status"></span>
+          <button class="btn-icon btn-icon--sm" id="btn-next-tree" title="Next tree ]">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <span class="tree-counter" id="tree-counter"></span>
+          <span class="save-counter hidden" id="save-counter" title="Saved tree count"></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main workspace -->
+  <main class="workspace" id="workspace">
+
+    <!-- Empty state -->
+    <div class="empty-state" id="empty-state">
+      <div class="empty-state__icon">
+        <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="8" y="16" width="48" height="36" rx="4"/>
+          <path d="M8 24h48"/>
+          <path d="M20 8l4 8M44 8l-4 8"/>
+          <circle cx="32" cy="36" r="8"/>
+          <path d="M29 36l2 2 4-4"/>
+        </svg>
+      </div>
+      <h2 class="empty-state__title">No tree loaded</h2>
+      <p class="empty-state__desc"><strong>Capture</strong> a new tree (4 photos) with the camera, or <strong>Load Folder</strong> to open an existing dataset of images and YOLO labels.</p>
+      <div class="empty-state__actions">
+        <button class="btn btn--accent" id="btn-capture-tree-hero">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Capture Tree
+        </button>
+        <button class="btn btn--primary" id="btn-load-folder-hero">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Load Folder
+        </button>
+      </div>
+    </div>
+
+    <!-- Editor (shown after loading) -->
+    <div class="editor-area hidden" id="editor-area">
+
+      <!-- Tabs -->
+      <div class="tabs" id="tabs">
+        <button class="tab" data-tab="carousel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M19 8v8M22 10v4"/></svg>
+          Annotate
+        </button>
+        <button class="tab active" data-tab="annotation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Annotation Editor
+        </button>
+        <button class="tab" data-tab="dedup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Deduplication
+        </button>
+        <button class="tab" data-tab="results">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-5 5"/></svg>
+          Results
+        </button>
+      </div>
+
+      <!-- ?? Tab: Annotation Editor ?? -->
+      <!-- Tab: Annotate (touch carousel) -->
+      <div class="tab-panel hidden" id="panel-carousel"></div>
+
+      <div class="tab-panel active" id="panel-annotation">
+        <div class="annotation-layout">
+          <!-- Side pills + toolbar -->
+          <div class="annotation-sidebar">
+            <div class="side-pills" id="side-pills">
+              <!-- Populated dynamically by app.js based on tree's side count -->
+            </div>
+
+            <div class="editor-toolbar">
+              <div class="toolbar-group">
+                <span class="toolbar-label">Class</span>
+                <div class="class-buttons">
+                  <button class="btn-class btn-b1" data-class="1" title="B1 - Press [1]">B1</button>
+                  <button class="btn-class btn-b2" data-class="2" title="B2 - Press [2]">B2</button>
+                  <button class="btn-class btn-b3" data-class="3" title="B3 - Press [3]">B3</button>
+                  <button class="btn-class btn-b4" data-class="4" title="B4 - Press [4]">B4</button>
+                </div>
+              </div>
+              <div class="toolbar-group">
+                <span class="toolbar-label">Action</span>
+                <button class="btn btn--ghost btn--sm" id="btn-delete-bbox" title="Delete [Del]">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                  Delete
+                </button>
+                <button class="btn btn--ghost btn--sm" id="btn-detect-side" title="Auto-detect bunches on this side (YOLO)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>
+                  Detect
+                </button>
+              </div>
+              <div class="toolbar-group">
+                <span class="toolbar-label">View</span>
+                <button class="btn btn--ghost btn--sm" id="btn-toggle-magnifier" title="Magnifier [M]">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+                  Magnifier
+                </button>
+              </div>
+            </div>
+
+            <div class="bbox-stats" id="bbox-stats">
+              <span class="bbox-count" id="bbox-count">0 bbox</span>
+            </div>
+
+            <div class="file-info" id="file-info"></div>
+
+            <div class="editor-hints">
+              <p class="hints-title">Edit bbox</p>
+              <p>Drag empty area -> new bbox</p>
+              <p>Click bbox -> select</p>
+              <p>Drag bbox -> move</p>
+              <p>Drag corner/edge -> resize</p>
+              <p>[1-4] -> change class</p>
+              <p>[Del] -> delete</p>
+              <p>[Esc] -> clear selection</p>
+              <p>[M] -> magnifier on/off</p>
+              <p class="hints-title hints-title--mt">Navigation</p>
+              <p><kbd>[</kbd> / <kbd>]</kbd> -> previous/next tree</p>
+              <p><kbd>Q</kbd> / <kbd>E</kbd> -> previous/next side</p>
+            </div>
+          </div>
+
+          <!-- Canvas -->
+          <div class="canvas-wrapper" id="editor-canvas-wrapper">
+            <canvas id="editor-canvas" class="editor-canvas" tabindex="0"></canvas>
+            <div class="canvas-placeholder" id="canvas-placeholder">Select a side to start editing</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Dedup -->
+      <div class="tab-panel hidden" id="panel-dedup">
+        <div class="dedup-header">
+          <div class="dedup-pair-nav">
+            <button class="btn-icon btn-icon--sm" id="btn-prev-pair">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <span class="dedup-pair-label" id="dedup-pair-label">Side 1 <-> Side 2</span>
+            <button class="btn-icon btn-icon--sm" id="btn-next-pair">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          </div>
+          <button class="btn btn--outline btn--sm" id="btn-run-suggestions">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Run Suggestions
+          </button>
+          <button class="btn btn--ghost btn--sm active" id="btn-toggle-dedup-magnifier" title="Disable magnifier [M]">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
+            Magnifier
+          </button>
+          <button class="btn btn--ghost btn--sm active" id="btn-toggle-dedup-suggestions" title="Hide automatic suggestions [S]">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            Suggestions
+          </button>
+
+          <button class="btn btn--primary btn--sm" id="btn-compute" title="Mark this tree complete: compute unique bunches and save output JSON">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Compute &amp; Mark Complete
+          </button>
+
+          <!-- Dedup edit toolbar: change class / delete for the currently selected bbox -->
+          <div class="dedup-edit-toolbar" id="dedup-edit-toolbar">
+            <span class="dedup-edit-label" id="dedup-edit-label">Select bbox</span>
+            <div class="dedup-edit-classes">
+              <button class="btn-class btn-b1 btn-class--xs" data-dedup-class="1" title="Change to B1 [1]">B1</button>
+              <button class="btn-class btn-b2 btn-class--xs" data-dedup-class="2" title="Change to B2 [2]">B2</button>
+              <button class="btn-class btn-b3 btn-class--xs" data-dedup-class="3" title="Change to B3 [3]">B3</button>
+              <button class="btn-class btn-b4 btn-class--xs" data-dedup-class="4" title="Change to B4 [4]">B4</button>
+            </div>
+            <button class="btn btn--ghost btn--sm" id="btn-dedup-delete" title="Delete bbox [Del]">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              Delete
+            </button>
+          </div>
+
+          <button type="button" class="dedup-help" id="btn-dedup-help" aria-label="Help"
+            title="Click left bbox -> click right bbox -> link
+Drag empty area -> new bbox
+
+Shortcut:
+Left/Right arrows  pair
+R    run suggestions
+S    show/hide suggestions
+M    magnifier on/off
+1-4  change selected bbox class
+Del  delete selected bbox">?</button>
+        </div>
+
+        <div class="dedup-canvases">
+          <div class="dedup-canvas-block">
+            <div class="dedup-canvas-label" id="dedup-left-label">Side 1</div>
+            <div class="dedup-canvas-info" id="dedup-left-info"></div>
+            <canvas id="dedup-left-canvas" class="dedup-canvas"></canvas>
+          </div>
+          <div class="dedup-canvas-block">
+            <div class="dedup-canvas-label" id="dedup-right-label">Side 2</div>
+            <div class="dedup-canvas-info" id="dedup-right-info"></div>
+            <canvas id="dedup-right-canvas" class="dedup-canvas"></canvas>
+          </div>
+        </div>
+
+        <div class="dedup-panels-wrapper">
+          <button class="dedup-panels-toggle" id="btn-toggle-panels">&#9660; Suggestions &amp; Link</button>
+          <div class="dedup-panels" id="dedup-panels-container">
+            <div class="dedup-panel">
+              <h3 class="dedup-panel-title">Algorithm Suggestions</h3>
+              <div id="dedup-suggestions"></div>
+            </div>
+            <div class="dedup-panel">
+              <h3 class="dedup-panel-title">Confirmed Links</h3>
+              <div id="dedup-links"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Results -->
+      <div class="tab-panel hidden" id="panel-results">
+        <div class="results-header">
+          <button class="btn btn--accent btn--sm" id="btn-save-output" title="Save the latest output JSON without recomputing">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save Output Again
+          </button>
+          <div class="export-buttons hidden" id="export-buttons">
+            <button class="btn btn--outline btn--sm" id="btn-export-yolo" title="Download YOLO labels per side, including mismatch files if any">Export YOLO</button>
+            <button class="btn btn--outline btn--sm" id="btn-export-json" title="Download session JSON for backup and loading later">Export Session JSON</button>
+            <button class="btn btn--outline btn--sm" id="btn-export-csv" title="Download per-tree counting summary as CSV">Export CSV</button>
+            <button class="btn btn--outline btn--sm" id="btn-export-identity" title="Download unique-bunch identities and member detections">Export Identity JSON</button>
+          </div>
+        </div>
+        <div id="results-container"></div>
+      </div>
+
+    </div><!-- /editor-area -->
+  </main>
+
+  <!-- Project Config Modal -->
+  <div class="modal-overlay hidden" id="modal-project-config">
+    <div class="modal">
+      <div class="modal__header">
+        <h2 class="modal__title">Output Settings</h2>
+        <p class="modal__desc">Choose where PalmAnnotate saves corrected files. Output names stay aligned with the original dataset.</p>
+      </div>
+      <div class="modal__body">
+        <div class="form-group">
+          <label class="form-label">Output JSON Folder</label>
+          <div class="form-row">
+            <button class="btn btn--outline btn--sm" id="btn-pick-output-dir">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              Choose Folder
+            </button>
+            <span class="form-value" id="cfg-output-dir-name">Not selected</span>
+          </div>
+          <span class="form-hint">Per-tree files are saved as <code>{tree_name}.json</code>, replacing the matching output file when saved again.</span>
+          <span class="form-hint" id="cfg-fs-warning" style="display:none;color:var(--c-warning)">This browser does not support the File System Access API. Output will be downloaded instead.</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">YOLO Label Folder (.txt)</label>
+          <div class="form-row">
+            <button class="btn btn--outline btn--sm" id="btn-pick-labels-dir">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              Choose Folder
+            </button>
+            <span class="form-value" id="cfg-labels-dir-name">Not selected</span>
+            <button class="btn btn--ghost btn--sm" id="btn-clear-labels-dir" type="button" title="Clear selection and do not write .txt files">Clear</button>
+          </div>
+          <span class="form-hint">Optional. Corrected labels keep the original per-side filename and are written under the same split folder.</span>
+        </div>
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--primary" id="btn-cfg-confirm">Start Annotation</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mismatch Resolve Modal -->
+  <div class="modal-overlay hidden" id="modal-mismatch">
+    <div class="modal modal--wide">
+      <div class="modal__header">
+        <h2 class="modal__title">Bunch Class Resolution</h2>
+        <p class="modal__desc">Some confirmed bunches have inconsistent classes across sides. Choose the final class for each bunch before continuing.</p>
+      </div>
+      <div class="modal__body" id="mismatch-body">
+        <!-- Populated dynamically -->
+      </div>
+      <div class="modal__footer">
+        <button class="btn btn--ghost" id="btn-mismatch-cancel">Cancel</button>
+        <button class="btn btn--primary" id="btn-mismatch-confirm">Apply &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts - load order matters -->
+  <script src="js/yolo-io.js"></script>
+  <!-- Storage abstraction (must load before dataset/project/fs-output) -->
+  <script src="js/storage/storage-adapter.js"></script>
+  <script src="js/storage/fsa-adapter.js"></script>
+  <script src="js/storage/capacitor-adapter.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/dedup-utils.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/dataset.js"></script>
+  <script src="js/bbox-editor.js"></script>
+  <script src="js/dedup-ui.js"></script>
+  <script src="js/results.js"></script>
+  <script src="js/project.js"></script>
+  <script src="js/output-schema.js"></script>
+  <script src="js/fs-output.js"></script>
+  <script src="js/persist/session-store.js"></script>
+  <script src="js/capture/capture-source.js"></script>
+  <script src="js/capture/orbbec-source.js"></script>
+  <script src="js/capture/capture-flow.js"></script>
+  <script src="js/detect/detector.js"></script>
+  <script src="js/carousel/carousel-ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

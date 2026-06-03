@@ -1,0 +1,375 @@
+/* ============================================
+   PalmAnnotate - Capture-first flow (Phase 2)
+   Touch/finger-first overlay UI. Min 56px tap
+   targets. Reuses style.css design tokens.
+   All rules scoped under .capture-* so nothing
+   leaks into the rest of the app.
+   ============================================ */
+
+/* ---- Root overlay ---- */
+.capture-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;                 /* above modals (1000) and magnifier (9999 is non-interactive) */
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: rgba(8, 14, 8, 0.92);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  color: var(--c-text);
+  font-family: var(--f-body);
+  /* Respect notches / home indicators on phones. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---- Centered card panel (metadata / side / review / saving) ---- */
+.capture-panel {
+  margin: auto;
+  width: 100%;
+  max-width: 460px;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.capture-title {
+  font-family: var(--f-display);
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--c-text);
+}
+
+.capture-subtitle {
+  color: var(--c-text-muted);
+  font-size: 0.95rem;
+  margin-top: calc(-1 * var(--space-sm));
+}
+
+/* ---- Metadata form ---- */
+.capture-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.capture-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.capture-field__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--c-text-dim);
+}
+
+.capture-input {
+  min-height: 56px;
+  width: 100%;
+  padding: 0 var(--space-md);
+  font-family: var(--f-body);
+  font-size: 1rem;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  transition: border-color 160ms var(--ease);
+  appearance: none;
+}
+
+.capture-input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+}
+
+select.capture-input {
+  /* Custom chevron so the native control matches the dark theme. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a3c4a3' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-md) center;
+  padding-right: var(--space-xl);
+}
+
+.capture-input--readonly {
+  color: var(--c-text-muted);
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+}
+
+/* ---- GPS row ---- */
+.capture-gps {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.capture-gps__status {
+  font-family: var(--f-mono);
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+}
+
+/* ---- Buttons (touch-first, min 56px) ---- */
+.capture-btn {
+  min-height: 56px;
+  padding: 0 var(--space-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  font-family: var(--f-body);
+  font-size: 1rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease),
+              transform 120ms var(--ease), opacity 160ms var(--ease);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.capture-btn:active:not(:disabled) { transform: scale(0.97); }
+.capture-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.capture-btn--primary {
+  background: var(--c-accent);
+  color: var(--c-bg);
+}
+.capture-btn--primary:hover:not(:disabled) { background: #c8f05a; }
+
+.capture-btn--outline {
+  background: transparent;
+  color: var(--c-text);
+  border-color: var(--c-border-hover);
+}
+.capture-btn--outline:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.capture-btn--ghost {
+  background: transparent;
+  color: var(--c-text-muted);
+}
+.capture-btn--ghost:hover:not(:disabled) {
+  color: var(--c-text);
+  background: var(--c-surface-raised);
+}
+
+/* ---- Action bar ---- */
+.capture-actions {
+  display: flex;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+.capture-actions .capture-btn { flex: 1; }
+.capture-actions--review { margin-top: var(--space-md); }
+
+/* ---- Side progress ---- */
+.capture-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.capture-progress__dots {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.capture-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--c-surface-raised);
+  border: 1px solid var(--c-border);
+  transition: background 160ms var(--ease), transform 160ms var(--ease);
+}
+.capture-dot--done { background: var(--c-emerald); border-color: transparent; }
+.capture-dot--active {
+  background: var(--c-accent);
+  border-color: transparent;
+  transform: scale(1.25);
+}
+
+/* ---- Captured-frame preview (review step) ---- */
+.capture-preview {
+  width: 100%;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.capture-preview__img {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+}
+
+/* ---- Saving panel ---- */
+.capture-saving {
+  align-items: center;
+  text-align: center;
+}
+.capture-spinner {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 4px solid var(--c-border);
+  border-top-color: var(--c-accent);
+  animation: captureSpin 800ms linear infinite;
+}
+@keyframes captureSpin { to { transform: rotate(360deg); } }
+
+/* ============================================
+   Live camera overlay (web getUserMedia path)
+   Full-screen video + circular shutter.
+   ============================================ */
+.capture-cam {
+  background: #000;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.capture-cam__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.capture-cam__bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+}
+
+/* Spacer mirrors the cancel button width so the shutter stays centered. */
+.capture-cam__spacer {
+  width: 92px;
+  flex-shrink: 0;
+}
+
+.capture-cam__cancel {
+  min-width: 92px;
+  min-height: 56px;
+  padding: 0 var(--space-md);
+  font-family: var(--f-body);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--c-border-hover);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.capture-cam__cancel:active { transform: scale(0.97); }
+
+.capture-cam__shutter {
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: #fff;
+  border: 5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 120ms var(--ease);
+}
+.capture-cam__shutter:active { transform: scale(0.92); }
+
+/* ---- Shared util ---- */
+.capture-overlay .hidden { display: none !important; }
+
+/* ---- Narrow phones ---- */
+@media (max-width: 380px) {
+  .capture-panel { padding: var(--space-lg) var(--space-md); }
+  .capture-title { font-size: 1.65rem; }
+}
+
+/* Android portrait phones around 9:20 through 9:16: keep capture controls
+   reachable while preserving enough preview height for photo review. */
+@media (pointer: coarse) and (max-width: 480px) and (min-aspect-ratio: 9 / 20) and (max-aspect-ratio: 9 / 16) {
+  .capture-panel {
+    max-width: none;
+    gap: var(--space-md);
+    padding: var(--space-lg) var(--space-md);
+  }
+
+  .capture-form {
+    gap: var(--space-sm);
+  }
+
+  .capture-input,
+  .capture-btn {
+    min-height: 52px;
+  }
+
+  .capture-actions {
+    gap: var(--space-sm);
+  }
+
+  .capture-preview__img {
+    max-height: 54dvh;
+  }
+
+  .capture-cam__bar {
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+  }
+
+  .capture-cam__cancel {
+    min-width: 84px;
+  }
+
+  .capture-cam__spacer {
+    width: 84px;
+  }
+
+  .capture-cam__shutter {
+    width: 72px;
+    height: 72px;
+  }
+}
+
+/* 4:3 tablets can use a wider capture panel without stretching the controls
+   across the full screen. */
+@media (pointer: coarse) and (min-width: 900px) and (max-width: 1180px) and (max-aspect-ratio: 4 / 3) {
+  .capture-panel {
+    max-width: 620px;
+  }
+
+  .capture-preview__img {
+    max-height: 64vh;
+  }
+
+  .capture-cam__bar {
+    padding-left: clamp(var(--space-lg), 8vw, 96px);
+    padding-right: clamp(var(--space-lg), 8vw, 96px);
+  }
+}

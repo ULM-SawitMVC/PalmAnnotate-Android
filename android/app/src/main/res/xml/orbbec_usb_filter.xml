@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    USB device filter for the Orbbec USB (RGB-D) camera.
+
+    vendor-id 11205 == 0x2BC5 (Orbbec). This matches every Orbbec USB device.
+    To restrict to specific models later, add product-id attributes, e.g.:
+        <usb-device vendor-id="11205" product-id="..." />
+    (product ids vary per Orbbec model — read them from listDevices()).
+-->
+<resources>
+    <usb-device vendor-id="11205" />
+</resources>

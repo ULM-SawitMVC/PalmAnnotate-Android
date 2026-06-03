@@ -1,0 +1,399 @@
+/* ============================================================================
+   carousel.css — touch-first one-side-at-a-time annotation surface (Phase 4).
+   Finger-first equivalent of the desktop DedupUI. Every rule is scoped under
+   .carousel-* / .crsl-* so nothing leaks into the existing tabs.
+   ========================================================================== */
+
+.carousel-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: var(--space-sm);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── Top bar: mode segmented control + side/selection readout ─────────────── */
+.carousel-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+  padding: var(--space-xs) 0;
+}
+
+.crsl-seg {
+  display: inline-flex;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 3px;
+}
+
+.crsl-seg__btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-family: var(--f-body);
+  font-weight: 600;
+  font-size: 0.9rem;
+  min-height: 40px;
+  padding: 0 1.1rem;
+  border-radius: calc(var(--r-md) - 3px);
+  cursor: pointer;
+  transition: background 0.18s var(--ease), color 0.18s var(--ease);
+}
+
+.crsl-seg__btn--active {
+  background: var(--c-accent);
+  color: #0c120c;
+}
+
+.crsl-sidelabel {
+  color: var(--c-text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Stage: clips the sliding track + hosts swipe gestures ────────────────── */
+.carousel-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.03), transparent 60%),
+    var(--c-bg);
+  border: 1px solid var(--c-border);
+  touch-action: pan-y; /* allow vertical scroll; horizontal handled as swipe */
+}
+
+.carousel-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  will-change: transform;
+}
+.carousel-track--out-left  { transition: transform 0.14s var(--ease-smooth); transform: translateX(-22%); opacity: 0.5; }
+.carousel-track--out-right { transition: transform 0.14s var(--ease-smooth); transform: translateX(22%);  opacity: 0.5; }
+.carousel-track--in-left   { transform: translateX(-22%); opacity: 0.5; }
+.carousel-track--in-right  { transform: translateX(22%);  opacity: 0.5; }
+/* When no start/animation class is present the track rests at 0 with a smooth
+   transition (set inline by the JS during live drag). */
+.carousel-track:not([style*="transform"]) { transition: transform 0.2s var(--ease-smooth); }
+
+.carousel-slide {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.carousel-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none; /* editor / hit-testing own the canvas */
+}
+
+/* Edge tap zones — large, low-contrast affordances. */
+.crsl-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.18s var(--ease), background 0.18s var(--ease);
+  z-index: 3;
+}
+.crsl-edge:hover, .crsl-edge:active { opacity: 0.9; background: rgba(0, 0, 0, 0.25); }
+.crsl-edge--left  { left: 0;  }
+.crsl-edge--right { right: 0; }
+.crsl-edge span { pointer-events: none; }
+/* In EDIT mode the editor owns gestures; hide edge zones to avoid mis-taps. */
+.carousel-root--edit .crsl-edge { display: none; }
+
+/* Transient hint banner. */
+.crsl-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translate(-50%, 12px);
+  background: rgba(12, 18, 12, 0.92);
+  border: 1px solid var(--c-border-hover);
+  color: var(--c-text);
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.55rem 1rem;
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-soft);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease), transform 0.2s var(--ease);
+  z-index: 5;
+  max-width: 86%;
+  text-align: center;
+}
+.crsl-hint--show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ── Bottom controls ─────────────────────────────────────────────────────── */
+.carousel-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Dots / segment indicator. */
+.crsl-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.crsl-dot {
+  position: relative;
+  width: 26px;
+  height: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-raised);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.18s var(--ease), width 0.18s var(--ease);
+}
+.crsl-dot--has-boxes { background: var(--c-text-dim); }
+.crsl-dot--has-links { box-shadow: 0 0 0 2px var(--c-accent-dim); }
+.crsl-dot--current { width: 40px; background: var(--c-accent); border-color: var(--c-accent); }
+
+/* Thumbnail strip. */
+.crsl-thumbs {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+.crsl-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 64px;
+  height: 48px;
+  border-radius: var(--r-sm);
+  border: 2px solid var(--c-border);
+  background: var(--c-surface);
+  overflow: hidden;
+  cursor: pointer;
+  padding: 0;
+}
+.crsl-thumb--current { border-color: var(--c-accent); }
+.crsl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.crsl-thumb__cap {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--c-text);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  padding: 6px 4px 2px;
+  text-align: center;
+}
+
+/* Class bar: B1-B4 chips + Link + Delete. */
+.crsl-classbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.crsl-chip {
+  --chip-color: var(--c-accent);
+  appearance: none;
+  min-width: 52px;
+  min-height: 48px;
+  padding: 0 0.9rem;
+  border-radius: var(--r-md);
+  border: 2px solid var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 16%, transparent);
+  color: var(--c-text);
+  font-family: var(--f-body);
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), transform 0.05s linear;
+}
+.crsl-chip:active { transform: scale(0.96); }
+.crsl-chip--active { background: var(--chip-color); color: #0c120c; }
+.crsl-chip:disabled { opacity: 0.4; cursor: default; }
+
+.crsl-classbar__spacer { flex: 1; }
+
+.crsl-action {
+  appearance: none;
+  min-height: 48px;
+  padding: 0 1.1rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border-hover);
+  background: var(--c-surface-raised);
+  color: var(--c-text);
+  font-family: var(--f-body);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.crsl-action:disabled { opacity: 0.4; cursor: default; }
+.crsl-action--link.crsl-action--armed {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: #0c120c;
+}
+.crsl-action--del { border-color: color-mix(in srgb, var(--c-red) 55%, var(--c-border)); }
+.crsl-action--del:not(:disabled):active { background: color-mix(in srgb, var(--c-red) 22%, var(--c-surface-raised)); }
+
+/* Confirmed-links list for the current side. */
+.crsl-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.crsl-links--empty { display: none; }
+.crsl-link-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-xl);
+  padding: 0.25rem 0.4rem 0.25rem 0.3rem;
+}
+.crsl-link-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.crsl-link-label { font-size: 0.8rem; color: var(--c-text-muted); }
+.crsl-link-del {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--c-text-dim);
+  font-size: 1.1rem;
+  line-height: 1;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.crsl-link-del:active { background: rgba(255, 255, 255, 0.08); color: var(--c-red); }
+
+/* On fine-pointer (desktop) shrink the touch targets a touch. */
+@media (pointer: fine) {
+  .crsl-chip, .crsl-action { min-height: 38px; }
+  .crsl-edge { width: 44px; }
+}
+
+/* Android portrait phones around 9:20 through 9:16 keep the one-side editor
+   dominant by trimming optional chrome and making actions wrap predictably. */
+@media (pointer: coarse) and (max-width: 480px) and (min-aspect-ratio: 9 / 20) and (max-aspect-ratio: 9 / 16) {
+  .carousel-root {
+    gap: var(--space-xs);
+  }
+
+  .carousel-topbar {
+    gap: var(--space-xs);
+    flex-wrap: nowrap;
+  }
+
+  .crsl-seg {
+    flex: 0 0 auto;
+  }
+
+  .crsl-seg__btn {
+    min-height: 44px;
+    padding: 0 0.75rem;
+    font-size: 0.84rem;
+  }
+
+  .crsl-sidelabel {
+    font-size: 0.78rem;
+  }
+
+  .carousel-bottom {
+    gap: var(--space-xs);
+  }
+
+  .crsl-thumbs {
+    display: none;
+  }
+
+  .crsl-dots {
+    gap: 0.35rem;
+  }
+
+  .crsl-classbar {
+    gap: 0.4rem;
+  }
+
+  .crsl-classbar__spacer {
+    display: none;
+  }
+
+  .crsl-chip {
+    flex: 1 1 calc(25% - 0.4rem);
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 0.35rem;
+  }
+
+  .crsl-action {
+    flex: 1 1 calc(50% - 0.4rem);
+    min-height: 44px;
+    padding: 0 0.6rem;
+  }
+
+  .crsl-edge {
+    width: 44px;
+  }
+}
+
+/* 4:3 tablets keep thumbnail navigation visible without letting it compete
+   with the main canvas. */
+@media (pointer: coarse) and (min-width: 900px) and (max-width: 1180px) and (max-aspect-ratio: 4 / 3) {
+  .carousel-topbar {
+    flex-wrap: nowrap;
+  }
+
+  .crsl-thumb {
+    width: 56px;
+    height: 42px;
+  }
+
+  .crsl-chip,
+  .crsl-action {
+    min-height: 44px;
+  }
+}

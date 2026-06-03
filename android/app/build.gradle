@@ -1,0 +1,96 @@
+apply plugin: 'com.android.application'
+// Kotlin support for the native Orbbec plugin (OrbbecPlugin.kt). The
+// kotlin-gradle-plugin classpath is declared in the root build.gradle.
+apply plugin: 'kotlin-android'
+
+android {
+    namespace "dev.sawitulm.palmannotate"
+    compileSdk rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "dev.sawitulm.palmannotate"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // ── Release signing (DISABLED template) ──────────────────────────────────
+    // To ship a signed release APK/AAB, generate a keystore and enable this block.
+    // Full step-by-step (keytool command + env vars): docs/android-build.md.
+    //
+    // The config reads credentials from environment variables so no secrets are
+    // committed. Set these in your shell/CI before `./gradlew assembleRelease`:
+    //   PA_KEYSTORE        absolute path to the .keystore/.jks (defaults to
+    //                      android/app/release.keystore when unset)
+    //   PA_KEYSTORE_PASS   keystore (store) password
+    //   PA_KEY_ALIAS       key alias inside the keystore
+    //   PA_KEY_PASS        key password (often the same as the store password)
+    //
+    // signingConfigs {
+    //     release {
+    //         storeFile file(System.getenv('PA_KEYSTORE') ?: 'release.keystore')
+    //         storePassword System.getenv('PA_KEYSTORE_PASS')
+    //         keyAlias System.getenv('PA_KEY_ALIAS')
+    //         keyPassword System.getenv('PA_KEY_PASS')
+    //     }
+    // }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Uncomment the line below (and the signingConfigs block above) to
+            // sign release builds. See docs/android-build.md.
+            // signingConfig signingConfigs.release
+        }
+    }
+    // Match the Java 17 target Capacitor sets in capacitor.build.gradle so the
+    // Kotlin and Java compilers agree on the JVM bytecode level.
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    // Kotlin standard library for the native Orbbec plugin (OrbbecPlugin.kt).
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$rootProject.ext.kotlinVersion"
+
+    // TODO(Orbbec): drop the Orbbec Android SDK .aar into android/app/libs/ and
+    // uncomment the line below to put it on the compile/runtime classpath. The
+    // existing flatDir repo (see the repositories block above, dirs 'libs')
+    // already exposes android/app/libs, so no extra repository is needed for an
+    // .aar placed there. If the SDK ships as a Maven artifact instead, add its
+    // repository + a normal implementation "<group>:<artifact>:<version>" line.
+    // implementation fileTree(dir: 'libs', include: ['*.aar'])
+
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

@@ -1,0 +1,50 @@
+# Firecrawl cache
+.firecrawl/
+
+# Claude Code
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Debug logs
+debug.log
+*.log
+
+# Local dataset (tidak perlu di-repo)
+Damimas_Only/
+
+# Claude Code project instructions (lokal)
+CLAUDE.md
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
+
+# On-device model weights (large; swap-in — folder + config are committed)
+models/*.onnx
+
+# Capacitor / Node (commit android/ source, ignore build artifacts)
+node_modules/
+www/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.idea/
+*.iml
