@@ -51,12 +51,15 @@
 
 .home__stats {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-md);
+  width: 100%;
+  min-width: 0;
 }
-.home__stats--three { grid-template-columns: 1fr 1fr 1fr; }
+.home__stats--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .stat-card {
+  min-width: 0;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
   border-radius: 18px;
@@ -430,6 +433,40 @@
   }
   .home__hero h1 { font-size: 2rem; }
   .stat-card__num { font-size: 2.4rem; }
+}
+
+@media (max-width: 380px) {
+  .home__scroll {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+    gap: var(--space-md);
+  }
+
+  .home__stats--three {
+    gap: var(--space-sm);
+  }
+
+  .home__stats--three .stat-card {
+    padding: var(--space-md) var(--space-xs);
+    border-radius: 16px;
+  }
+
+  .home__stats--three .stat-card__num {
+    font-size: clamp(1.35rem, 8vw, 1.8rem);
+  }
+
+  .home__stats--three .stat-card__label {
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+  }
+
+  .lock-badge {
+    padding: var(--space-md);
+  }
+
+  .lock-badge__title {
+    font-size: 1rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

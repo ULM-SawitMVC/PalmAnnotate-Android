@@ -2611,6 +2611,47 @@ kbd {
     min-height: 0;
   }
 
+  body:not(.is-home) .header__inner--wide {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    min-height: 0;
+    gap: 6px;
+  }
+
+  body:not(.is-home) .header__brand {
+    display: none;
+  }
+
+  body:not(.is-home) .dataset-toolbar {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    width: 100%;
+    gap: var(--space-xs);
+  }
+
+  body:not(.is-home) #btn-load-folder,
+  body:not(.is-home) #btn-load-session {
+    display: none;
+  }
+
+  body:not(.is-home) #btn-home {
+    grid-column: 1;
+    grid-row: 1;
+    width: 44px;
+    min-width: 44px;
+  }
+
+  body:not(.is-home) .tree-nav {
+    grid-column: 2;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    width: 100%;
+    gap: var(--space-xs);
+  }
+
   .tabs {
     flex-wrap: nowrap;
     overflow-x: auto;
@@ -2620,23 +2661,6 @@ kbd {
   .tab {
     flex: 0 0 auto;
     min-height: 42px;
-  }
-
-  .dataset-toolbar {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-xs);
-  }
-
-  .dataset-toolbar > .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .tree-nav {
-    grid-column: 1 / -1;
-    width: 100%;
-    gap: var(--space-xs);
   }
 
   .tree-select {
