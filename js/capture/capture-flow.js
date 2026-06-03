@@ -784,6 +784,44 @@ const CaptureFlow = (() => {
     };
   }
 
+  /**
+   * On native, make sure the Android CAMERA runtime permission is GRANTED before
+   * any getUserMedia call. This sidesteps a Capacitor WebView bug: when its
+   * onPermissionRequest has to request the runtime permission mid-stream, the
+   * result handler can call grant()/deny() twice and crash the Activity
+   * ("IllegalStateException: Either grant() or deny() has been already called"),
+   * which kicks the operator out of the app — then the reopened app prompts a
+   * second time before the camera finally streams.
+   *
+   * Requesting up-front through the Camera plugin's own (correct) permission flow
+   * means that by the time getUserMedia runs the permission is already held, so
+   * onPermissionRequest grants immediately without the buggy round-trip — one
+   * clean prompt, no crash, camera works on the first try.
+   *
+   * Best-effort: never throws. A denial just lets capture fall back to the
+   * one-shot picker (getUserMedia will fail and _captureWeb uses the file input).
+   */
+  async function _ensureCameraPermission() {
+    try {
+      const native = window.Storage && Storage.isNative && Storage.isNative();
+      if (!native) return;
+      const Camera = window.Capacitor &&
+                     window.Capacitor.Plugins &&
+                     window.Capacitor.Plugins.Camera;
+      if (!Camera) return;
+      let status = null;
+      if (typeof Camera.checkPermissions === 'function') {
+        try { status = await Camera.checkPermissions(); } catch (_) { status = null; }
+      }
+      if (status && status.camera === 'granted') return;
+      if (typeof Camera.requestPermissions === 'function') {
+        await Camera.requestPermissions({ permissions: ['camera'] });
+      }
+    } catch (e) {
+      console.info('[CaptureFlow] camera permission pre-request skipped:', e);
+    }
+  }
+
   // ── Orchestration ───────────────────────────────────────────────────────────
 
   /**
@@ -832,6 +870,12 @@ const CaptureFlow = (() => {
       }
 
       // (b) capture every side (embedded, popup-free) + final review.
+      //     Pre-grant the camera runtime permission first so the WebView's
+      //     onPermissionRequest never has to request it mid-stream — that
+      //     mid-stream path can double-call grant()/deny() and crash the
+      //     Activity on the first capture. Placed AFTER the freeform metadata
+      //     form so that form still builds synchronously; no-op on web.
+      await _ensureCameraPermission();
       const shots = await _captureAllSides(overlay, sideCount, { onProgress }, ctl);
       if (!shots) { _teardown(overlay); return null; } // cancelled
 

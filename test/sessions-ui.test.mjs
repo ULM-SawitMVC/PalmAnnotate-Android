@@ -74,8 +74,8 @@ test('home renders rolled-up stats and a resumable session row', async () => {
   assert.equal(rowTitle.textContent, 'DAMIMAS · A21B');
 });
 
-test('opening a session shows the locked badge; +Pohon captures and records', async () => {
-  const { container, SessionsUI, SessionStore } = boot();
+test('opening a session shows the locked badge; +Pohon captures, records, and opens annotation', async () => {
+  const { container, SessionsUI, SessionStore, openedWith } = boot();
 
   const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B', sideCount: 4 });
   await SessionStore.addTreeToSession(s.id, { name: 'DAMIMAS_A21B_0001', treeId: 1, sideCount: 4 });
@@ -87,9 +87,12 @@ test('opening a session shows the locked badge; +Pohon captures and records', as
   assert.equal(container.querySelector('.lock-badge__title').textContent, 'DAMIMAS · A21B');
   assert.equal(container.querySelectorAll('.list-row').length, 1, 'one seeded pohon');
 
-  // + Pohon → capture hook returns 0002 → recorded → detail re-renders.
+  // + Pohon → capture hook returns 0002 → recorded → opens STRAIGHT into the
+  // annotation editor (no detour back to the tree list, matching "Next tree").
   container.querySelector('.sheet__cta').click();
-  await waitFor(() => container.querySelectorAll('.list-row').length === 2);
+  await waitFor(() => openedWith.some(o => o.name === 'DAMIMAS_A21B_0002'));
+  const opened0002 = openedWith.find(o => o.name === 'DAMIMAS_A21B_0002');
+  assert.equal(opened0002.sessionId, s.id, 'opens the new tree for the owning session');
 
   // The session index now has two pohon and nextId advanced to 3.
   const fresh = await SessionStore.getSession(s.id);

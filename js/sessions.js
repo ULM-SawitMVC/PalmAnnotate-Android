@@ -598,7 +598,16 @@ const SessionsUI = (() => {
       console.warn('[SessionsUI] addTreeToSession failed:', e);
     }
     _toast(`Tree ${tree.name} saved`, 'success');
-    _renderDetail(id);
+    // Go straight into annotation for the tree we just captured — same as the
+    // in-editor "Next tree" loop. Previously this re-rendered the tree list, so
+    // the very first capture dumped the operator back to the list and forced a
+    // manual tap (+ reload) to start annotating. Fall back to the detail list
+    // only when no host openPohon hook is wired (e.g. unit harness without it).
+    if (typeof _hooks.openPohon === 'function') {
+      _hooks.openPohon(tree.name, id);
+    } else {
+      _renderDetail(id);
+    }
   }
 
   async function _downloadSession(session) {
