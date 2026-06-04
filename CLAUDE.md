@@ -37,6 +37,13 @@ Run from the repo root. There is no separate lint step.
 ## Toolchain / starter pack (this machine)
 
 The Android build needs a **JDK** and the **Android SDK** — neither is on `PATH` by default here.
+
+> **READ THIS BEFORE BUILDING — do not search the disk for a JDK.** `JAVA_HOME` is **not** set
+> anywhere in the environment (not Machine/User scope, not the PowerShell profile), and there is **no
+> Android Studio install**. A bare `gradlew` fails with `JAVA_HOME is not set` (exit 49). The only JDK
+> is the unregistered Temurin at `C:\tools\jdk17\jdk-17.0.19+10` — **set it inline every build** (see
+> the block below). The locations in this table are the source of truth; trust them instead of probing.
+
 Verified working locations on this machine:
 
 | Tool         | Path                                   | Notes                                      |
@@ -105,6 +112,51 @@ an updated timestamp. Other Gradle targets: `assembleRelease` (needs a signing c
 
 > Capture GPS prompts for the Location permission on first launch — granting it is what makes the
 > in-app GPS work (the permission must also be declared in `AndroidManifest.xml`, which it is).
+
+## On-device testing & verification (adb + DevTools)
+
+**Read this instead of searching — the device, paths, and CDP flow are fixed and known.** Everything
+below was reconstructed from scratch once; it should never need rediscovering.
+
+- **Repo root (absolute):** `C:\Users\Zainal\Desktop\PalmAnnotate-Android`. The agent's reported cwd
+  may be `...\PalmAnnotate` (no `-Android`) — Glob/PowerShell default-dir searches miss the project;
+  **always pass the full path.**
+- **adb:** `C:\tools\android-sdk\platform-tools\adb.exe` (not on `PATH`).
+- **Device:** Xiaomi Pad 6 (`model:23043RP34G`, `device:pipa`), USB. Get the serial from `adb devices`
+  (was `5aa23bd6` — re-check, serials can change). The Orbbec **Gemini 335L** attaches via a **powered
+  USB hub**; `Orbbec.isAvailable()` returns `{available:false}` when it's unplugged.
+- **JDK / build:** see "Toolchain" + "Compile the Android APK" above (`C:\tools\jdk17\jdk-17.0.19+10`).
+
+Install the fresh APK and relaunch — **a running app keeps the OLD code until restarted**:
+
+```powershell
+$adb = 'C:\tools\android-sdk\platform-tools\adb.exe'
+$apk = 'C:\Users\Zainal\Desktop\PalmAnnotate-Android\android\app\build\outputs\apk\debug\app-debug.apk'
+& $adb install -r $apk
+& $adb shell am force-stop dev.sawitulm.palmannotate
+& $adb shell monkey -p dev.sawitulm.palmannotate -c android.intent.category.LAUNCHER 1
+```
+
+Screenshot (cheapest visual check; pull-to-file avoids PowerShell binary-stdout mangling):
+
+```powershell
+& $adb shell screencap -p /sdcard/pa.png ; & $adb pull /sdcard/pa.png "$env:TEMP\pa.png"   # then Read the PNG
+```
+
+Inspect the live WebView from the host via Chrome DevTools Protocol — confirms JS modules / native
+plugin methods are loaded and lets you `Runtime.evaluate` arbitrary expressions:
+
+```powershell
+$procId = (& $adb shell pidof dev.sawitulm.palmannotate).Trim()
+& $adb forward tcp:9222 localabstract:webview_devtools_remote_$procId
+# GET http://localhost:9222/json/list  -> take .webSocketDebuggerUrl, open it (Node global WebSocket),
+#   send {id,method:'Runtime.evaluate',params:{expression:'...',returnByValue:true}}
+& $adb forward --remove tcp:9222   # cleanup when done
+```
+
+The **live Orbbec depth stream + camera switch only render on the capture screen with the Orbbec
+source selected** (built-in camera is the default). Driving that whole flow over CDP is fragile —
+for a visual check, have the operator open the capture screen on Orbbec, then take one screenshot.
 
 ## Module map (`js/`)
 

@@ -446,15 +446,24 @@ const CaptureFlow = (() => {
       let video = null;
       let progressHost = null;
       let deviceChangeHandle = null;  // native USB attach/detach subscription
+      let buildSeq = 0;
 
-      function finish(val) {
+      async function _stopCurrentPreview() {
+        const stop = stopPreview;
+        stopPreview = null;
+        if (!stop) return;
+        try { await stop(); } catch (_) {}
+      }
+
+      async function finish(val) {
         if (settled) return;
         settled = true;
+        buildSeq++;
         if (deviceChangeHandle && typeof deviceChangeHandle.remove === 'function') {
-          try { deviceChangeHandle.remove(); } catch (_) {}
+          try { await deviceChangeHandle.remove(); } catch (_) {}
           deviceChangeHandle = null;
         }
-        if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
+        await _stopCurrentPreview();
         resolve(val);
       }
 
@@ -466,10 +475,10 @@ const CaptureFlow = (() => {
         const Orbbec = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Orbbec;
         if (!Orbbec || typeof Orbbec.addListener !== 'function') return;
         try {
-          deviceChangeHandle = await Orbbec.addListener('orbbecDeviceChange', () => {
+          deviceChangeHandle = await Orbbec.addListener('orbbecDeviceChange', async () => {
             if (settled || busy) return;
-            if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
-            _buildSurface();
+            await _stopCurrentPreview();
+            if (!settled) _buildSurface();
           });
         } catch (_) { /* listener optional */ }
       }
@@ -516,19 +525,23 @@ const CaptureFlow = (() => {
           if (src.id === (source && source.id)) opt.selected = true;
           select.appendChild(opt);
         }
-        select.addEventListener('change', () => {
+        select.addEventListener('change', async () => {
           _selectedSourceId = select.value;
-          // Re-open the surface with the newly chosen source.
-          if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
-          _buildSurface();
+          // Re-open the surface with the newly chosen source. Awaiting the old
+          // preview stop prevents a native Orbbec pump from racing the next
+          // source's open/start path after USB-C detach/PD renegotiation.
+          await _stopCurrentPreview();
+          if (!settled) _buildSurface();
         });
         row.appendChild(select);
         return row;
       }
 
       async function _buildSurface() {
+        const seq = ++buildSeq;
         overlay.innerHTML = '';
         available = await _availableSources();
+        if (settled || seq !== buildSeq) return;
         source = _chooseSource(available);
 
         // Element-preview sources (Orbbec) render their own RGB + depth-field DOM
@@ -609,7 +622,7 @@ const CaptureFlow = (() => {
             if (busy || settled) return;
             refreshBtn.disabled = true;
             refreshBtn.textContent = 'Scanning…';
-            if (stopPreview) { try { await stopPreview(); } catch (_) {} stopPreview = null; }
+            await _stopCurrentPreview();
             try { await _refreshSources(); } catch (_) {}
             if (!settled) _buildSurface();
           });
@@ -633,26 +646,26 @@ const CaptureFlow = (() => {
             // If the operator cancelled (or switched source) while getUserMedia
             // was resolving, finish() already ran with stopPreview still null —
             // stop this now-orphaned stream so the camera doesn't stay live.
-            if (settled) { try { stop(); } catch (_) {} }
+            if (settled || seq !== buildSeq) { try { await stop(); } catch (_) {} }
             else { stopPreview = stop; }
           } catch (e) {
             console.info('[CaptureFlow] live preview unavailable, using one-shot capture:', e);
             previewMode = 'oneshot';
             live = false;
             stopPreview = null;
-            if (!settled) _buildSurface();
+            if (!settled && seq === buildSeq) _buildSurface();
           }
         } else if (elementPreview) {
           try {
             const stop = await source.mountPreview(stage);
-            if (settled) { try { await stop(); } catch (_) {} }
+            if (settled || seq !== buildSeq) { try { await stop(); } catch (_) {} }
             else { stopPreview = stop; }
           } catch (e) {
             console.info('[CaptureFlow] Orbbec live preview unavailable, using one-shot capture:', e);
             previewMode = 'oneshot';
             live = false;
             stopPreview = null;
-            if (!settled) _buildSurface();
+            if (!settled && seq === buildSeq) _buildSurface();
           }
         }
       }

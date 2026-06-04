@@ -201,6 +201,20 @@ test('OrbbecSource.mountPreview subscribes to frames, starts the pump, renders R
   assert.equal(stage.querySelector('.orbbec-live'), null, 'preview DOM removed on stop');
 });
 
+test('OrbbecSource.mountPreview cleans listener and DOM when native startPreview fails', async () => {
+  let removed = false;
+  const { ctx, dom } = loadOrbbecDom({
+    async requestPermission() { return { granted: true }; },
+    async addListener() { return { remove: async () => { removed = true; } }; },
+    async startPreview() { throw new Error('device disconnected'); },
+  });
+  const stage = dom.document.createElement('div');
+
+  await assert.rejects(() => ctx.OrbbecSource.mountPreview(stage), /device disconnected/);
+  assert.equal(removed, true, 'frame listener should be removed after start failure');
+  assert.equal(stage.querySelector('.orbbec-live'), null, 'preview DOM should be removed after start failure');
+});
+
 test('OrbbecSource.mountPreview rejects (so capture falls back) when USB permission is denied', async () => {
   const { ctx, dom } = loadOrbbecDom({
     async requestPermission() { return { granted: false }; },

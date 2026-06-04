@@ -11,6 +11,23 @@ function read(rel) {
   return readFileSync(join(root, rel), 'utf8');
 }
 
+function sliceBetween(source, start, end) {
+  const from = source.indexOf(start);
+  assert.notEqual(from, -1, `missing start marker: ${start}`);
+  const to = source.indexOf(end, from + start.length);
+  assert.notEqual(to, -1, `missing end marker after ${start}: ${end}`);
+  return source.slice(from, to);
+}
+
+function assertInOrder(source, labels) {
+  let cursor = -1;
+  for (const label of labels) {
+    const next = source.indexOf(label);
+    assert.ok(next > cursor, `${label} should appear after previous lifecycle step`);
+    cursor = next;
+  }
+}
+
 test('Android app id, namespace, strings, and Capacitor config stay aligned', () => {
   const cap = JSON.parse(read('capacitor.config.json'));
   const appGradle = read('android/app/build.gradle');
@@ -92,6 +109,29 @@ test('Android Orbbec USB camera integration is optional and registered', () => {
   assert.match(plugin, /Pipeline/);
   assert.match(plugin, /waitForFrameSet/);
   assert.doesNotMatch(plugin, /Orbbec SDK not integrated yet/);
+});
+
+test('Android Orbbec disconnect teardown serializes the native preview pump before SDK release/restart', () => {
+  // Regression guard for the USB-C PD/charging detach crash: Orbbec can disappear
+  // while the preview pump is blocked in waitForFrameSet(). Every path that
+  // releases the SDK or starts a direct/new reader must first stop+join that pump,
+  // otherwise the vendor native layer can race and kill the app process.
+  const plugin = read('android/app/src/main/java/dev/sawitulm/palmannotate/OrbbecPlugin.kt');
+
+  const detach = sliceBetween(plugin, 'override fun onDeviceDetach(deviceList: DeviceList)', 'notifyDeviceChange(false, 0)');
+  assertInOrder(detach, ['stopPump()', 'cameraExecutor.execute', 'joinPump()', 'closeSdkLocked()']);
+
+  const stopPreview = sliceBetween(plugin, 'fun stopPreview(call: PluginCall)', '/** Stop/release the Pipeline');
+  assertInOrder(stopPreview, ['stopPump()', 'cameraExecutor.execute', 'joinPump()', 'call.resolve']);
+
+  const startPreview = sliceBetween(plugin, 'fun startPreview(call: PluginCall)', '/** Stop the live preview pump');
+  assertInOrder(startPreview, ['joinPump()', 'openSdkLocked()', 'startPump()', 'call.resolve']);
+
+  const capture = sliceBetween(plugin, 'fun capture(call: PluginCall)', '/**\n     * Start the live preview pump');
+  assert.match(capture, /if \(pumpRunning\)[\s\S]*captureViaPump\(\)[\s\S]*else[\s\S]*joinPump\(\)[\s\S]*captureRgbd\(\)/);
+
+  const closeSdk = sliceBetween(plugin, 'private fun closeSdkLocked()', '// ── Frame capture');
+  assertInOrder(closeSdk, ['pumpRunning = false', 'pendingCapture.getAndSet(null)?.reject', 'safeStopAndClose(oldPipeline)']);
 });
 
 test('Native activity uses a full-screen WebView and delegates Android Back to the SPA', () => {

@@ -84,9 +84,17 @@ class OrbbecPlugin : Plugin() {
         /** Longest the colorized depth preview edge may be (PiP is small). */
         private const val DEPTH_PREVIEW_MAX_DIM = 360
         private const val DEPTH_PREVIEW_JPEG_QUALITY = 70
-        /** Depth-field colormap clamp range, in millimetres. */
+        /** Fallback depth colormap window (mm), used only when a frame carries no valid depth. */
         private const val DEPTH_MIN_MM = 200f
         private const val DEPTH_MAX_MM = 6_000f
+        /**
+         * The live depth preview auto-ranges to each frame's valid min/max so near/far
+         * contrast fills the palette (like the file viewer), then eases the stored range
+         * toward the new frame (EMA) so colours stay stable instead of breathing.
+         */
+        private const val DEPTH_RANGE_EMA = 0.12f
+        private const val DEPTH_RANGE_PAD = 0.05f
+        private const val DEPTH_RANGE_MIN_SPAN_MM = 120f
         /** How long capture() waits for the pump to hand back a full-res frame. */
         private const val CAPTURE_VIA_PUMP_TIMEOUT_MS = 6_000L
     }
@@ -147,6 +155,11 @@ class OrbbecPlugin : Plugin() {
     @Volatile private var pumpRunning = false
     private var streamPump: Thread? = null
     private val pendingCapture = AtomicReference<CaptureWaiter?>(null)
+    // Smoothed depth-preview colormap range (mm). Touched only on the pump thread;
+    // reset to "uninitialised" by startPump so each fresh stream re-adapts.
+    private var depthRangeInit = false
+    private var depthRangeMinMm = 0f
+    private var depthRangeMaxMm = 0f
 
     private val deviceChangedCallback = object : DeviceChangedCallback {
         override fun onDeviceAttach(deviceList: DeviceList) {
@@ -182,7 +195,16 @@ class OrbbecPlugin : Plugin() {
             }
 
             if (detachedSelectedDevice) {
+                // A USB-C PD role switch can make the Orbbec disappear while the
+                // preview pump is blocked inside waitForFrameSet(). Do not close
+                // the native SDK objects underneath that reader: stop + join the
+                // pump first, then release Pipeline/Device/OBContext on the
+                // single camera executor. Without this ordering the vendor SDK can
+                // race detach cleanup and take the app process down instead of
+                // surfacing a normal "camera disconnected" state to JS.
+                stopPump()
                 cameraExecutor.execute {
+                    joinPump()
                     synchronized(stateLock) {
                         closeSdkLocked()
                     }
@@ -352,7 +374,15 @@ class OrbbecPlugin : Plugin() {
                 synchronized(stateLock) { openSdkLocked() }
                 // While the live pump owns the pipeline, let it hand back the next
                 // full-res frameset instead of reading the pipeline concurrently.
-                val frame = if (pumpRunning) captureViaPump() else captureRgbd()
+                // If stopPreview() just ran, pumpRunning is already false but the
+                // old thread may still be unwinding out of waitForFrameSet(); join
+                // it before doing a direct capture so the SDK never has two readers.
+                val frame = if (pumpRunning) {
+                    captureViaPump()
+                } else {
+                    joinPump()
+                    captureRgbd()
+                }
                 val ret = JSObject()
                 ret.put("base64", Base64.encodeToString(frame.color.bytes, Base64.NO_WRAP))
                 ret.put("width", frame.color.width)
@@ -388,6 +418,10 @@ class OrbbecPlugin : Plugin() {
     fun startPreview(call: PluginCall) {
         cameraExecutor.execute {
             try {
+                // A previous stopPreview()/detach may have signalled the pump but
+                // not yet observed its exit. Join first so a fresh preview never
+                // races an old waitForFrameSet() reader on the same pipeline.
+                joinPump()
                 synchronized(stateLock) { openSdkLocked() }
                 startPump()
                 call.resolve(JSObject().put("streaming", true))
@@ -402,7 +436,10 @@ class OrbbecPlugin : Plugin() {
     @PluginMethod
     fun stopPreview(call: PluginCall) {
         stopPump()
-        call.resolve(JSObject().put("stopped", true))
+        cameraExecutor.execute {
+            joinPump()
+            call.resolve(JSObject().put("stopped", true))
+        }
     }
 
     /** Stop/release the Pipeline, Device and OBContext. */
@@ -459,6 +496,7 @@ class OrbbecPlugin : Plugin() {
         synchronized(stateLock) {
             if (pumpRunning) return
             pumpRunning = true
+            depthRangeInit = false
             val thread = Thread({ runPump() }, "PalmAnnotate-OrbbecPump").apply { isDaemon = true }
             streamPump = thread
             thread.start()
@@ -844,6 +882,7 @@ class OrbbecPlugin : Plugin() {
         // The pump loop reads `pipeline` under stateLock each iteration, so nulling
         // it here also breaks the loop (belt-and-braces with stopPump/joinPump).
         pumpRunning = false
+        pendingCapture.getAndSet(null)?.reject(IllegalStateException("Orbbec camera closed"))
 
         safeStopAndClose(oldPipeline)
         safeClose(oldDevice, "device")
@@ -1090,18 +1129,48 @@ class OrbbecPlugin : Plugin() {
         val outH = (height + step - 1) / step
         if (outW <= 0 || outH <= 0) return null
 
-        val pixels = IntArray(outW * outH)
+        // Pass 1: subsample the depth plane into a mm grid and find this frame's
+        // valid (nonzero) depth extent, so the colormap can auto-range to it.
+        val mmGrid = FloatArray(outW * outH)
         var di = 0
+        var frameMin = Float.MAX_VALUE
+        var frameMax = 0f
         var y = 0
-        while (y < height && di < pixels.size) {
+        while (y < height && di < mmGrid.size) {
             var x = 0
-            while (x < width && di < pixels.size) {
+            while (x < width && di < mmGrid.size) {
                 val idx = (y * width + x) * 2
                 val v = (data[idx].toInt() and 0xFF) or ((data[idx + 1].toInt() and 0xFF) shl 8)
-                pixels[di++] = depthPreviewColor(v * scale)
+                val mm = v * scale
+                mmGrid[di++] = mm
+                if (mm > 0f) {
+                    if (mm < frameMin) frameMin = mm
+                    if (mm > frameMax) frameMax = mm
+                }
                 x += step
             }
             y += step
+        }
+        val filled = di
+
+        // EMA-smooth the auto-range so colours stay stable as the scene moves; fall
+        // back to the fixed window only when a frame has no valid depth at all.
+        val lo: Float
+        val hi: Float
+        if (frameMax > frameMin) {
+            val r = smoothDepthRange(frameMin, frameMax)
+            lo = r.first; hi = r.second
+        } else {
+            lo = DEPTH_MIN_MM; hi = DEPTH_MAX_MM
+        }
+        val span = (hi - lo).coerceAtLeast(1f)
+
+        // Pass 2: colorize from the smoothed range.
+        val pixels = IntArray(outW * outH)
+        var ci = 0
+        while (ci < filled) {
+            pixels[ci] = depthPreviewColor(mmGrid[ci], lo, span)
+            ci++
         }
 
         val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
@@ -1115,14 +1184,38 @@ class OrbbecPlugin : Plugin() {
         }
     }
 
-    /** Jet colormap over [DEPTH_MIN_MM, DEPTH_MAX_MM]; 0/invalid depth → black. */
-    private fun depthPreviewColor(mm: Float): Int {
+    /** Jet colormap over [minMm, minMm + span]; 0/invalid depth → black. */
+    private fun depthPreviewColor(mm: Float, minMm: Float, span: Float): Int {
         if (mm <= 0f) return 0xFF shl 24
-        val t = ((mm - DEPTH_MIN_MM) / (DEPTH_MAX_MM - DEPTH_MIN_MM)).coerceIn(0f, 1f)
+        val t = ((mm - minMm) / span).coerceIn(0f, 1f)
         val r = (clampUnit(1.5f - kotlin.math.abs(4f * t - 3f)) * 255f).toInt()
         val g = (clampUnit(1.5f - kotlin.math.abs(4f * t - 2f)) * 255f).toInt()
         val b = (clampUnit(1.5f - kotlin.math.abs(4f * t - 1f)) * 255f).toInt()
         return argb(r, g, b)
+    }
+
+    /**
+     * EMA-smoothed auto-range for the depth preview colormap. Pads the frame's
+     * valid extent a little, then eases the stored min/max toward it so the live
+     * PiP keeps high near/far contrast without the palette flickering frame to
+     * frame. Runs on the pump thread only. Returns the smoothed (minMm, maxMm).
+     */
+    private fun smoothDepthRange(frameMin: Float, frameMax: Float): Pair<Float, Float> {
+        val pad = (frameMax - frameMin) * DEPTH_RANGE_PAD
+        val targetMin = (frameMin - pad).coerceAtLeast(0f)
+        val targetMax = frameMax + pad
+        if (!depthRangeInit) {
+            depthRangeMinMm = targetMin
+            depthRangeMaxMm = targetMax
+            depthRangeInit = true
+        } else {
+            depthRangeMinMm += (targetMin - depthRangeMinMm) * DEPTH_RANGE_EMA
+            depthRangeMaxMm += (targetMax - depthRangeMaxMm) * DEPTH_RANGE_EMA
+        }
+        if (depthRangeMaxMm - depthRangeMinMm < DEPTH_RANGE_MIN_SPAN_MM) {
+            depthRangeMaxMm = depthRangeMinMm + DEPTH_RANGE_MIN_SPAN_MM
+        }
+        return Pair(depthRangeMinMm, depthRangeMaxMm)
     }
 
     private fun clampUnit(v: Float): Float = if (v < 0f) 0f else if (v > 1f) 1f else v

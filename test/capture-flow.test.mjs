@@ -254,6 +254,69 @@ test('CaptureFlow docks the source switch in the controls and drives element-pre
   assert.equal(grabbed, 2, 'capture used the element-preview grab(), not one-shot capture()');
 });
 
+test('CaptureFlow waits for async Orbbec preview stop before switching sources', async () => {
+  let mounted = 0;
+  let stopStarted = 0;
+  let stopFinished = 0;
+  let releaseStop;
+  const stopReleased = new Promise(resolve => { releaseStop = resolve; });
+  const orbbec = {
+    id: 'orbbec',
+    name: 'Orbbec USB camera',
+    async isAvailable() { return true; },
+    supportsLivePreview() { return true; },
+    async mountPreview(stage) {
+      mounted += 1;
+      const img = stage.ownerDocument.createElement('img');
+      img.className = 'orbbec-live__main';
+      stage.appendChild(img);
+      return async () => {
+        stopStarted += 1;
+        await stopReleased;
+        stopFinished += 1;
+        if (img.parentNode) img.parentNode.removeChild(img);
+      };
+    },
+    async grab() { return { blob: new Blob(['orb']), width: 1, height: 1 }; },
+    async capture() { return null; },
+  };
+  const builtin = {
+    id: 'builtin-camera', name: 'Device Camera',
+    async isAvailable() { return true; },
+    async capture() { return { blob: new Blob(['b']), width: 1, height: 1 }; },
+  };
+  const { ctx, dom } = makeCaptureContext([], { native: true, sources: [builtin, orbbec] });
+  const body = dom.document.body;
+
+  const promise = ctx.CaptureFlow.start({ sideCount: 1 });
+  dom.document.querySelector('select').value = 'DAMIMAS';
+  getByText(body, 'button', 'Start Capture').click();
+
+  await waitButton(body, 'Capture');
+  let controls = await waitFor(() => body.querySelector('.capture-live__controls'));
+  let select = await waitFor(() => controls.querySelector('.capture-source__select'));
+  select.value = 'orbbec';
+  select.dispatchEvent({ type: 'change', target: select });
+  await waitFor(() => body.querySelector('.orbbec-live__main'));
+  assert.equal(mounted, 1);
+
+  controls = await waitFor(() => body.querySelector('.capture-live__controls'));
+  select = await waitFor(() => controls.querySelector('.capture-source__select'));
+  select.value = 'builtin-camera';
+  select.dispatchEvent({ type: 'change', target: select });
+
+  await waitFor(() => stopStarted === 1);
+  assert.ok(body.querySelector('.orbbec-live__main'), 'old Orbbec preview remains until async stop resolves');
+  assert.equal(stopFinished, 0, 'surface switch must not race ahead of native stopPreview');
+
+  releaseStop();
+  await waitFor(() => !body.querySelector('.orbbec-live__main'));
+  assert.equal(stopFinished, 1);
+
+  getByText(body, 'button', 'Cancel').click();
+  assert.equal(await promise, null);
+});
+
 test('CaptureFlow "Find camera" button rescans sources for a replugged USB camera', async () => {
   let refreshed = 0;
   const orbbec = {
