@@ -428,6 +428,63 @@ const CapacitorAdapter = (() => {
     return typeof path === 'string' && /^[a-z][a-z0-9+.-]*:/i.test(path);
   }
 
+  // ── Dataset binary / JSON readback (depth raw viewer) ───────────────────────
+
+  /** Decode a base64 payload (Filesystem.readFile with no encoding) to bytes. */
+  function _base64ToBytes(data) {
+    const raw = String(data == null ? '' : data);
+    const comma = raw.indexOf(',');
+    const b64 = comma >= 0 && raw.slice(0, comma).indexOf('base64') >= 0 ? raw.slice(comma + 1) : raw;
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+
+  /**
+   * Read a dataset file as raw bytes. Accepts either a native uri (file://…,
+   * content://…) or a dataset-relative path (e.g. depth/field/STEM_1.raw). Used
+   * by the depth raw viewer to colorize captured uint16 depth planes. Returns
+   * null on any failure so the viewer can degrade gracefully.
+   * @returns {Promise<Uint8Array|null>}
+   */
+  async function readDatasetBinary(relPathOrUri) {
+    const fs = _fs();
+    if (!fs || !relPathOrUri) return null;
+    try {
+      let args;
+      if (_looksLikeNativeUri(relPathOrUri)) {
+        args = { path: relPathOrUri };
+      } else {
+        await _ensureBase();
+        args = { path: DATASET + '/' + _safeRelPath(relPathOrUri, 'depth/field/depth.raw'), directory: DIRECTORY };
+      }
+      const res = await fs.readFile(args);  // no encoding → base64 string
+      return _base64ToBytes(res && res.data);
+    } catch (e) {
+      console.warn('[CapacitorAdapter] readDatasetBinary failed:', relPathOrUri, e);
+      return null;
+    }
+  }
+
+  /**
+   * Read + parse a dataset-relative JSON file (e.g. depth/field/STEM_1.json or
+   * metadata/STEM.json). Returns null when missing/unparseable.
+   * @returns {Promise<object|null>}
+   */
+  async function readDatasetJsonAt(relPath) {
+    const fs = _fs();
+    if (!fs || !relPath) return null;
+    try {
+      await _ensureBase();
+      const path = DATASET + '/' + _safeRelPath(relPath, 'metadata/tree.json');
+      const res = await fs.readFile({ path, directory: DIRECTORY, encoding: ENCODING });
+      return JSON.parse(_decode(res && res.data));
+    } catch (e) {
+      return null;
+    }
+  }
+
   function _safeFileName(filename, fallback) {
     const raw = String(filename || '').replace(/\\/g, '/').split('/').pop() || '';
     const safe = _safeSegment(raw);
@@ -475,6 +532,7 @@ const CapacitorAdapter = (() => {
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
     persistDatasetImage, persistDatasetFile, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
+    readDatasetBinary, readDatasetJsonAt,
   };
 })();
 

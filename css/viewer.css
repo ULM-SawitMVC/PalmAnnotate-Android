@@ -1,0 +1,196 @@
+/* ============================================
+   PalmAnnotate — Depth raw viewer + "More" sheet
+   Reuses .capture-overlay (css/capture.css) for the
+   blurred full-screen backdrop. Scoped under
+   .depth-viewer / .more-menu so nothing leaks.
+   ============================================ */
+
+/* ---- "More" action sheet (annotate screen) ---- */
+.more-menu {
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.more-menu__sheet {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  background: var(--c-surface, #141a14);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+
+.more-menu__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 64px;
+  padding: var(--space-md) var(--space-lg);
+  text-align: left;
+  color: var(--c-text);
+  background: var(--c-surface-raised, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: border-color 160ms var(--ease), background 160ms var(--ease);
+}
+.more-menu__item:hover { border-color: var(--c-accent); }
+.more-menu__item:active { transform: scale(0.99); }
+
+.more-menu__item-label { font-size: 1.05rem; font-weight: 600; }
+.more-menu__item-sub { font-size: 0.82rem; color: var(--c-text-muted); }
+.more-menu__cancel { margin-top: var(--space-xs); }
+
+/* ---- Depth raw viewer ---- */
+.depth-viewer { align-items: stretch; justify-content: center; }
+
+.depth-viewer__panel {
+  margin: auto;
+  width: 100%;
+  max-width: 1100px;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+}
+
+.depth-viewer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+.depth-viewer__title {
+  font-family: var(--f-display);
+  font-size: 1.4rem;
+  font-weight: 400;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+.depth-viewer__close { min-height: 48px; flex-shrink: 0; }
+
+.depth-viewer__tabs {
+  display: flex;
+  gap: var(--space-xs);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+.depth-viewer__tab {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  font-family: var(--f-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--c-text-muted);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.depth-viewer__tab--active {
+  color: var(--c-bg);
+  background: var(--c-accent);
+  border-color: transparent;
+}
+
+.depth-viewer__body {
+  display: flex;
+  gap: var(--space-lg);
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.depth-viewer__stage {
+  position: relative;
+  flex: 1 1 60%;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.depth-viewer__canvas {
+  max-width: 100%;
+  max-height: 64vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+  cursor: crosshair;
+}
+.depth-viewer__notice {
+  position: absolute;
+  inset: auto var(--space-md) var(--space-md) var(--space-md);
+  display: none;
+  padding: var(--space-sm) var(--space-md);
+  text-align: center;
+  color: var(--c-text);
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: var(--r-md);
+  font-size: 0.9rem;
+}
+.depth-viewer__notice--show { display: block; }
+
+.depth-viewer__aside {
+  flex: 1 1 40%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.depth-viewer__legend {
+  font-family: var(--f-mono);
+  font-size: 0.82rem;
+  color: var(--c-text-muted);
+}
+.depth-viewer__readout {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--space-md);
+  font-family: var(--f-mono);
+  font-size: 0.95rem;
+  color: var(--c-accent);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+}
+.depth-viewer__jsonlabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--c-text-dim);
+}
+.depth-viewer__json {
+  flex: 1 1 auto;
+  min-height: 120px;
+  margin: 0;
+  padding: var(--space-md);
+  overflow: auto;
+  font-family: var(--f-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Narrow / portrait phones: stack the heatmap over the JSON aside. */
+@media (max-width: 760px), (orientation: portrait) {
+  .depth-viewer__body { flex-direction: column; }
+  .depth-viewer__canvas { max-height: 42vh; }
+}

@@ -126,6 +126,22 @@ const CaptureFlow = (() => {
               typeof src.grab === 'function');
   }
 
+  /** True on a native Capacitor runtime (where USB sources can appear/disappear). */
+  function _isNativeRuntime() {
+    return !!(window.Storage && Storage.isNative && Storage.isNative());
+  }
+
+  /** Ask every source that supports it to re-scan hardware (e.g. a replugged USB camera). */
+  async function _refreshSources() {
+    const registry = window.CaptureSources;
+    const sources = registry && typeof registry.list === 'function' ? registry.list() : [];
+    for (const src of sources) {
+      if (src && typeof src.refresh === 'function') {
+        try { await src.refresh(); } catch (_) { /* a broken source must not block refresh */ }
+      }
+    }
+  }
+
   /**
    * Build the canonical session-mode stem: `${VARIETY}_${BLOK}_${0001}`, e.g.
    * DAMIMAS_A21B_0001. Blok is sanitized so "A 21B" → "A21B". Side numbers and
@@ -422,15 +438,40 @@ const CaptureFlow = (() => {
       let source = null;
       let available = [];
       let live = false;
+      // 'video'   → built-in camera streams into a <video> (getUserMedia)
+      // 'element' → source renders its own preview DOM (Orbbec RGB + depth field)
+      // 'oneshot' → no live preview; a Capture button calls source.capture()
+      let previewMode = 'oneshot';
       let stopPreview = null;
       let video = null;
       let progressHost = null;
+      let deviceChangeHandle = null;  // native USB attach/detach subscription
 
       function finish(val) {
         if (settled) return;
         settled = true;
+        if (deviceChangeHandle && typeof deviceChangeHandle.remove === 'function') {
+          try { deviceChangeHandle.remove(); } catch (_) {}
+          deviceChangeHandle = null;
+        }
         if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
         resolve(val);
+      }
+
+      // Auto re-scan sources when a USB camera is (un)plugged mid-capture, so a
+      // re-attached Orbbec reappears without leaving the surface. Only fires once
+      // the native SDK context is live (after an Orbbec open/preview); the manual
+      // "Find camera" button covers the cold first-plug case.
+      async function _subscribeDeviceChange() {
+        const Orbbec = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Orbbec;
+        if (!Orbbec || typeof Orbbec.addListener !== 'function') return;
+        try {
+          deviceChangeHandle = await Orbbec.addListener('orbbecDeviceChange', () => {
+            if (settled || busy) return;
+            if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
+            _buildSurface();
+          });
+        } catch (_) { /* listener optional */ }
       }
 
       function _renderProgress() {
@@ -445,7 +486,8 @@ const CaptureFlow = (() => {
         busy = true;
         let shot = null;
         try {
-          if (live && video) shot = await source.grab(video);
+          if (previewMode === 'video' && video) shot = await source.grab(video);
+          else if (previewMode === 'element') shot = await source.grab();
           else if (source) shot = await source.capture();
         } catch (e) {
           console.warn('[CaptureFlow] capture failed:', e);
@@ -463,38 +505,50 @@ const CaptureFlow = (() => {
         _renderProgress();
       }
 
+      /** Build the source switch (Device Camera ⇄ Orbbec USB) for the control row. */
+      function _buildSourceSwitch() {
+        const row = _el('label', 'capture-source capture-source--inline capture-live__source');
+        row.appendChild(_el('span', 'capture-source__label', 'Camera'));
+        const select = _el('select', 'capture-source__select');
+        for (const src of available) {
+          const opt = _el('option', null, src.name || src.id);
+          opt.value = src.id;
+          if (src.id === (source && source.id)) opt.selected = true;
+          select.appendChild(opt);
+        }
+        select.addEventListener('change', () => {
+          _selectedSourceId = select.value;
+          // Re-open the surface with the newly chosen source.
+          if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
+          _buildSurface();
+        });
+        row.appendChild(select);
+        return row;
+      }
+
       async function _buildSurface() {
         overlay.innerHTML = '';
         available = await _availableSources();
         source = _chooseSource(available);
-        live = _isLiveSource(source);
+
+        // Element-preview sources (Orbbec) render their own RGB + depth-field DOM
+        // into the stage; video-preview sources (built-in camera) stream into a
+        // <video> via getUserMedia. Everything else is a one-shot Capture button.
+        const elementPreview = !!(source &&
+          typeof source.supportsLivePreview === 'function' && source.supportsLivePreview() &&
+          typeof source.mountPreview === 'function' && typeof source.grab === 'function');
+        const videoPreview = !elementPreview && _isLiveSource(source);
+        previewMode = elementPreview ? 'element' : (videoPreview ? 'video' : 'oneshot');
+        live = previewMode !== 'oneshot';
 
         const panel = _el('div', 'capture-panel capture-live');
 
-        // Top: side indicator + dots, plus optional source select / manual ID.
+        // Top: side indicator + dots, plus the optional manual-ID field. The
+        // camera/source switch now lives down in the control row (beside the
+        // shutter) so it no longer crowds the progress header.
         const top = _el('div', 'capture-live__top');
         progressHost = _el('div', 'capture-live__progress');
         top.appendChild(progressHost);
-
-        if (available.length > 1) {
-          const row = _el('label', 'capture-source capture-source--inline');
-          row.appendChild(_el('span', 'capture-source__label', 'Camera'));
-          const select = _el('select', 'capture-source__select');
-          for (const src of available) {
-            const opt = _el('option', null, src.name || src.id);
-            opt.value = src.id;
-            if (src.id === (source && source.id)) opt.selected = true;
-            select.appendChild(opt);
-          }
-          select.addEventListener('change', () => {
-            _selectedSourceId = select.value;
-            // Re-open the surface with the newly chosen source.
-            if (stopPreview) { try { stopPreview(); } catch (_) {} stopPreview = null; }
-            _buildSurface();
-          });
-          row.appendChild(select);
-          top.appendChild(row);
-        }
 
         // Manual-ID sessions: a small inline numeric ID field (auto-ID hides it).
         if (ctl && ctl.manualIdEnabled) {
@@ -520,20 +574,24 @@ const CaptureFlow = (() => {
 
         panel.appendChild(top);
 
-        // Stage: live <video>, or a placeholder for one-shot sources (Orbbec).
+        // Stage: built-in camera streams into a <video>; Orbbec renders its own
+        // preview DOM here (mountPreview); one-shot sources show a placeholder.
         const stage = _el('div', 'capture-live__stage');
-        if (live) {
+        if (videoPreview) {
           video = _el('video', 'capture-live__video');
+          stage.appendChild(video);
         } else {
           video = null;
-          stage.appendChild(_el('div', 'capture-live__placeholder',
-            source ? `Tap Capture (${source.name || source.id})` : 'No camera available'));
+          if (!elementPreview) {
+            stage.appendChild(_el('div', 'capture-live__placeholder',
+              source ? `Tap Capture (${source.name || source.id})` : 'No camera available'));
+          }
         }
-        if (video) stage.appendChild(video);
         panel.appendChild(stage);
 
-        // Controls — Cancel + the big Capture shutter. CSS positions the shutter
-        // on the right (tablet/landscape) or bottom (phone/portrait).
+        // Controls — Cancel + (optional) source switch + the big Capture shutter.
+        // CSS positions the cluster on the right (tablet/landscape) or bottom
+        // (phone/portrait).
         const controls = _el('div', 'capture-live__controls');
         const cancelBtn = _el('button', 'capture-btn capture-btn--ghost capture-live__cancel', 'Cancel');
         cancelBtn.type = 'button';
@@ -541,6 +599,22 @@ const CaptureFlow = (() => {
         shootBtn.type = 'button';
         shootBtn.disabled = !source;
         controls.appendChild(cancelBtn);
+        if (available.length > 1) controls.appendChild(_buildSourceSwitch());
+        // "Find camera" — re-scan hardware so a (re)plugged USB camera (Orbbec)
+        // is detected without leaving the capture surface. Native only.
+        if (_isNativeRuntime()) {
+          const refreshBtn = _el('button', 'capture-btn capture-btn--outline capture-live__refresh', 'Find camera');
+          refreshBtn.type = 'button';
+          refreshBtn.addEventListener('click', async () => {
+            if (busy || settled) return;
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = 'Scanning…';
+            if (stopPreview) { try { await stopPreview(); } catch (_) {} stopPreview = null; }
+            try { await _refreshSources(); } catch (_) {}
+            if (!settled) _buildSurface();
+          });
+          controls.appendChild(refreshBtn);
+        }
         controls.appendChild(shootBtn);
         panel.appendChild(controls);
 
@@ -551,8 +625,9 @@ const CaptureFlow = (() => {
 
         _renderProgress();
 
-        // Open the live stream into the video (reused across all targets).
-        if (live && video) {
+        // Open the live preview (reused across all targets). On failure, fall
+        // back to a one-shot Capture button by rebuilding the surface.
+        if (videoPreview && video) {
           try {
             const stop = await source.openPreview(video);
             // If the operator cancelled (or switched source) while getUserMedia
@@ -562,6 +637,19 @@ const CaptureFlow = (() => {
             else { stopPreview = stop; }
           } catch (e) {
             console.info('[CaptureFlow] live preview unavailable, using one-shot capture:', e);
+            previewMode = 'oneshot';
+            live = false;
+            stopPreview = null;
+            if (!settled) _buildSurface();
+          }
+        } else if (elementPreview) {
+          try {
+            const stop = await source.mountPreview(stage);
+            if (settled) { try { await stop(); } catch (_) {} }
+            else { stopPreview = stop; }
+          } catch (e) {
+            console.info('[CaptureFlow] Orbbec live preview unavailable, using one-shot capture:', e);
+            previewMode = 'oneshot';
             live = false;
             stopPreview = null;
             if (!settled) _buildSurface();
@@ -569,6 +657,7 @@ const CaptureFlow = (() => {
         }
       }
 
+      _subscribeDeviceChange();
       _buildSurface();
     });
   }

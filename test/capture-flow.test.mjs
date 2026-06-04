@@ -195,3 +195,91 @@ test('CaptureFlow review lets the operator retake one side before saving', async
   assert.equal(writes.images.length, 2);
   assert.equal(shots.length, 0, 'all three queued frames were consumed');
 });
+
+test('CaptureFlow docks the source switch in the controls and drives element-preview (Orbbec) sources', async () => {
+  const orbbecShot = { blob: new Blob(['orb'], { type: 'image/jpeg' }), width: 1280, height: 720 };
+  let mounted = false;
+  let grabbed = 0;
+  const orbbec = {
+    id: 'orbbec',
+    name: 'Orbbec USB camera',
+    async isAvailable() { return true; },
+    supportsLivePreview() { return true; },
+    async mountPreview(stage) {
+      mounted = true;
+      const img = stage.ownerDocument.createElement('img');
+      img.className = 'orbbec-live__main';
+      stage.appendChild(img);
+      return async () => {};
+    },
+    async grab() { grabbed += 1; return orbbecShot; },
+    async capture() { return orbbecShot; },
+  };
+  const builtin = {
+    id: 'builtin-camera',
+    name: 'Device Camera',
+    async isAvailable() { return true; },
+    async capture() { return { blob: new Blob(['b']), width: 100, height: 100 }; },
+  };
+  const { ctx, dom } = makeCaptureContext([], { native: true, sources: [builtin, orbbec] });
+  const body = dom.document.body;
+
+  // sideCount is clamped to a minimum of 2 by CaptureFlow.start.
+  const promise = ctx.CaptureFlow.start({ sideCount: 2 });
+  dom.document.querySelector('select').value = 'DAMIMAS';
+  getByText(body, 'button', 'Start Capture').click();
+
+  // The surface starts on the built-in camera; the source switch is docked in
+  // the control cluster (NOT the top bar).
+  await waitButton(body, 'Capture');
+  const controls = body.querySelector('.capture-live__controls');
+  const select = controls.querySelector('.capture-source__select');
+  assert.ok(select, 'source switch is rendered inside the control cluster');
+
+  // Switch to the Orbbec → its element preview (RGB + depth) mounts into the stage.
+  select.value = 'orbbec';
+  select.dispatchEvent({ type: 'change', target: select });
+  await waitFor(() => body.querySelector('.orbbec-live__main'));
+  assert.equal(mounted, true, 'Orbbec mountPreview rendered the live RGB/depth DOM');
+
+  // Capture both sides from the element-preview source (popup-free advance).
+  (await waitButton(body, 'Capture')).click();
+  await waitTitle(body, 'Side 2 / 2');
+  (await waitButton(body, 'Capture')).click();
+  (await waitButton(body, 'Save')).click();
+
+  const tree = await promise;
+  assert.ok(tree);
+  assert.equal(tree.sides.length, 2);
+  assert.equal(grabbed, 2, 'capture used the element-preview grab(), not one-shot capture()');
+});
+
+test('CaptureFlow "Find camera" button rescans sources for a replugged USB camera', async () => {
+  let refreshed = 0;
+  const orbbec = {
+    id: 'orbbec', name: 'Orbbec USB camera',
+    async isAvailable() { return true; },
+    async capture() { return null; },
+    async refresh() { refreshed += 1; return true; },
+  };
+  const builtin = {
+    id: 'builtin-camera', name: 'Device Camera',
+    async isAvailable() { return true; },
+    async capture() { return { blob: new Blob(['b']), width: 1, height: 1 }; },
+  };
+  const { ctx, dom } = makeCaptureContext([], { native: true, sources: [builtin, orbbec] });
+  const body = dom.document.body;
+
+  const promise = ctx.CaptureFlow.start({ sideCount: 1 });
+  dom.document.querySelector('select').value = 'DAMIMAS';
+  getByText(body, 'button', 'Start Capture').click();
+
+  const findBtn = await waitButton(body, 'Find camera');
+  findBtn.click();
+  await waitFor(() => refreshed > 0);
+  assert.ok(refreshed >= 1, 'a registered source was asked to re-scan hardware');
+
+  getByText(body, 'button', 'Cancel').click();
+  const tree = await promise;
+  assert.equal(tree, null);
+});

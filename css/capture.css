@@ -538,6 +538,122 @@ select.capture-input {
   .capture-live__cancel { position: absolute; top: calc(var(--space-lg) + env(safe-area-inset-top)); right: var(--space-lg); }
 }
 
+/* ---- Source switch, docked in the control cluster (beside the shutter) ---- */
+.capture-live__source {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: rgba(0, 0, 0, 0.42);
+  border: 1px solid var(--c-border-hover);
+  border-radius: var(--r-md);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.capture-live__source .capture-source__label { color: var(--c-text); }
+.capture-live__source .capture-source__select {
+  min-height: 48px;
+  width: auto;
+  min-width: 128px;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+/* "Find camera" rescan button, docked in the control cluster. */
+.capture-live__refresh {
+  min-height: 48px;
+  padding: 0 var(--space-md);
+  color: var(--c-text);
+  background: rgba(0, 0, 0, 0.42);
+  border-color: var(--c-border-hover);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ============================================
+   Orbbec live preview (RGB main + depth field PiP)
+   The source renders this DOM into .capture-live__stage. RGB streams full-bleed;
+   the colorized depth field rides in a tappable picture-in-picture thumbnail.
+   ============================================ */
+.orbbec-live { position: absolute; inset: 0; }
+
+.orbbec-live__main {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.orbbec-live__pip {
+  position: absolute;
+  z-index: 2;
+  top: calc(78px + env(safe-area-inset-top));
+  right: calc(var(--space-md) + env(safe-area-inset-right));
+  width: 34%;
+  max-width: 260px;
+  min-width: 120px;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  margin: 0;
+  border: 2px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+.orbbec-live__pip:active { transform: scale(0.98); }
+.orbbec-live__pip--empty { display: none; }
+
+.orbbec-live__pipimg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.orbbec-live__piplabel {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  z-index: 1;
+  padding: 1px 7px;
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+}
+
+.orbbec-live__waiting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--c-text-muted);
+  font-size: 1rem;
+}
+.orbbec-live__waiting--hidden { display: none; }
+
+/* Landscape/tablet: controls hug the right edge, so park the depth PiP at the
+   bottom-left where nothing else lives. */
+@media (orientation: landscape) {
+  .orbbec-live__pip {
+    top: auto;
+    right: auto;
+    bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+    left: calc(var(--space-md) + env(safe-area-inset-left));
+  }
+}
+
 /* ============================================
    End-of-capture review (swipe all shots)
    ============================================ */

@@ -260,7 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function _carouselHooks() {
     return {
       onHome: () => _onHomeButton(),
-      onMore: () => _toggleMoreTabs(),
+      onMore: () => _openMoreMenu(),
       onBrowsePrev: () => _navigateTree('prev'),
       onBrowseNext: () => _navigateTree('next'),
       onDetect: () => _detectCurrentSide(),
@@ -279,6 +279,62 @@ document.addEventListener('DOMContentLoaded', () => {
   // Deduplication / Results) for power users on the single annotate screen.
   function _toggleMoreTabs() {
     document.body.classList.toggle('crsl-show-tabs');
+  }
+
+  // "More" action sheet on the single annotate screen: open the raw depth/JSON
+  // viewer for the current tree, or reveal the legacy editor tabs. Built/removed
+  // here so it never leaks into the rest of the shell.
+  function _openMoreMenu() {
+    const existing = document.querySelector('.more-menu');
+    if (existing) { existing.remove(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'capture-overlay more-menu';
+    const sheet = document.createElement('div');
+    sheet.className = 'more-menu__sheet';
+
+    const close = () => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); };
+
+    const mkBtn = (label, sub, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'more-menu__item';
+      const t = document.createElement('span');
+      t.className = 'more-menu__item-label';
+      t.textContent = label;
+      b.appendChild(t);
+      if (sub) {
+        const s = document.createElement('span');
+        s.className = 'more-menu__item-sub';
+        s.textContent = sub;
+        b.appendChild(s);
+      }
+      b.addEventListener('click', () => { close(); onClick(); });
+      return b;
+    };
+
+    sheet.appendChild(mkBtn('Depth & raw viewer', 'Inspect captured .raw depth + JSON', () => {
+      const tree = window.DatasetManager && DatasetManager.getTree && DatasetManager.getTree();
+      if (!tree) { _showToast('Open a tree first to inspect its depth.', 'info'); return; }
+      if (window.DepthViewer && DepthViewer.open) DepthViewer.open(tree);
+      else _showToast('Depth viewer unavailable.', 'error');
+    }));
+
+    sheet.appendChild(mkBtn('Editor tools', 'Show / hide annotation, dedup & results tabs', () => {
+      _toggleMoreTabs();
+    }));
+
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'capture-btn capture-btn--ghost more-menu__cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', close);
+    sheet.appendChild(cancel);
+
+    overlay.appendChild(sheet);
+    // Tapping the backdrop (outside the sheet) dismisses the menu.
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
   }
 
   // Record a freshly-captured pohon into the owning session's index. The photos

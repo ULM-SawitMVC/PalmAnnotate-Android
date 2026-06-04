@@ -60,6 +60,9 @@ if it's missing. Install a JDK (17) and the Android SDK (cmdline-tools + `platfo
 > path**. The goal is that the user never has to come back and ask "rebuild it" — the installable
 > `app-debug.apk` is always current at end of turn.
 >
+> - **Always force a fresh APK timestamp:** use `clean assembleDebug` for the final compile, not plain
+>   `assembleDebug`. Gradle's incremental `UP-TO-DATE` build can leave `app-debug.apk` with an old
+>   timestamp even after sync, which is confusing when checking whether the APK is new.
 > - Run it at the **end of the turn**, after all edits for that turn are done (one build per turn, not
 >   one per file).
 > - **Skip the rebuild only** when the turn changed nothing that affects the APK — i.e. edits limited
@@ -67,8 +70,8 @@ if it's missing. Install a JDK (17) and the Android SDK (cmdline-tools + `platfo
 >   ("docs/tests only — APK unchanged, not rebuilt") so it's a deliberate choice, not a forgotten step.
 > - If the build **fails**, fix it before ending the turn (a red build is never "done"); if it can't be
 >   fixed, surface the error and the last-good APK's status explicitly.
-> - Gradle is incremental: if sources are byte-identical the APK legitimately won't change timestamp —
->   that's correct, just note it. Use `clean assembleDebug` only when a from-zero build is actually needed.
+> - Do not rely on Gradle incremental output for the final agent build. The expected final command is
+>   `clean assembleDebug` so the APK file is regenerated and its timestamp updates.
 
 `npm run sync` / `cap sync` only copies web assets into the Android project; it does **not** produce
 an APK. To compile, set the env vars and run the Gradle wrapper. From **PowerShell** at the repo root:
@@ -78,9 +81,9 @@ $env:JAVA_HOME      = 'C:\tools\jdk17\jdk-17.0.19+10'
 $env:ANDROID_HOME   = 'C:\tools\android-sdk'
 $env:PATH           = "$env:JAVA_HOME\bin;$env:PATH"
 
-npm run sync                              # rebuild www/ + push into android/ (do this after any js/css edit)
+npm run sync                                      # rebuild www/ + push into android/ (do this after any js/css edit)
 cd android
-.\gradlew.bat assembleDebug --no-daemon   # ~45-60s once dependencies are cached
+.\gradlew.bat clean assembleDebug --no-daemon     # force-regenerate app-debug.apk with a fresh timestamp
 ```
 
 Output APK (debug-signed, directly installable):
@@ -96,8 +99,9 @@ C:\tools\android-sdk\platform-tools\adb.exe install -r `
   "android\app\build\outputs\apk\debug\app-debug.apk"
 ```
 
-Other Gradle targets: `assembleRelease` (needs a signing config), `clean`, `installDebug`
-(build + adb-install in one step). First-ever build downloads dependencies and is slower.
+Use `clean assembleDebug` for agent final rebuilds so `app-debug.apk` is physically regenerated with
+an updated timestamp. Other Gradle targets: `assembleRelease` (needs a signing config), `clean`,
+`installDebug` (build + adb-install in one step). First-ever build downloads dependencies and is slower.
 
 > Capture GPS prompts for the Location permission on first launch — granting it is what makes the
 > in-app GPS work (the permission must also be declared in `AndroidManifest.xml`, which it is).

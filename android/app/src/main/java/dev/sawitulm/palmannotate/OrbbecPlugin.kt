@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
@@ -38,8 +39,11 @@ import com.orbbec.obsensor.types.LogSeverity
 import com.orbbec.obsensor.types.SensorType
 import com.orbbec.obsensor.types.StreamType
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Capacitor bridge for Orbbec USB RGB-D cameras.
@@ -70,6 +74,39 @@ class OrbbecPlugin : Plugin() {
         private const val FRAME_TIMEOUT_MS = 1_500L
         private const val DEVICE_QUERY_RETRIES = 8
         private const val DEVICE_QUERY_DELAY_MS = 250L
+
+        // ── Live preview (notifyListeners("orbbecFrame", …)) tuning ──────────────
+        /** Minimum gap between emitted preview frames (~12.5 fps) to spare the bridge. */
+        private const val PREVIEW_INTERVAL_MS = 80L
+        /** Longest the colored RGB preview edge may be before JPEG-encoding for the bridge. */
+        private const val COLOR_PREVIEW_MAX_DIM = 720
+        private const val COLOR_PREVIEW_JPEG_QUALITY = 60
+        /** Longest the colorized depth preview edge may be (PiP is small). */
+        private const val DEPTH_PREVIEW_MAX_DIM = 360
+        private const val DEPTH_PREVIEW_JPEG_QUALITY = 70
+        /** Depth-field colormap clamp range, in millimetres. */
+        private const val DEPTH_MIN_MM = 200f
+        private const val DEPTH_MAX_MM = 6_000f
+        /** How long capture() waits for the pump to hand back a full-res frame. */
+        private const val CAPTURE_VIA_PUMP_TIMEOUT_MS = 6_000L
+    }
+
+    /** One-shot handoff between capture() (waiter) and the streaming pump (filler). */
+    private class CaptureWaiter {
+        @Volatile var result: CapturedRgbd? = null
+        @Volatile var error: Exception? = null
+        val latch = CountDownLatch(1)
+
+        fun resolve(r: CapturedRgbd) { result = r; latch.countDown() }
+        fun reject(e: Exception) { error = e; latch.countDown() }
+
+        fun await(timeoutMs: Long): CapturedRgbd {
+            if (!latch.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+                throw IllegalStateException("Timed out waiting for Orbbec frame")
+            }
+            error?.let { throw it }
+            return result ?: throw IllegalStateException("No Orbbec frame produced")
+        }
     }
 
     private data class CapturedJpeg(
@@ -104,15 +141,25 @@ class OrbbecPlugin : Plugin() {
     private var streaming = false
     private var depthStreaming = false
 
+    // Live-preview pump: a dedicated thread is the SOLE reader of the pipeline
+    // while streaming. capture() coordinates through pendingCapture so two threads
+    // never call waitForFrameSet() on the same pipeline at once.
+    @Volatile private var pumpRunning = false
+    private var streamPump: Thread? = null
+    private val pendingCapture = AtomicReference<CaptureWaiter?>(null)
+
     private val deviceChangedCallback = object : DeviceChangedCallback {
         override fun onDeviceAttach(deviceList: DeviceList) {
+            var count = 0
             try {
-                Log.i(TAG, "Orbbec device attached (${deviceList.getDeviceCount()} device(s))")
+                count = deviceList.getDeviceCount()
+                Log.i(TAG, "Orbbec device attached ($count device(s))")
             } catch (e: Exception) {
                 Log.w(TAG, "onDeviceAttach failed", e)
             } finally {
                 safeClose(deviceList, "attach deviceList")
             }
+            notifyDeviceChange(true, count)
         }
 
         override fun onDeviceDetach(deviceList: DeviceList) {
@@ -141,6 +188,19 @@ class OrbbecPlugin : Plugin() {
                     }
                 }
             }
+            notifyDeviceChange(false, 0)
+        }
+    }
+
+    /** Tell JS the USB device set changed so the UI can re-scan sources. */
+    private fun notifyDeviceChange(attached: Boolean, count: Int) {
+        try {
+            notifyListeners(
+                "orbbecDeviceChange",
+                JSObject().put("attached", attached).put("count", count)
+            )
+        } catch (e: Exception) {
+            Log.d(TAG, "notifyDeviceChange ignored", e)
         }
     }
 
@@ -290,7 +350,9 @@ class OrbbecPlugin : Plugin() {
         cameraExecutor.execute {
             try {
                 synchronized(stateLock) { openSdkLocked() }
-                val frame = captureRgbd()
+                // While the live pump owns the pipeline, let it hand back the next
+                // full-res frameset instead of reading the pipeline concurrently.
+                val frame = if (pumpRunning) captureViaPump() else captureRgbd()
                 val ret = JSObject()
                 ret.put("base64", Base64.encodeToString(frame.color.bytes, Base64.NO_WRAP))
                 ret.put("width", frame.color.width)
@@ -317,30 +379,70 @@ class OrbbecPlugin : Plugin() {
         }
     }
 
-    /** Preview is not rendered natively; keeping the pipeline open is enough. */
+    /**
+     * Start the live preview pump: open the pipeline and spin up the streaming
+     * thread that emits throttled, downscaled RGB + colorized-depth frames to JS
+     * via notifyListeners("orbbecFrame", …).
+     */
     @PluginMethod
     fun startPreview(call: PluginCall) {
-        open(call)
+        cameraExecutor.execute {
+            try {
+                synchronized(stateLock) { openSdkLocked() }
+                startPump()
+                call.resolve(JSObject().put("streaming", true))
+            } catch (e: Exception) {
+                Log.e(TAG, "startPreview failed", e)
+                call.reject(e.message ?: "Failed to start Orbbec preview")
+            }
+        }
     }
 
-    /** No JS preview pump to stop. The capture pipeline remains open. */
+    /** Stop the live preview pump. The pipeline stays open for a following capture. */
     @PluginMethod
     fun stopPreview(call: PluginCall) {
+        stopPump()
         call.resolve(JSObject().put("stopped", true))
     }
 
     /** Stop/release the Pipeline, Device and OBContext. */
     @PluginMethod
     fun close(call: PluginCall) {
+        stopPump()
         cameraExecutor.execute {
+            joinPump()
             synchronized(stateLock) { closeSdkLocked() }
             call.resolve(JSObject().put("closed", true))
         }
     }
 
+    /**
+     * Re-enumerate the USB bus and drop any stale SDK context so a re-plugged
+     * Orbbec is detected on the next open/startPreview. Fixes the "works on first
+     * connect, but unplug → replug is never found" case: after a detach the SDK
+     * context is torn down, and a fresh device instance needs a clean re-init plus
+     * a new USB-permission grant. Resolves { available, count } for the live bus.
+     */
+    @PluginMethod
+    fun refresh(call: PluginCall) {
+        stopPump()
+        cameraExecutor.execute {
+            joinPump()
+            synchronized(stateLock) { closeSdkLocked() }
+            val devices = orbbecDevices()
+            call.resolve(
+                JSObject()
+                    .put("available", devices.isNotEmpty())
+                    .put("count", devices.size)
+            )
+        }
+    }
+
     override fun handleOnDestroy() {
+        stopPump()
         try {
             cameraExecutor.execute {
+                joinPump()
                 synchronized(stateLock) { closeSdkLocked() }
             }
         } catch (e: Exception) {
@@ -348,6 +450,139 @@ class OrbbecPlugin : Plugin() {
         }
         cameraExecutor.shutdown()
         super.handleOnDestroy()
+    }
+
+    // ── Live preview pump ────────────────────────────────────────────────────
+
+    /** Start the streaming thread (idempotent). */
+    private fun startPump() {
+        synchronized(stateLock) {
+            if (pumpRunning) return
+            pumpRunning = true
+            val thread = Thread({ runPump() }, "PalmAnnotate-OrbbecPump").apply { isDaemon = true }
+            streamPump = thread
+            thread.start()
+        }
+    }
+
+    /**
+     * Signal the streaming thread to stop and fail any in-flight capture handoff.
+     * Does NOT wait for the thread to exit — safe to call from the main thread
+     * (stopPreview) since it leaves the pipeline open. Teardown paths that close
+     * the pipeline must additionally joinPump() so the close can't race a read.
+     */
+    private fun stopPump() {
+        synchronized(stateLock) { pumpRunning = false }
+        pendingCapture.getAndSet(null)?.reject(IllegalStateException("Orbbec preview stopped"))
+        synchronized(stateLock) { streamPump }?.let { try { it.interrupt() } catch (_: Exception) {} }
+    }
+
+    /**
+     * Wait (bounded) for the pump thread to exit so the pipeline can be closed
+     * without a concurrent waitForFrameSet(). Must run OFF the stateLock (the pump
+     * briefly takes it each iteration) and OFF the main thread — call it from the
+     * cameraExecutor only.
+     */
+    private fun joinPump() {
+        synchronized(stateLock) { pumpRunning = false }
+        val thread = synchronized(stateLock) { streamPump }
+        if (thread != null && thread.isAlive) {
+            try { thread.interrupt() } catch (_: Exception) {}
+            try {
+                thread.join(FRAME_TIMEOUT_MS + 1_000L)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+        synchronized(stateLock) { if (streamPump === thread) streamPump = null }
+    }
+
+    /**
+     * Streaming loop: the SOLE reader of the pipeline while running. Each frameset
+     * fulfils a pending full-res capture (if any) and, throttled, emits a small
+     * RGB + colorized-depth preview to JS.
+     */
+    private fun runPump() {
+        var lastPreview = 0L
+        while (pumpRunning) {
+            val activePipeline = synchronized(stateLock) { pipeline }
+            if (activePipeline == null) break
+
+            var frameSet: FrameSet? = null
+            var colorFrame: ColorFrame? = null
+            var depthFrame: DepthFrame? = null
+            try {
+                frameSet = activePipeline.waitForFrameSet(FRAME_TIMEOUT_MS)
+                if (frameSet == null) continue
+                colorFrame = frameSet.getColorFrame()
+                depthFrame = frameSet.getDepthFrame()
+
+                // Hand a full-resolution frame to a waiting capture() call.
+                val waiter = pendingCapture.getAndSet(null)
+                if (waiter != null) {
+                    try {
+                        val color = colorFrame ?: throw IllegalStateException("No color frame")
+                        val depth = depthFrame?.let { runCatching { encodeDepthFrame(it) }.getOrNull() }
+                        waiter.resolve(CapturedRgbd(encodeColorFrame(color), depth))
+                    } catch (e: Exception) {
+                        waiter.reject(e)
+                    }
+                }
+
+                // Throttled, downscaled preview push.
+                val now = System.currentTimeMillis()
+                if (now - lastPreview >= PREVIEW_INTERVAL_MS) {
+                    lastPreview = now
+                    emitPreview(colorFrame, depthFrame)
+                }
+            } catch (e: InterruptedException) {
+                break
+            } catch (e: Exception) {
+                Log.w(TAG, "pump iteration failed", e)
+                pendingCapture.getAndSet(null)?.reject(e)
+            } finally {
+                safeClose(depthFrame, "pump depth frame")
+                safeClose(colorFrame, "pump color frame")
+                safeClose(frameSet, "pump frameSet")
+            }
+        }
+    }
+
+    /** Block on the pump producing the next full-res frame for capture(). */
+    private fun captureViaPump(): CapturedRgbd {
+        if (!pumpRunning) return captureRgbd()
+        val waiter = CaptureWaiter()
+        pendingCapture.set(waiter)
+        return waiter.await(CAPTURE_VIA_PUMP_TIMEOUT_MS)
+    }
+
+    /** Encode + emit one preview frame (best-effort; never throws). */
+    private fun emitPreview(colorFrame: ColorFrame?, depthFrame: DepthFrame?) {
+        try {
+            val event = JSObject()
+            var any = false
+            if (colorFrame != null) {
+                val rgb = runCatching { encodeColorPreviewBase64(colorFrame) }.getOrNull()
+                if (rgb != null) {
+                    event.put("rgb", rgb)
+                    event.put("width", colorFrame.getWidth())
+                    event.put("height", colorFrame.getHeight())
+                    any = true
+                }
+            }
+            if (depthFrame != null) {
+                val depth = runCatching { encodeDepthPreviewBase64(depthFrame) }.getOrNull()
+                if (depth != null) {
+                    event.put("depth", depth)
+                    event.put("depthWidth", depthFrame.getWidth())
+                    event.put("depthHeight", depthFrame.getHeight())
+                    any = true
+                }
+            }
+            if (any) notifyListeners("orbbecFrame", event)
+        } catch (e: Exception) {
+            Log.w(TAG, "emitPreview failed", e)
+        }
     }
 
     // ── SDK lifecycle internals ──────────────────────────────────────────────
@@ -606,6 +841,9 @@ class OrbbecPlugin : Plugin() {
         selectedUid = null
         streaming = false
         depthStreaming = false
+        // The pump loop reads `pipeline` under stateLock each iteration, so nulling
+        // it here also breaks the loop (belt-and-braces with stopPump/joinPump).
+        pumpRunning = false
 
         safeStopAndClose(oldPipeline)
         safeClose(oldDevice, "device")
@@ -804,6 +1042,90 @@ class OrbbecPlugin : Plugin() {
         }
         return CapturedDepth(y16, width, height, format.name, frame.getValueScale())
     }
+
+    // ── Live preview encoders (downscaled, cheap for the JS bridge) ──────────
+
+    /** Encode a downscaled JPEG preview of the color frame as base64. */
+    private fun encodeColorPreviewBase64(frame: ColorFrame): String {
+        val jpeg = encodeColorFrame(frame).bytes
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, bounds)
+        val srcMax = maxOf(bounds.outWidth, bounds.outHeight)
+        val opts = BitmapFactory.Options()
+        if (srcMax > COLOR_PREVIEW_MAX_DIM) opts.inSampleSize = sampleSizeFor(srcMax, COLOR_PREVIEW_MAX_DIM)
+        val bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
+            ?: return Base64.encodeToString(jpeg, Base64.NO_WRAP) // fall back to full JPEG
+        return try {
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, COLOR_PREVIEW_JPEG_QUALITY, out)
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    /** Largest power-of-two sample size that keeps the longest edge >= target. */
+    private fun sampleSizeFor(srcMax: Int, target: Int): Int {
+        var sample = 1
+        while (srcMax / (sample * 2) >= target) sample *= 2
+        return sample
+    }
+
+    /** Encode a subsampled, colorized JPEG preview of the depth field as base64. */
+    private fun encodeDepthPreviewBase64(frame: DepthFrame): String? {
+        val width = frame.getWidth()
+        val height = frame.getHeight()
+        if (width <= 0 || height <= 0) return null
+        val size = frame.getDataSize()
+        if (size <= 0) return null
+        val raw = ByteArray(size)
+        val copied = frame.getData(raw)
+        if (copied <= 0) return null
+        val data = if (copied in 1 until raw.size) raw.copyOf(copied) else raw
+        if (data.size < width * height * 2) return null
+        val scale = frame.getValueScale()
+
+        val step = maxOf(1, maxOf(width, height) / DEPTH_PREVIEW_MAX_DIM)
+        val outW = (width + step - 1) / step
+        val outH = (height + step - 1) / step
+        if (outW <= 0 || outH <= 0) return null
+
+        val pixels = IntArray(outW * outH)
+        var di = 0
+        var y = 0
+        while (y < height && di < pixels.size) {
+            var x = 0
+            while (x < width && di < pixels.size) {
+                val idx = (y * width + x) * 2
+                val v = (data[idx].toInt() and 0xFF) or ((data[idx + 1].toInt() and 0xFF) shl 8)
+                pixels[di++] = depthPreviewColor(v * scale)
+                x += step
+            }
+            y += step
+        }
+
+        val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        return try {
+            bmp.setPixels(pixels, 0, outW, 0, 0, outW, outH)
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, DEPTH_PREVIEW_JPEG_QUALITY, out)
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    /** Jet colormap over [DEPTH_MIN_MM, DEPTH_MAX_MM]; 0/invalid depth → black. */
+    private fun depthPreviewColor(mm: Float): Int {
+        if (mm <= 0f) return 0xFF shl 24
+        val t = ((mm - DEPTH_MIN_MM) / (DEPTH_MAX_MM - DEPTH_MIN_MM)).coerceIn(0f, 1f)
+        val r = (clampUnit(1.5f - kotlin.math.abs(4f * t - 3f)) * 255f).toInt()
+        val g = (clampUnit(1.5f - kotlin.math.abs(4f * t - 2f)) * 255f).toInt()
+        val b = (clampUnit(1.5f - kotlin.math.abs(4f * t - 1f)) * 255f).toInt()
+        return argb(r, g, b)
+    }
+
+    private fun clampUnit(v: Float): Float = if (v < 0f) 0f else if (v > 1f) 1f else v
 
     private fun pixelsToJpeg(pixels: IntArray, width: Int, height: Int): ByteArray {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

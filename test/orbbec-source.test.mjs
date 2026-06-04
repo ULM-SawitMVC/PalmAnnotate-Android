@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { loadModule } from './_harness.mjs';
+import { makeDom } from './dom-stub.mjs';
 
 const quietConsole = { ...console, info() {} };
 
@@ -20,6 +21,25 @@ function loadOrbbec({ native = true, plugin = null } = {}) {
       atob: value => Buffer.from(value, 'base64').toString('binary'),
     },
   });
+}
+
+// Variant with a real fake DOM so the live-preview path (mountPreview) can build
+// and query its RGB/depth elements.
+function loadOrbbecDom(plugin) {
+  const dom = makeDom();
+  const Capacitor = { isNativePlatform: () => true, Plugins: plugin ? { Orbbec: plugin } : {} };
+  const ctx = loadModule(['js/capture/capture-source.js', 'js/capture/orbbec-source.js'], {
+    globals: {
+      console: quietConsole,
+      document: dom.document,
+      Capacitor,
+      Blob,
+      Uint8Array,
+      createImageBitmap: undefined,
+      atob: value => Buffer.from(value, 'base64').toString('binary'),
+    },
+  });
+  return { ctx, dom };
 }
 
 test('OrbbecSource registers as optional and does not replace built-in camera default', async () => {
@@ -137,4 +157,80 @@ test('OrbbecSource capture rejects clearly when plugin or frame payload is missi
     }).OrbbecSource.capture(),
     /Orbbec capture returned no frame/
   );
+});
+
+test('OrbbecSource.supportsLivePreview tracks the streaming plugin API', () => {
+  assert.equal(
+    loadOrbbec({ plugin: { startPreview() {}, addListener() {} } }).OrbbecSource.supportsLivePreview(),
+    true
+  );
+  // Missing the streaming methods → no live preview (one-shot Capture only).
+  assert.equal(loadOrbbec({ plugin: { isAvailable() {} } }).OrbbecSource.supportsLivePreview(), false);
+  // Web runtime is never live for the USB camera.
+  assert.equal(
+    loadOrbbec({ native: false, plugin: { startPreview() {}, addListener() {} } }).OrbbecSource.supportsLivePreview(),
+    false
+  );
+});
+
+test('OrbbecSource.mountPreview subscribes to frames, starts the pump, renders RGB+depth, and stops cleanly', async () => {
+  const calls = [];
+  let frameCb = null;
+  const removed = { listener: false, preview: false };
+  const plugin = {
+    async requestPermission() { calls.push('perm'); return { granted: true }; },
+    async addListener(name, cb) { calls.push('addListener:' + name); frameCb = cb; return { remove: async () => { removed.listener = true; } }; },
+    async startPreview() { calls.push('startPreview'); return { streaming: true }; },
+    async stopPreview() { calls.push('stopPreview'); removed.preview = true; return { stopped: true }; },
+  };
+  const { ctx, dom } = loadOrbbecDom(plugin);
+  const stage = dom.document.createElement('div');
+
+  const stop = await ctx.OrbbecSource.mountPreview(stage);
+  assert.deepEqual(calls, ['perm', 'addListener:orbbecFrame', 'startPreview']);
+  assert.ok(stage.querySelector('.orbbec-live'), 'live wrapper mounted into the stage');
+
+  // A pushed frame updates the RGB main view and the depth PiP.
+  frameCb({ rgb: 'AAAA', depth: 'BBBB', width: 1280, height: 720 });
+  assert.equal(stage.querySelector('.orbbec-live__main').src, 'data:image/jpeg;base64,AAAA');
+  assert.equal(stage.querySelector('.orbbec-live__pipimg').src, 'data:image/jpeg;base64,BBBB');
+
+  await stop();
+  assert.equal(removed.listener, true, 'frame listener removed on stop');
+  assert.equal(removed.preview, true, 'native pump stopped on stop');
+  assert.equal(stage.querySelector('.orbbec-live'), null, 'preview DOM removed on stop');
+});
+
+test('OrbbecSource.mountPreview rejects (so capture falls back) when USB permission is denied', async () => {
+  const { ctx, dom } = loadOrbbecDom({
+    async requestPermission() { return { granted: false }; },
+    async addListener() { return { remove() {} }; },
+    async startPreview() { throw new Error('should not start'); },
+  });
+  await assert.rejects(() => ctx.OrbbecSource.mountPreview(dom.document.createElement('div')),
+    /Orbbec USB permission denied/);
+});
+
+test('OrbbecSource.grab returns a full-resolution frame from the running stream', async () => {
+  const { ctx } = loadOrbbecDom({
+    async capture() {
+      return { base64: Buffer.from('jpeg-bytes').toString('base64'), width: 1280, height: 720, format: 'jpeg' };
+    },
+  });
+  const shot = await ctx.OrbbecSource.grab();
+  assert.equal(shot.width, 1280);
+  assert.equal(shot.height, 720);
+  assert.equal(await shot.blob.text(), 'jpeg-bytes');
+});
+
+test('OrbbecSource.refresh re-scans via plugin.refresh, falling back to isAvailable', async () => {
+  assert.equal(
+    await loadOrbbec({ plugin: { async refresh() { return { available: true, count: 1 }; } } }).OrbbecSource.refresh(),
+    true
+  );
+  assert.equal(
+    await loadOrbbec({ plugin: { async isAvailable() { return { available: false }; } } }).OrbbecSource.refresh(),
+    false
+  );
+  assert.equal(await loadOrbbec({ native: false }).OrbbecSource.refresh(), false);
 });
