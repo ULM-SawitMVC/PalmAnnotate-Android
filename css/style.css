@@ -1846,6 +1846,11 @@ input { font-family: inherit; }
   pointer-events: none;
 }
 
+.dedup-canvas-block:first-child .dedup-canvas-info {
+  left: auto;
+  right: 4px;
+}
+
 .dedup-canvas {
   display: block;
   width: 100%;
