@@ -115,33 +115,41 @@ automatically — no native-code rebuild needed unless Android sources changed.
 ### Camera sources
 
 The **built-in device camera is still the default** capture source, and on
-Android it now streams **inside the app** via the WebView's `getUserMedia`
+Android it streams **inside the app** via the WebView's `getUserMedia`
 (the manifest declares `android.permission.CAMERA`) — there is no jump to the OS
 camera activity. If getUserMedia is ever denied/unavailable the flow degrades to
 a one-shot file picker (web) or the Capacitor Camera plugin (native), so capture
-never breaks. The native **Orbbec USB (RGB-D) camera** plugin is wired to the
-Orbbec Android SDK wrapper AAR
-(`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`); it has no live
-preview, so its side capture uses a one-shot Capture button:
+never breaks.
+
+The native **Orbbec USB (RGB-D) camera** plugin is wired to the Orbbec Android
+SDK wrapper AAR (`android/app/libs/obsensor_v2.0.6_2026031801_release.aar`) and
+renders an in-app RGB preview with a colorized-depth PiP. The capture flow uses
+the same side-to-side surface as the device camera:
 
 - Android USB-host enumeration and runtime USB permission are real.
-- `open()` starts an Orbbec `OBContext`/`Pipeline` color stream.
-- `capture()` returns one color frame as base64 JPEG (`{base64,width,height}`).
-- `close()` releases the pipeline/device/context.
+- `startPreview()` starts an Orbbec `OBContext`/`Pipeline` RGB-D stream and pumps
+  throttled preview frames to the WebView.
+- `capture()` returns a full-resolution color frame as base64 JPEG plus depth
+  sidecar metadata when depth is available.
+- `stopPreview()`/`close()` serialize the preview pump before releasing SDK
+  objects, so sudden USB detach/PD renegotiation should not crash the app.
 
-Runtime Orbbec capture still needs testing on a physical Android device with the
-Gemini/Orbbec hardware attached. When plugged in, Orbbec appears as an optional
-**Camera** choice during side capture; the device camera remains the fallback.
-Current Orbbec capture annotates the RGB JPEG but also saves the depth sidecar
-with the same tree/side stem:
+When plugged in, Orbbec appears as an optional **Camera** choice during side
+capture; the device camera remains the fallback. Orbbec capture annotates the
+RGB JPEG but also saves the depth sidecar with the same tree/side stem:
 `dataset/images/field/{TREE}_{side}.jpg`,
 `dataset/depth/field/{TREE}_{side}.raw`, and
-`dataset/depth/field/{TREE}_{side}.json`. Android storage/SAF behavior has been
-field-checked with an export shaped like
-`PalmAnnotate-Debug.zip`:
-`dataset/images/field`, `dataset/metadata`, `Output JSON`, and `Output TXT/field`
-are all populated as expected. For the full Android build, signing, SAF, and
-Orbbec notes, see [docs/android-build.md](docs/android-build.md).
+`dataset/depth/field/{TREE}_{side}.json`.
+
+**USB-C charging caveat:** Orbbec needs the Android device to stay in USB
+host/data role. Some tablets (verified: Xiaomi Pad 6) switch to
+`power_role=sink + data_role=device` when a charger is connected to a USB-C hub's
+PD pass-through port; Android then detaches the Orbbec and the Camera dropdown
+will remove it until the USB bus is re-enumerated. Use wireless ADB for debugging
+and, if charging is required, a hub/tablet combination that supports host data
+while sinking power, or power only the hub/Orbbec while the tablet remains host.
+For the full Android build, signing, SAF, and Orbbec notes, see
+[docs/android-build.md](docs/android-build.md).
 
 ## Output Schema
 

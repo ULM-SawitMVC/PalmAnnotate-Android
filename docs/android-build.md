@@ -242,30 +242,38 @@ git-ignored. To update the SDK, drop a new wrapper AAR into `android/app/libs/`.
 implementation fileTree(dir: 'libs', include: ['*.aar'])
 ```
 
-The Orbbec SDK requires **minSdk 24** (`android/variables.gradle`). Current native
-methods:
+The Orbbec SDK requires **minSdk 24** (`android/variables.gradle`). Current native methods:
 
 - `isAvailable()` / `listDevices()` — Android USB-host enumeration filtered to
   Orbbec vendor id `0x2BC5`.
 - `requestPermission()` — runtime USB permission with a one-shot broadcast
   receiver (`FLAG_MUTABLE`, `RECEIVER_NOT_EXPORTED`).
-- `open()` — creates `OBContext`, opens the first SDK-visible device, selects a
-  capturable color profile, and starts a `Pipeline` on a single worker thread.
-- `capture()` — waits for a color frame and returns base64 JPEG plus dimensions.
-  MJPG is passed through; RGB/BGR/RGBA/BGRA/YUYV/UYVY/NV21/NV12/I420 are encoded
-  to JPEG in Kotlin.
-- `close()` — stops and releases the pipeline, device, and SDK context.
+- `open()` — creates `OBContext`, opens the first SDK-visible device, selects
+  color/depth profiles, and starts a `Pipeline` on a single worker thread.
+- `startPreview()` — starts a dedicated preview pump that is the only pipeline
+  reader while live preview is running. It emits throttled RGB frames plus a
+  colorized depth PiP through Capacitor listener events.
+- `capture()` — returns a full-resolution color frame as base64 JPEG plus
+  dimensions and, when available, the synchronized depth sidecar. While preview
+  is running, capture is fulfilled by the pump instead of reading the pipeline
+  from a second thread. MJPG is passed through; RGB/BGR/RGBA/BGRA/YUYV/UYVY/
+  NV21/NV12/I420 are encoded to JPEG in Kotlin.
+- `stopPreview()` / `refresh()` / `close()` — stop and join the preview pump
+  before releasing or restarting SDK objects. This ordering is intentional: USB-C
+  PD role changes can detach the camera while `waitForFrameSet()` is blocked,
+  and closing the SDK underneath that reader can crash the vendor native layer.
 
 The built-in camera remains PalmAnnotate's safe default capture source and gets
 the embedded live preview described above. When an Orbbec USB camera is attached
 and `Orbbec.isAvailable()` reports a device, the embedded capture surface shows
-an inline **Camera** selector (`Device Camera` / `Orbbec USB camera`). Orbbec has
-no live preview, so selecting it switches the surface to a one-shot **Capture**
-button that grabs a frame per side via `OrbbecSource.capture()`; the rest of the
-flow (side-to-side advance, end-of-capture review, Save) is identical. Android
-may show a USB permission dialog on first use. The selected source is remembered
-for the rest of the capture flow, but if the Orbbec is unplugged/unavailable the
-surface falls back to the device camera.
+an inline **Camera** selector (`Device Camera` / `Orbbec USB camera`). Selecting
+Orbbec renders the native RGB preview with a tappable colorized-depth PiP; the
+same **Capture** button grabs one full-resolution RGB(+depth) frame per side via
+`OrbbecSource.grab()`. The rest of the flow (side-to-side advance,
+end-of-capture review, Save) is identical. Android may show a USB permission
+dialog on first use. The selected source is remembered for the rest of the
+capture flow, but if the Orbbec is unplugged/unavailable the surface falls back
+to the device camera.
 
 Current Orbbec persistence keeps the annotation pipeline RGB, but saves depth as
 a sidecar with the same tree/side stem for later RGB-D / 4-channel YOLO training:
@@ -282,8 +290,16 @@ format, value scale, unit, RGB filename, and alignment note. SAF mirrors the sam
 files when an export folder is selected. Delete Tree/Delete Session delete depth
 sidecars together with RGB/JSON/TXT.
 
-Runtime validation still requires a physical Android device with the Orbbec/Gemini
-camera attached.
+Runtime validation requires a physical Android device with the Orbbec/Gemini
+camera attached. A field-tested failure mode is USB-C PD pass-through on hubs:
+when the tablet switches from host mode to charging/device mode, Android detaches
+the Orbbec immediately. On Xiaomi Pad 6 this shows as `power_role=sink` and
+`data_role=device` in `adb shell dumpsys usb`; the required Orbbec mode is host
+data. Use wireless ADB for debugging, avoid plugging the tablet into a PC while
+capturing, and only use charge-through hubs/tablets that preserve `data_role=host`
+while sinking power. The app should survive the detach and show/fall back from
+Orbbec, but software cannot keep the camera connected after Android drops host
+role.
 
 ### Verified Android file lifecycle
 

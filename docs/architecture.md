@@ -93,3 +93,8 @@ Saved output filenames are dataset-driven:
 - No visual embeddings, tracking, or image hashing are used for deduplication.
 - One bbox can be linked to only one counterpart per adjacent side pair.
 - Folder handles must be selected again after a browser refresh.
+- Orbbec USB capture depends on Android staying in USB host/data role. Some USB-C
+  PD pass-through hubs/tablets switch to charging/device role when a charger is
+  connected; Android then detaches the Orbbec. PalmAnnotate hardens detach
+  cleanup so the app survives and falls back, but it cannot override USB-C role
+  negotiation in software.

@@ -12,7 +12,9 @@ python -m http.server 4173
 
 On web, click **Load Folder** and choose a dataset root containing `images/` and `labels/`.
 
-On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location. During side capture, a connected Orbbec USB camera appears in the **Camera** selector; choose **Orbbec USB camera** to use it, or keep **Device Camera** as fallback. Annotation uses the RGB image, while Orbbec depth is saved beside it with the same stem: `dataset/images/field/{TREE}_{side}.jpg`, `dataset/depth/field/{TREE}_{side}.raw`, and `dataset/depth/field/{TREE}_{side}.json`.
+On Android, use the Sessions home flow to start/resume a locked variety+block session and capture trees into the app's PalmAnnotate working store. The optional **Export folder** row lets you choose a public folder via Android's SAF picker so captures are mirrored into a browsable location. During side capture, a connected Orbbec USB camera appears in the **Camera** selector; choose **Orbbec USB camera** to use its in-app RGB preview and depth PiP, or keep **Device Camera** as fallback. Annotation uses the RGB image, while Orbbec depth is saved beside it with the same stem: `dataset/images/field/{TREE}_{side}.jpg`, `dataset/depth/field/{TREE}_{side}.raw`, and `dataset/depth/field/{TREE}_{side}.json`.
+
+**Orbbec + charging note:** if a USB-C hub charger/PD input makes the tablet switch out of USB host mode, Android disconnects the Orbbec and the Camera selector may fall back to **Device Camera**. This is a USB-C role limitation, not a dataset issue. Unplug/replug the Orbbec or tap **Find camera** after restoring host mode. For debugging, prefer wireless ADB; for field use, only use a powered hub/charger setup that keeps the tablet in host data role while powering the camera.
 
 PalmAnnotate groups files by tree name and side number. A tree named `DAMIMAS_A21B_0001` should have files such as:
 

@@ -158,6 +158,18 @@ The **live Orbbec depth stream + camera switch only render on the capture screen
 source selected** (built-in camera is the default). Driving that whole flow over CDP is fragile —
 for a visual check, have the operator open the capture screen on Orbbec, then take one screenshot.
 
+USB-C PD/charging diagnostics for Orbbec disconnects:
+
+```powershell
+& $adb shell dumpsys usb | Select-String -Pattern 'current_mode|power_role|data_role|manufacturer=11205|product=2052|Orbbec' -Context 2
+```
+
+Orbbec requires Android to keep USB **data_role=host**. On Xiaomi Pad 6 with some USB-C hubs, plugging
+PD pass-through charging can switch the tablet to `power_role=sink` + `data_role=device`; Android then
+detaches the Orbbec (`Orbbec.isAvailable() -> {available:false}`). Use wireless ADB for debugging and
+only use charge-through hardware that preserves host data while sinking power. App code must treat this
+as a normal disconnect and never assume software can keep the camera alive after Android drops host role.
+
 ## Module map (`js/`)
 
 - `app.js` — top-level UI controller: tabs, tree navigation, keyboard shortcuts, operation queue.
@@ -191,13 +203,15 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
 - App id / namespace: `dev.sawitulm.palmannotate`. SDK: min 24 (required by Orbbec SDK), target/compile 34.
 - **Orbbec SDK:** `android/app/libs/obsensor_v2.0.6_2026031801_release.aar` is vendored from
   `OrbbecSDK-Android-Wrapper-2.0.6.zip` and included with `implementation fileTree(dir: 'libs',
-  include: ['*.aar'])`. The plugin's `open()` creates `OBContext`/`Pipeline`, `capture()` returns a
-  base64 JPEG color frame, and `close()` releases SDK resources. Built-in camera remains the fallback;
-  when Orbbec is attached/available, the side-capture panel shows a Camera selector. Annotation still
-  uses RGB, but Orbbec persistence also writes the synchronized depth sidecar with the same stem:
+  include: ['*.aar'])`. The plugin's `open()` creates `OBContext`/`Pipeline`; `startPreview()` runs a
+  single-reader preview pump and streams RGB + colorized depth PiP into the WebView; `capture()` returns
+  a full-resolution base64 JPEG color frame plus depth sidecar data when available; `stopPreview()` /
+  `close()` stop+join the pump before releasing SDK resources so sudden USB detach/PD role changes do
+  not race the vendor native layer. Built-in camera remains the fallback; when Orbbec is attached/
+  available, the side-capture panel shows a Camera selector. Annotation still uses RGB, but Orbbec
+  persistence also writes the synchronized depth sidecar with the same stem:
   `dataset/images/field/{TREE}_{side}.jpg`, `dataset/depth/field/{TREE}_{side}.raw`, and
-  `dataset/depth/field/{TREE}_{side}.json` plus optional SAF mirror. Orbbec runtime still needs
-  real-device + camera validation.
+  `dataset/depth/field/{TREE}_{side}.json` plus optional SAF mirror.
 - **Storage root = `Directory.External`** (`capacitor-adapter.js`): all dataset images/labels,
   metadata, Output JSON/TXT and session downloads live under
   `/Android/data/dev.sawitulm.palmannotate/files/PalmAnnotate/…`. This is the only location that,
