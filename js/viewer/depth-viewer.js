@@ -34,6 +34,24 @@ const DepthViewer = (() => {
 
   function _clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+  // Display window follows the Gemini 335L optimal depth range (0.25–6 m) plus
+  // 1 m far-side margin. Raw .raw files are still preserved unmodified; this only
+  // filters the heatmap auto-range and display colour.
+  const DEPTH_FLOOR_MM = 250;
+  const DEPTH_CEILING_MM = 7000;
+  const DEPTH_RANGE_LOW_PERCENTILE = 0.02;
+  const DEPTH_RANGE_HIGH_PERCENTILE = 0.98;
+
+  function _isDisplayDepth(mm) {
+    return mm >= DEPTH_FLOOR_MM && mm <= DEPTH_CEILING_MM;
+  }
+
+  function _percentile(sorted, p) {
+    if (!sorted.length) return 0;
+    const idx = Math.round((sorted.length - 1) * p);
+    return sorted[_clamp(idx, 0, sorted.length - 1)];
+  }
+
   // Standard "jet" colormap: t in [0,1] → [r,g,b] 0..255. Matches the spirit of
   // the native preview colorizer so the live PiP and this viewer read alike.
   function _jet(t) {
@@ -44,9 +62,9 @@ const DepthViewer = (() => {
     return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
   }
 
-  /** Colour for a depth in mm; 0/invalid → black. */
+  /** Colour for a depth in mm; 0/invalid/out-of-display-range → black. */
   function _depthColor(mm, minMm, maxMm) {
-    if (!(mm > 0)) return [0, 0, 0];
+    if (!_isDisplayDepth(mm)) return [0, 0, 0];
     const span = (maxMm - minMm) || 1;
     return _jet((mm - minMm) / span);
   }
@@ -60,19 +78,44 @@ const DepthViewer = (() => {
     return out;
   }
 
-  /** Auto-range over valid (nonzero) depths, returned in millimetres. */
+  /**
+   * Robust display auto-range over valid depths, returned in millimetres. Zero,
+   * 65535 sentinel, <250 mm, and >7000 mm values are excluded. The heatmap range
+   * uses P2–P98 rather than raw min/max so a few noisy pixels do not dominate.
+   */
   function _range(u16, scale) {
-    let min = Infinity, max = -Infinity;
-    for (let i = 0; i < u16.length; i++) {
+    const vals = [];
+    let observedMin = Infinity, observedMax = -Infinity;
+    const total = u16.length;
+    for (let i = 0; i < total; i++) {
       const v = u16[i];
-      if (v === 0) continue;
-      if (v < min) min = v;
-      if (v > max) max = v;
+      if (v === 0 || v === 65535) continue;
+      const mm = v * scale;
+      if (!_isDisplayDepth(mm)) continue;
+      vals.push(mm);
+      if (mm < observedMin) observedMin = mm;
+      if (mm > observedMax) observedMax = mm;
     }
-    if (!isFinite(min)) return { minMm: 0, maxMm: 1, valid: 0 };
-    let valid = 0;
-    for (let i = 0; i < u16.length; i++) if (u16[i] !== 0) valid++;
-    return { minMm: min * scale, maxMm: Math.max(max * scale, min * scale + 1), valid };
+    if (!vals.length) {
+      return {
+        minMm: DEPTH_FLOOR_MM, maxMm: DEPTH_CEILING_MM, valid: 0, total,
+        validPct: 0, medianMm: 0, observedMinMm: 0, observedMaxMm: 0,
+        displayFloorMm: DEPTH_FLOOR_MM, displayCeilingMm: DEPTH_CEILING_MM,
+      };
+    }
+    vals.sort((a, b) => a - b);
+    const minMm = _percentile(vals, DEPTH_RANGE_LOW_PERCENTILE);
+    const maxMm = Math.max(_percentile(vals, DEPTH_RANGE_HIGH_PERCENTILE), minMm + 1);
+    const valid = vals.length;
+    return {
+      minMm, maxMm, valid, total,
+      validPct: total ? valid / total * 100 : 0,
+      medianMm: _percentile(vals, 0.5),
+      observedMinMm: observedMin,
+      observedMaxMm: observedMax,
+      displayFloorMm: DEPTH_FLOOR_MM,
+      displayCeilingMm: DEPTH_CEILING_MM,
+    };
   }
 
   /** Paint a colorized depth heatmap into `canvas` at native w×h. */
@@ -218,7 +261,7 @@ const DepthViewer = (() => {
       const raw = cur.u16[py * cur.w + px] || 0;
       const mm = raw * cur.scale;
       readout.textContent = raw > 0
-        ? `px(${px}, ${py}) = ${Math.round(mm)} ${cur.unit} (raw ${raw})`
+        ? `px(${px}, ${py}) = ${Math.round(mm)} ${cur.unit} (raw ${raw})${_isDisplayDepth(mm) ? '' : ' · outside display range'}`
         : `px(${px}, ${py}) = no reading (0)`;
     });
 
@@ -255,11 +298,13 @@ const DepthViewer = (() => {
       const scale = Number(meta.valueScale || 1) || 1;
       const unit = meta.unit || 'mm';
       const u16 = _toUint16(bytes);
-      const { minMm, maxMm, valid } = _range(u16, scale);
+      const stats = _range(u16, scale);
+      const { minMm, maxMm, valid } = stats;
       _paintCanvas(canvas, u16, w, h, minMm, maxMm, scale);
       cur = { u16, w, h, scale, unit };
       notice.classList.remove('depth-viewer__notice--show');
-      legend.textContent = `Range ${Math.round(minMm)}–${Math.round(maxMm)} ${unit} · ${valid.toLocaleString()} valid px · ${w}×${h}`;
+      const pct = stats.validPct != null ? stats.validPct.toFixed(1) : '0.0';
+      legend.textContent = `P2–P98 ${Math.round(minMm)}–${Math.round(maxMm)} ${unit} · median ${Math.round(stats.medianMm || 0)} ${unit} · ${valid.toLocaleString()} valid px (${pct}%) · display ${stats.displayFloorMm}–${stats.displayCeilingMm} ${unit} · ${w}×${h}`;
     }
 
     _selectSide(0);

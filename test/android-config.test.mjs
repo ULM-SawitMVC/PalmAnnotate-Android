@@ -111,6 +111,20 @@ test('Android Orbbec USB camera integration is optional and registered', () => {
   assert.doesNotMatch(plugin, /Orbbec SDK not integrated yet/);
 });
 
+test('Android Orbbec depth preview uses optimal-range filtering and lighter robust colorization', () => {
+  const plugin = read('android/app/src/main/java/dev/sawitulm/palmannotate/OrbbecPlugin.kt');
+
+  assert.match(plugin, /DEPTH_RANGE_FLOOR_MM = 250f/);
+  assert.match(plugin, /DEPTH_RANGE_CEILING_MM = 7_000f/);
+  assert.match(plugin, /DEPTH_PREVIEW_MAX_DIM = 288/);
+  assert.match(plugin, /DEPTH_PREVIEW_INTERVAL_MS = 160L/);
+  assert.match(plugin, /DEPTH_RANGE_LOW_PERCENTILE = 0\.02f/);
+  assert.match(plugin, /DEPTH_RANGE_HIGH_PERCENTILE = 0\.98f/);
+  assert.match(plugin, /depthDisplayFloorMm/);
+  assert.match(plugin, /depthDisplayCeilingMm/);
+  assert.match(plugin, /validMm\.sort\(0, validCount\)/);
+});
+
 test('Android Orbbec disconnect teardown serializes the native preview pump before SDK release/restart', () => {
   // Regression guard for the USB-C PD/charging detach crash: Orbbec can disappear
   // while the preview pump is blocked in waitForFrameSet(). Every path that

@@ -1,0 +1,350 @@
+/* Tablet-first compact annotation overrides.
+   Goal: image dominates; tools float like a small palette; bottom actions stay flat. */
+
+body.crsl-shell #panel-carousel {
+  padding: 0;
+}
+
+body.crsl-shell .carousel-root {
+  position: relative;
+  gap: 0;
+  overflow: hidden;
+  background: #050805;
+}
+
+body.crsl-shell .carousel-topbar {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  min-height: 42px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(7,12,7,0.82), rgba(7,12,7,0.48));
+  backdrop-filter: blur(14px) saturate(1.25);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  flex-wrap: nowrap;
+}
+
+body.crsl-shell .crsl-topbtn,
+body.crsl-shell .crsl-seg__btn {
+  min-height: 34px;
+  min-width: 34px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  padding: 0 0.7rem;
+}
+
+body.crsl-shell .crsl-seg {
+  padding: 2px;
+  border-radius: 12px;
+}
+
+body.crsl-shell .crsl-treelabel,
+body.crsl-shell .crsl-sidelabel {
+  font-size: 0.78rem;
+}
+
+body.crsl-shell .carousel-stage {
+  flex: 1 1 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: #020402;
+}
+
+body.crsl-shell .carousel-bottom {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+  display: block;
+}
+
+body.crsl-shell .crsl-dots {
+  display: none;
+}
+
+/* Photoshop-like floating tool palette. */
+body.crsl-shell .crsl-classbar {
+  position: absolute;
+  left: max(8px, env(safe-area-inset-left));
+  top: calc(max(8px, env(safe-area-inset-top)) + 54px);
+  z-index: 22;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 16px;
+  background: rgba(7, 12, 7, 0.72);
+  box-shadow: 0 18px 38px rgba(0,0,0,0.28);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+body.crsl-shell .crsl-classbar__spacer {
+  display: none;
+}
+
+body.crsl-shell .crsl-chip,
+body.crsl-shell .crsl-action {
+  min-width: 54px;
+  min-height: 42px;
+  padding: 0 0.55rem;
+  border-radius: 12px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+body.crsl-shell .crsl-action--boxes {
+  font-size: 0.72rem;
+  min-width: 68px;
+}
+
+.crsl-action--active {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+  background: rgba(184, 224, 74, 0.12);
+}
+
+/* Bottom stays a single flat row; it no longer stacks upward and steals image height. */
+body.crsl-shell .crsl-actionrow {
+  position: absolute;
+  right: max(8px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 23;
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  background: rgba(7, 12, 7, 0.68);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+body.crsl-shell .crsl-thumbs {
+  position: absolute;
+  left: calc(max(8px, env(safe-area-inset-left)) + 78px);
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 21;
+  pointer-events: auto;
+  max-width: min(42vw, 460px);
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(7, 12, 7, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+body.crsl-shell .crsl-thumb {
+  width: 58px;
+  height: 44px;
+}
+
+body.crsl-shell .crsl-links {
+  position: absolute;
+  left: calc(max(8px, env(safe-area-inset-left)) + 78px);
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 58px);
+  z-index: 21;
+  pointer-events: auto;
+  max-width: min(42vw, 460px);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+body.crsl-shell .crsl-links--empty {
+  display: none;
+}
+
+body.crsl-shell.crsl-show-tabs .tabs {
+  position: absolute;
+  top: calc(max(8px, env(safe-area-inset-top)) + 54px);
+  left: 86px;
+  right: 86px;
+  z-index: 25;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(7, 12, 7, 0.78);
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+body.crsl-shell.crsl-show-tabs .tab {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+/* Classic editor compact mode: keep the image large and push tools into a slim rail. */
+.annotation-sidebar {
+  width: 132px;
+}
+
+.annotation-sidebar .editor-hints {
+  display: none;
+}
+
+.annotation-sidebar .toolbar-group,
+.annotation-sidebar .quality-card {
+  border-radius: 12px;
+}
+
+@media (pointer: coarse) and (min-width: 700px) {
+  .tabs {
+    min-height: 42px;
+  }
+  .tab {
+    padding: 0.55rem 0.85rem;
+  }
+  .annotation-layout {
+    position: relative;
+  }
+  .annotation-sidebar {
+    width: 112px;
+    position: absolute;
+    z-index: 8;
+    left: 8px;
+    top: 8px;
+    bottom: 8px;
+    max-height: calc(100% - 16px);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 16px;
+    background: rgba(12, 18, 12, 0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .canvas-wrapper {
+    width: 100%;
+  }
+}
+
+/* Compact QA / export-readiness surfaces. */
+.quality-card,
+.capture-qa {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.035);
+  overflow: hidden;
+}
+.quality-card__summary,
+.capture-qa__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0.5rem 0.55rem;
+  cursor: pointer;
+  list-style: none;
+}
+.quality-card__summary::-webkit-details-marker,
+.capture-qa__summary::-webkit-details-marker { display: none; }
+.quality-card__title,
+.capture-qa__title {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-muted);
+}
+.quality-card__badge,
+.capture-qa__badge {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+}
+.quality-card--ok .quality-card__badge,
+.capture-qa--ok .capture-qa__badge { color: var(--c-emerald); }
+.quality-card--warn .quality-card__badge,
+.capture-qa--warn .capture-qa__badge { color: var(--c-warn); }
+.quality-card--error .quality-card__badge,
+.capture-qa--error .capture-qa__badge { color: var(--c-red); }
+.quality-card__metrics,
+.capture-qa__metrics,
+.quality-modal__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 0.55rem 0.45rem;
+}
+.quality-chip,
+.capture-qa__metric {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  color: var(--c-text-muted);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 0.12rem 0.34rem;
+  background: rgba(0,0,0,0.16);
+}
+.quality-card__issues,
+.capture-qa__issues {
+  padding: 0 0.55rem 0.55rem;
+}
+.quality-issue,
+.capture-qa__issue {
+  margin: 0.22rem 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: var(--c-text-muted);
+}
+.quality-issue--ok,
+.capture-qa__issue--ok { color: var(--c-emerald); }
+.quality-issue--warn,
+.capture-qa__issue--warn { color: var(--c-warn); }
+.quality-issue--error,
+.capture-qa__issue--error { color: var(--c-red); }
+.quality-issue--info,
+.capture-qa__issue--info { color: var(--c-text-dim); }
+.quality-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0,0,0,0.58);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.quality-modal__panel {
+  width: min(560px, 94vw);
+  max-height: min(680px, 88vh);
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 22px;
+  background: var(--c-surface);
+  box-shadow: 0 28px 80px rgba(0,0,0,0.42);
+  padding: 1rem;
+}
+.quality-modal__panel h2 {
+  font-family: var(--f-display);
+  font-size: 1.45rem;
+  margin-bottom: 0.25rem;
+}
+.quality-modal__desc {
+  color: var(--c-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.quality-modal__issues {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.8rem 0 1rem;
+}
+.quality-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}

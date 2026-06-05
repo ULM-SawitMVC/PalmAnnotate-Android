@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const bboxCount        = document.getElementById('bbox-count');
   const btnDeleteBbox        = document.getElementById('btn-delete-bbox');
   const btnDetectSide        = document.getElementById('btn-detect-side');
-  const btnToggleMagnifier   = document.getElementById('btn-toggle-magnifier');
+  const btnToggleBoxes       = document.getElementById('btn-toggle-boxes');
   const classBtns            = document.querySelectorAll('.btn-class');
 
   const btnPrevPair      = document.getElementById('btn-prev-pair');
@@ -67,10 +67,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const dedupRightCanvas = document.getElementById('dedup-right-canvas');
   const dedupSuggestionsEl = document.getElementById('dedup-suggestions');
   const dedupLinksEl     = document.getElementById('dedup-links');
-  const btnToggleDedupMagnifier  = document.getElementById('btn-toggle-dedup-magnifier');
   const btnToggleDedupSuggestions= document.getElementById('btn-toggle-dedup-suggestions');
 
   const fileInfo         = document.getElementById('file-info');
+  const treeQualityCard  = document.getElementById('tree-quality-card');
+  const treeQualityBadge = document.getElementById('tree-quality-badge');
+  const treeQualityMetrics = document.getElementById('tree-quality-metrics');
+  const treeQualityIssues  = document.getElementById('tree-quality-issues');
 
   const btnCompute       = document.getElementById('btn-compute');
   const exportButtons    = document.getElementById('export-buttons');
@@ -778,6 +781,123 @@ document.addEventListener('DOMContentLoaded', () => {
     return DatasetManager.getTrees()[idx] || null;
   }
 
+  function _qualityReport(opts = {}) {
+    if (!window.QualityCheck || !QualityCheck.analyzeTree) return null;
+    const session = opts.session || ActiveSession.get();
+    const tree = opts.tree || (session ? _getDatasetTreeByName(session.treeName) : DatasetManager.getTree());
+    let mismatches = [];
+    try { mismatches = ActiveSession.getMismatchedClusters ? ActiveSession.getMismatchedClusters() : []; } catch (_) { mismatches = []; }
+    return QualityCheck.analyzeTree(tree, session, {
+      result: opts.result !== undefined ? opts.result : _lastResult,
+      mismatches,
+    });
+  }
+
+  function _renderQualityPanel() {
+    if (!treeQualityCard || !treeQualityBadge || !treeQualityMetrics || !treeQualityIssues) return;
+    const report = _qualityReport();
+    if (!report) {
+      treeQualityCard.classList.add('hidden');
+      return;
+    }
+    treeQualityCard.classList.remove('hidden');
+    treeQualityCard.classList.remove('quality-card--ok', 'quality-card--warn', 'quality-card--error');
+    treeQualityCard.classList.add(`quality-card--${report.status}`);
+    treeQualityBadge.textContent = report.status === 'ok' ? 'OK' : (report.status === 'error' ? 'Fix' : 'Check');
+    const m = report.metrics || {};
+    treeQualityMetrics.innerHTML = '';
+    const chips = [
+      `${m.imageSides || 0}/${m.expectedSides || 0} views`,
+      `${m.depthSides || 0} depth`,
+      `${m.totalBoxes || 0} bbox`,
+      `${m.links || 0} links`,
+    ];
+    chips.forEach(txt => {
+      const chip = document.createElement('span');
+      chip.className = 'quality-chip';
+      chip.textContent = txt;
+      treeQualityMetrics.appendChild(chip);
+    });
+    treeQualityIssues.innerHTML = '';
+    const issues = (report.issues || []).slice(0, 5);
+    if (!issues.length) {
+      const ok = document.createElement('p');
+      ok.className = 'quality-issue quality-issue--ok';
+      ok.textContent = 'Ready: view, metadata, annotation, and depth-pair checks look good.';
+      treeQualityIssues.appendChild(ok);
+    } else {
+      issues.forEach(it => {
+        const row = document.createElement('p');
+        row.className = `quality-issue quality-issue--${it.level}`;
+        row.textContent = it.message;
+        treeQualityIssues.appendChild(row);
+      });
+      if ((report.issues || []).length > issues.length) {
+        const more = document.createElement('p');
+        more.className = 'quality-issue quality-issue--info';
+        more.textContent = `+${report.issues.length - issues.length} more issue(s)`;
+        treeQualityIssues.appendChild(more);
+      }
+    }
+  }
+
+  function _confirmQualityBeforeExport(label) {
+    return new Promise((resolve) => {
+      const report = _qualityReport();
+      if (!report || report.status === 'ok') { resolve(true); return; }
+
+      const overlay = document.createElement('div');
+      overlay.className = 'pa-modal quality-modal';
+      const panel = document.createElement('div');
+      panel.className = 'quality-modal__panel';
+      const title = document.createElement('h2');
+      title.textContent = 'Dataset check before export';
+      const desc = document.createElement('p');
+      desc.className = 'quality-modal__desc';
+      desc.textContent = `${label || 'Export'} can continue, but review these warnings first.`;
+      panel.appendChild(title);
+      panel.appendChild(desc);
+
+      const metrics = document.createElement('div');
+      metrics.className = 'quality-modal__metrics';
+      const m = report.metrics || {};
+      [`${m.imageSides || 0}/${m.expectedSides || 0} views`, `${m.depthSides || 0} depth`, `${m.totalBoxes || 0} bbox`, `${m.links || 0} links`].forEach(txt => {
+        const chip = document.createElement('span'); chip.className = 'quality-chip'; chip.textContent = txt; metrics.appendChild(chip);
+      });
+      panel.appendChild(metrics);
+
+      const list = document.createElement('div');
+      list.className = 'quality-modal__issues';
+      (report.issues || []).forEach(it => {
+        const row = document.createElement('p');
+        row.className = `quality-issue quality-issue--${it.level}`;
+        row.textContent = it.message;
+        list.appendChild(row);
+      });
+      panel.appendChild(list);
+
+      const actions = document.createElement('div');
+      actions.className = 'quality-modal__actions';
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.className = 'btn btn--ghost';
+      back.textContent = 'Back to fix';
+      const cont = document.createElement('button');
+      cont.type = 'button';
+      cont.className = report.status === 'error' ? 'btn btn--outline' : 'btn btn--primary';
+      cont.textContent = report.status === 'error' ? 'Export anyway' : 'Continue export';
+      actions.appendChild(back);
+      actions.appendChild(cont);
+      panel.appendChild(actions);
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+
+      const done = (ok) => { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); resolve(ok); };
+      back.addEventListener('click', () => done(false));
+      cont.addEventListener('click', () => done(true));
+    });
+  }
+
   function _validateOutputAgainstTree(outputJson, datasetTree) {
     if (!outputJson || !datasetTree) throw new Error('Missing output or dataset tree.');
     if (outputJson.tree_name !== datasetTree.name) {
@@ -858,6 +978,7 @@ document.addEventListener('DOMContentLoaded', () => {
     _initEditor(0);
     _updateTreeCounter();
     _updateSaveStatus();
+    _renderQualityPanel();
 
     // Refresh dedup if that tab is visible
     if (_activeTab() === 'dedup') _initDedup();
@@ -1071,6 +1192,7 @@ document.addEventListener('DOMContentLoaded', () => {
         _updateSaveCounter();
         if (savedIdx >= 0) _refreshTreeSelectOption(savedIdx);
       }
+      _renderQualityPanel();
       return true;
     } else {
       _showToast(`Save failed: ${saveResult.error}`, 'error');
@@ -1399,6 +1521,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ActiveSession.propagateClassFromBox(sideIndex, bboxId);
       }
     );
+    if (_editor.setBoxesVisible && BBoxEditor.getBoxesVisible) _editor.setBoxesVisible(BBoxEditor.getBoxesVisible());
+    _updateBoxesBtn();
     _updateBboxCount(sideIndex);
   }
 
@@ -1407,6 +1531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!session) return;
     const count = session.sides[sideIndex].bboxes.length;
     bboxCount.textContent = `${count} bbox`;
+    _renderQualityPanel();
   }
 
   // Class buttons — touch substitute for the [1]-[4] keyboard shortcuts.
@@ -1439,35 +1564,34 @@ document.addEventListener('DOMContentLoaded', () => {
     btnDetectSide.addEventListener('click', () => _detectCurrentSide());
   }
 
-  // Magnifier toggle
-  function _updateMagnifierBtn() {
-    const on = BBoxEditor.getMagnifierEnabled();
-    btnToggleMagnifier.classList.toggle('active', on);
-    btnToggleMagnifier.title = on ? 'Disable magnifier [M]' : 'Magnifier [M]';
+  // BBox overlay toggle — useful on tablets when the operator wants to inspect
+  // the RGB image without labels/boxes covering details.
+  function _updateBoxesBtn() {
+    if (!btnToggleBoxes || !BBoxEditor.getBoxesVisible) return;
+    const on = BBoxEditor.getBoxesVisible();
+    btnToggleBoxes.classList.toggle('active', on);
+    btnToggleBoxes.title = on ? 'Hide bbox overlays' : 'Show bbox overlays';
+    btnToggleBoxes.textContent = on ? 'Boxes on' : 'Boxes off';
   }
 
-  btnToggleMagnifier.addEventListener('click', () => {
-    BBoxEditor.setMagnifierGlobal(!BBoxEditor.getMagnifierEnabled());
-    _updateMagnifierBtn();
-  });
+  if (btnToggleBoxes) {
+    btnToggleBoxes.addEventListener('click', () => {
+      const next = !(BBoxEditor.getBoxesVisible && BBoxEditor.getBoxesVisible());
+      if (BBoxEditor.setBoxesVisibleGlobal) BBoxEditor.setBoxesVisibleGlobal(next);
+      if (_editor && _editor.setBoxesVisible) _editor.setBoxesVisible(next);
+      _updateBoxesBtn();
+    });
+  }
 
   // ── Dedup ──────────────────────────────────────────────────────────────────
 
   function _initDedup() {
     if (!ActiveSession.get()) return;
     DedupUI.init(dedupLeftCanvas, dedupRightCanvas, dedupSuggestionsEl, dedupLinksEl);
-    _updateDedupMagnifierBtn();
     _updateDedupSuggestionsBtn();
     _dedupInitialized = true;
     _updateDedupPairUI();
     DedupUI.showPair(_currentPair);
-  }
-
-  function _updateDedupMagnifierBtn() {
-    if (!btnToggleDedupMagnifier || !DedupUI.getMagnifierEnabled) return;
-    const on = DedupUI.getMagnifierEnabled();
-    btnToggleDedupMagnifier.classList.toggle('active', on);
-    btnToggleDedupMagnifier.title = on ? 'Disable magnifier [M]' : 'Magnifier [M]';
   }
 
   function _updateDedupSuggestionsBtn() {
@@ -1516,13 +1640,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ActiveSession.runSuggestions();
     DedupUI.refresh();
   });
-
-  if (btnToggleDedupMagnifier) {
-    btnToggleDedupMagnifier.addEventListener('click', () => {
-      DedupUI.setMagnifierEnabled(!DedupUI.getMagnifierEnabled());
-      _updateDedupMagnifierBtn();
-    });
-  }
 
   if (btnToggleDedupSuggestions) {
     btnToggleDedupSuggestions.addEventListener('click', () => {
@@ -1700,27 +1817,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }));
 
-  btnExportYolo.addEventListener('click', () => {
+  btnExportYolo.addEventListener('click', async () => {
     const session = ActiveSession.get();
     if (!session) return;
+    if (!await _confirmQualityBeforeExport('Export YOLO')) return;
     // Use mismatch-aware export when results are computed
     if (_lastResult) Results.exportYoloWithMismatch(session, _lastResult);
     else Results.exportYolo(session);
   });
 
-  btnExportJSON.addEventListener('click', () => {
+  btnExportJSON.addEventListener('click', async () => {
     const session = ActiveSession.get();
-    if (session) Results.exportJSON(session, _lastResult);
+    if (!session) return;
+    if (!await _confirmQualityBeforeExport('Export Session JSON')) return;
+    Results.exportJSON(session, _lastResult);
   });
 
-  btnExportCSV.addEventListener('click', () => {
+  btnExportCSV.addEventListener('click', async () => {
     const session = ActiveSession.get();
-    if (session) Results.exportCSV(session, _lastResult);
+    if (!session) return;
+    if (!await _confirmQualityBeforeExport('Export CSV')) return;
+    Results.exportCSV(session, _lastResult);
   });
 
-  btnExportIdentity.addEventListener('click', () => {
+  btnExportIdentity.addEventListener('click', async () => {
     const session = ActiveSession.get();
-    if (session && _lastResult) Results.exportIdentityJSON(session, _lastResult);
+    if (!session || !_lastResult) return;
+    if (!await _confirmQualityBeforeExport('Export Identity JSON')) return;
+    Results.exportIdentityJSON(session, _lastResult);
   });
 
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
@@ -1748,22 +1872,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Skip when typing in form controls
     if (e.target.closest('input, select, textarea')) return;
-
-    // Magnifier toggle — works even when editor canvas has focus
-    if (e.key === 'm' || e.key === 'M') {
-      if (tab === 'annotation') {
-        BBoxEditor.setMagnifierGlobal(!BBoxEditor.getMagnifierEnabled());
-        _updateMagnifierBtn();
-        e.preventDefault();
-        return;
-      }
-      if (tab === 'dedup') {
-        DedupUI.setMagnifierEnabled(!DedupUI.getMagnifierEnabled());
-        _updateDedupMagnifierBtn();
-        e.preventDefault();
-        return;
-      }
-    }
 
     // Suggestions visibility toggle (dedup tab only)
     if ((e.key === 's' || e.key === 'S') && tab === 'dedup') {

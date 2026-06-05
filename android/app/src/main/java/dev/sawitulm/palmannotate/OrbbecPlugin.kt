@@ -76,25 +76,44 @@ class OrbbecPlugin : Plugin() {
         private const val DEVICE_QUERY_DELAY_MS = 250L
 
         // ── Live preview (notifyListeners("orbbecFrame", …)) tuning ──────────────
-        /** Minimum gap between emitted preview frames (~12.5 fps) to spare the bridge. */
+        /** Minimum gap between emitted RGB preview frames (~12.5 fps) to spare the bridge. */
         private const val PREVIEW_INTERVAL_MS = 80L
+        /** Minimum gap between emitted depth-preview frames (~6.25 fps; RGB stays smoother). */
+        private const val DEPTH_PREVIEW_INTERVAL_MS = 160L
         /** Longest the colored RGB preview edge may be before JPEG-encoding for the bridge. */
         private const val COLOR_PREVIEW_MAX_DIM = 720
         private const val COLOR_PREVIEW_JPEG_QUALITY = 60
         /** Longest the colorized depth preview edge may be (PiP is small). */
-        private const val DEPTH_PREVIEW_MAX_DIM = 360
+        private const val DEPTH_PREVIEW_MAX_DIM = 288
         private const val DEPTH_PREVIEW_JPEG_QUALITY = 70
         /** Fallback depth colormap window (mm), used only when a frame carries no valid depth. */
-        private const val DEPTH_MIN_MM = 200f
+        private const val DEPTH_MIN_MM = 250f
         private const val DEPTH_MAX_MM = 6_000f
         /**
-         * The live depth preview auto-ranges to each frame's valid min/max so near/far
-         * contrast fills the palette (like the file viewer), then eases the stored range
-         * toward the new frame (EMA) so colours stay stable instead of breathing.
+         * The live depth preview auto-ranges to each frame's robust valid-depth percentiles
+         * (P2–P98) so near/far contrast fills the palette without letting a few noisy pixels
+         * dominate, then eases the stored range toward the new frame (EMA) so colours stay
+         * stable instead of breathing.
+         *
+         * EMA is fairly aggressive (≈90% in ~5 frames / 0.4 s) so the palette tracks a
+         * panning/approaching scene quickly. A lower value lagged ~1.5 s and left near/far
+         * objects mis-coloured (still "blue" when they should already read "yellow").
          */
-        private const val DEPTH_RANGE_EMA = 0.12f
+        private const val DEPTH_RANGE_EMA = 0.40f
         private const val DEPTH_RANGE_PAD = 0.05f
         private const val DEPTH_RANGE_MIN_SPAN_MM = 120f
+        private const val DEPTH_RANGE_LOW_PERCENTILE = 0.02f
+        private const val DEPTH_RANGE_HIGH_PERCENTILE = 0.98f
+        /** Gemini 335L optimal range floor (0.25 m); nearer readings are unstable for display. */
+        private const val DEPTH_RANGE_FLOOR_MM = 250f
+        /**
+         * Depths above the Gemini 335L optimal range plus 1 m (6 m + 1 m = 7 m),
+         * along with the 65535 / 0xFFFF sentinel, are treated as noise when AUTO-RANGING
+         * the preview colormap. Without this, a handful of stray far/invalid pixels push
+         * frameMax toward the theoretical ~65 m range, the span explodes, and the whole
+         * scene collapses to the "near" (blue) end of the palette.
+         */
+        private const val DEPTH_RANGE_CEILING_MM = 7_000f
         /** How long capture() waits for the pump to hand back a full-res frame. */
         private const val CAPTURE_VIA_PUMP_TIMEOUT_MS = 6_000L
     }
@@ -400,6 +419,8 @@ class OrbbecPlugin : Plugin() {
                     ret.put("depthEncoding", "uint16le")
                     ret.put("depthUnit", "mm")
                     ret.put("depthAlignedTo", "color")
+                    ret.put("depthDisplayFloorMm", DEPTH_RANGE_FLOOR_MM.toDouble())
+                    ret.put("depthDisplayCeilingMm", DEPTH_RANGE_CEILING_MM.toDouble())
                 }
                 call.resolve(ret)
             } catch (e: Exception) {
@@ -542,6 +563,7 @@ class OrbbecPlugin : Plugin() {
      */
     private fun runPump() {
         var lastPreview = 0L
+        var lastDepthPreview = 0L
         while (pumpRunning) {
             val activePipeline = synchronized(stateLock) { pipeline }
             if (activePipeline == null) break
@@ -567,11 +589,14 @@ class OrbbecPlugin : Plugin() {
                     }
                 }
 
-                // Throttled, downscaled preview push.
+                // Throttled, downscaled preview push. RGB stays responsive while the
+                // heavier depth colorize/JPEG/base64 path updates at a lower rate.
                 val now = System.currentTimeMillis()
                 if (now - lastPreview >= PREVIEW_INTERVAL_MS) {
+                    val includeDepth = now - lastDepthPreview >= DEPTH_PREVIEW_INTERVAL_MS
                     lastPreview = now
-                    emitPreview(colorFrame, depthFrame)
+                    if (includeDepth) lastDepthPreview = now
+                    emitPreview(colorFrame, if (includeDepth) depthFrame else null)
                 }
             } catch (e: InterruptedException) {
                 break
@@ -1129,12 +1154,13 @@ class OrbbecPlugin : Plugin() {
         val outH = (height + step - 1) / step
         if (outW <= 0 || outH <= 0) return null
 
-        // Pass 1: subsample the depth plane into a mm grid and find this frame's
-        // valid (nonzero) depth extent, so the colormap can auto-range to it.
+        // Pass 1: subsample the depth plane into a mm grid and collect plausible
+        // display depths. The colormap uses robust P2–P98 percentiles instead of
+        // raw min/max so a few edge/noise pixels do not dominate the palette.
         val mmGrid = FloatArray(outW * outH)
+        val validMm = FloatArray(outW * outH)
+        var validCount = 0
         var di = 0
-        var frameMin = Float.MAX_VALUE
-        var frameMax = 0f
         var y = 0
         while (y < height && di < mmGrid.size) {
             var x = 0
@@ -1143,21 +1169,23 @@ class OrbbecPlugin : Plugin() {
                 val v = (data[idx].toInt() and 0xFF) or ((data[idx + 1].toInt() and 0xFF) shl 8)
                 val mm = v * scale
                 mmGrid[di++] = mm
-                if (mm > 0f) {
-                    if (mm < frameMin) frameMin = mm
-                    if (mm > frameMax) frameMax = mm
-                }
+                // Range only over plausible optimal-window depths so near/far/sentinel
+                // noise cannot blow up the colormap span and wash the scene to blue.
+                if (isPlausiblePreviewDepth(mm)) validMm[validCount++] = mm
                 x += step
             }
             y += step
         }
         val filled = di
 
-        // EMA-smooth the auto-range so colours stay stable as the scene moves; fall
-        // back to the fixed window only when a frame has no valid depth at all.
+        // EMA-smooth the robust auto-range so colours stay stable as the scene moves;
+        // fall back to the fixed window only when a frame has no valid depth at all.
         val lo: Float
         val hi: Float
-        if (frameMax > frameMin) {
+        if (validCount > 0) {
+            validMm.sort(0, validCount)
+            val frameMin = percentile(validMm, validCount, DEPTH_RANGE_LOW_PERCENTILE)
+            val frameMax = percentile(validMm, validCount, DEPTH_RANGE_HIGH_PERCENTILE)
             val r = smoothDepthRange(frameMin, frameMax)
             lo = r.first; hi = r.second
         } else {
@@ -1184,9 +1212,18 @@ class OrbbecPlugin : Plugin() {
         }
     }
 
-    /** Jet colormap over [minMm, minMm + span]; 0/invalid depth → black. */
+    private fun isPlausiblePreviewDepth(mm: Float): Boolean =
+        mm >= DEPTH_RANGE_FLOOR_MM && mm <= DEPTH_RANGE_CEILING_MM
+
+    private fun percentile(sorted: FloatArray, count: Int, p: Float): Float {
+        if (count <= 0) return 0f
+        val idx = kotlin.math.round((count - 1) * p).toInt().coerceIn(0, count - 1)
+        return sorted[idx]
+    }
+
+    /** Jet colormap over [minMm, minMm + span]; 0/invalid/out-of-range depth → black. */
     private fun depthPreviewColor(mm: Float, minMm: Float, span: Float): Int {
-        if (mm <= 0f) return 0xFF shl 24
+        if (!isPlausiblePreviewDepth(mm)) return 0xFF shl 24
         val t = ((mm - minMm) / span).coerceIn(0f, 1f)
         val r = (clampUnit(1.5f - kotlin.math.abs(4f * t - 3f)) * 255f).toInt()
         val g = (clampUnit(1.5f - kotlin.math.abs(4f * t - 2f)) * 255f).toInt()
@@ -1202,8 +1239,8 @@ class OrbbecPlugin : Plugin() {
      */
     private fun smoothDepthRange(frameMin: Float, frameMax: Float): Pair<Float, Float> {
         val pad = (frameMax - frameMin) * DEPTH_RANGE_PAD
-        val targetMin = (frameMin - pad).coerceAtLeast(0f)
-        val targetMax = frameMax + pad
+        val targetMin = (frameMin - pad).coerceAtLeast(DEPTH_RANGE_FLOOR_MM)
+        val targetMax = (frameMax + pad).coerceAtMost(DEPTH_RANGE_CEILING_MM)
         if (!depthRangeInit) {
             depthRangeMinMm = targetMin
             depthRangeMaxMm = targetMax

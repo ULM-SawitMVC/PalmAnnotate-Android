@@ -403,10 +403,12 @@ const CaptureFlow = (() => {
    */
   function _buildProgress(sideNum, sideCount, shots) {
     const wrap = _el('div', 'capture-progress');
-    wrap.appendChild(_el('h2', 'capture-title', `Side ${sideNum} / ${sideCount}`));
-    const dots = _el('div', 'capture-progress__dots');
+    wrap.appendChild(_el('h2', 'capture-title', `View ${sideNum} / ${sideCount}`));
+    wrap.appendChild(_el('p', 'capture-subtitle capture-subtitle--compact', 'Same tree, next view — not a new tree.'));
+    const dots = _el('div', 'capture-progress__dots capture-progress__dots--views');
     for (let i = 1; i <= sideCount; i++) {
       const dot = _el('span', 'capture-dot');
+      dot.textContent = `V${i}`;
       if (shots && shots[i - 1]) dot.classList.add('capture-dot--done');
       else if (i === sideNum) dot.classList.add('capture-dot--active');
       dots.appendChild(dot);
@@ -684,15 +686,42 @@ const CaptureFlow = (() => {
    *   { action: 'cancel' }          — abort the whole capture
    *   { action: 'retake', index }   — re-shoot one side, then return here
    */
-  function _reviewAll(overlay, shots, sideCount) {
+  function _renderCaptureQa(shots, sideCount, metadata) {
+    const report = window.QualityCheck && QualityCheck.analyzeCaptureShots
+      ? QualityCheck.analyzeCaptureShots(shots, sideCount, metadata)
+      : { status: 'ok', issues: [], metrics: {} };
+    const wrap = _el('details', `capture-qa capture-qa--${report.status}`);
+    wrap.open = report.status !== 'ok';
+    const summary = _el('summary', 'capture-qa__summary');
+    summary.appendChild(_el('span', 'capture-qa__title', 'Pre-save check'));
+    summary.appendChild(_el('span', 'capture-qa__badge', report.status === 'ok' ? 'OK' : `${report.issues.length} issue(s)`));
+    wrap.appendChild(summary);
+
+    const metrics = report.metrics || {};
+    const metricRow = _el('div', 'capture-qa__metrics');
+    metricRow.appendChild(_el('span', 'capture-qa__metric', `${metrics.capturedSides || 0}/${metrics.expectedSides || sideCount} RGB`));
+    metricRow.appendChild(_el('span', 'capture-qa__metric', `${metrics.depthSides || 0} depth`));
+    metricRow.appendChild(_el('span', 'capture-qa__metric', metadata && metadata.gps ? 'GPS set' : 'GPS missing'));
+    wrap.appendChild(metricRow);
+
+    const list = _el('div', 'capture-qa__issues');
+    const issues = (report.issues || []).filter(i => i.level !== 'info').slice(0, 5);
+    if (!issues.length) list.appendChild(_el('p', 'capture-qa__issue capture-qa__issue--ok', 'Metadata, RGB views, and depth pair status look ready.'));
+    for (const it of issues) list.appendChild(_el('p', `capture-qa__issue capture-qa__issue--${it.level}`, it.message));
+    wrap.appendChild(list);
+    return wrap;
+  }
+
+  function _reviewAll(overlay, shots, sideCount, metadata) {
     return new Promise((resolve) => {
       overlay.innerHTML = '';
       const urls = [];
       const panel = _el('div', 'capture-panel capture-reviewall');
 
-      panel.appendChild(_el('h2', 'capture-title', 'Review photos'));
+      panel.appendChild(_el('h2', 'capture-title', 'Review views'));
       panel.appendChild(_el('p', 'capture-subtitle',
-        `Swipe through the ${sideCount} sides. Retake any, then save.`));
+        `Swipe through the ${sideCount} views for this one tree. Retake any, then save.`));
+      panel.appendChild(_renderCaptureQa(shots, sideCount, metadata));
 
       const strip = _el('div', 'capture-reviewall__strip');
       for (let i = 0; i < sideCount; i++) {
@@ -743,7 +772,7 @@ const CaptureFlow = (() => {
    * if the capture was cancelled before saving.
    * @returns {Promise<Array|null>}
    */
-  async function _captureAllSides(overlay, sideCount, opts, ctl) {
+  async function _captureAllSides(overlay, sideCount, opts, ctl, metadata) {
     const shots = new Array(sideCount).fill(null);
 
     // First pass over every side.
@@ -754,7 +783,7 @@ const CaptureFlow = (() => {
 
     // Review / retake loop.
     for (;;) {
-      const decision = await _reviewAll(overlay, shots, sideCount);
+      const decision = await _reviewAll(overlay, shots, sideCount, metadata);
       if (decision.action === 'save') return shots;
       if (decision.action === 'cancel') return null;
       if (decision.action === 'retake') {
@@ -978,7 +1007,7 @@ const CaptureFlow = (() => {
       //     Activity on the first capture. Placed AFTER the freeform metadata
       //     form so that form still builds synchronously; no-op on web.
       await _ensureCameraPermission();
-      const shots = await _captureAllSides(overlay, sideCount, { onProgress }, ctl);
+      const shots = await _captureAllSides(overlay, sideCount, { onProgress }, ctl, metadata);
       if (!shots) { _teardown(overlay); return null; } // cancelled
 
       // (c) finalise tree name / id (manual ID may have been edited inline).

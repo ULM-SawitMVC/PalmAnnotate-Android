@@ -98,7 +98,7 @@ test('CaptureFlow captures a multi-side field tree (popup-free) and persists it 
 
   // Side 1 → side 2 with NO per-side confirm; the indicator advances each shot.
   (await waitButton(body, 'Capture')).click();
-  await waitTitle(body, 'Side 2 / 2');
+  await waitTitle(body, 'View 2 / 2');
   (await waitButton(body, 'Capture')).click();
 
   // Single end-of-capture review → Save.
@@ -135,7 +135,7 @@ test('CaptureFlow aborts native capture when app-storage photo persistence retur
   dom.document.querySelector('select').value = 'DAMIMAS';
   getByText(body, 'button', 'Start Capture').click();
   (await waitButton(body, 'Capture')).click();
-  await waitTitle(body, 'Side 2 / 2');
+  await waitTitle(body, 'View 2 / 2');
   (await waitButton(body, 'Capture')).click();
   (await waitButton(body, 'Save')).click();
 
@@ -178,7 +178,7 @@ test('CaptureFlow review lets the operator retake one side before saving', async
   getByText(body, 'button', 'Start Capture').click();
 
   (await waitButton(body, 'Capture')).click();
-  await waitTitle(body, 'Side 2 / 2');
+  await waitTitle(body, 'View 2 / 2');
   (await waitButton(body, 'Capture')).click();
 
   // Review → retake side 1 → back to the live surface for that side only.
@@ -244,7 +244,7 @@ test('CaptureFlow docks the source switch in the controls and drives element-pre
 
   // Capture both sides from the element-preview source (popup-free advance).
   (await waitButton(body, 'Capture')).click();
-  await waitTitle(body, 'Side 2 / 2');
+  await waitTitle(body, 'View 2 / 2');
   (await waitButton(body, 'Capture')).click();
   (await waitButton(body, 'Save')).click();
 

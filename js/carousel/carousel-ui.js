@@ -77,6 +77,7 @@ const CarouselUI = (() => {
   let _mode = MODE_REVIEW;
   let _sideIndex = 0;
   let _selectedId = null;  // selected bbox id (REVIEW mode)
+  let _boxesVisible = true;
   let _editor = null;      // BBoxEditor instance (EDIT mode)
 
   // Link-mode arming: source endpoint waiting for a target on an adjacent side.
@@ -368,6 +369,20 @@ const CarouselUI = (() => {
     spacer.className = 'crsl-classbar__spacer';
     _classBar.appendChild(spacer);
 
+    // Overlay toggle — lets the operator inspect the RGB image without boxes.
+    const boxesBtn = document.createElement('button');
+    boxesBtn.type = 'button';
+    boxesBtn.className = 'crsl-action crsl-action--boxes crsl-action--active';
+    boxesBtn.dataset.role = 'boxes';
+    boxesBtn.textContent = 'Boxes';
+    boxesBtn.addEventListener('click', () => {
+      _boxesVisible = !_boxesVisible;
+      if (_editor && _editor.setBoxesVisible) _editor.setBoxesVisible(_boxesVisible);
+      _renderSide();
+      _renderClassBar();
+    });
+    _classBar.appendChild(boxesBtn);
+
     // Link action — arms link mode with the selected box as source.
     const linkBtn = document.createElement('button');
     linkBtn.type = 'button';
@@ -519,8 +534,10 @@ const CarouselUI = (() => {
     const br = tr.imageToCanvas(img.naturalWidth, img.naturalHeight);
     ctx.drawImage(img, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
 
+    if (!_boxesVisible) return;
+
     const decor = _linkDecorForSide(side.sideIndex);
-    const lineW = Math.max(1.5, tr.scaleToCanvas(1.5));
+    const lineW = Math.max(3, tr.scaleToCanvas(2.4));
 
     side.bboxes.forEach((b, idx) => {
       const btl = tr.imageToCanvas(b.x1, b.y1);
@@ -576,7 +593,7 @@ const CarouselUI = (() => {
 
       // Label: "#index className".
       const label = `#${idx + 1} ${b.className}`;
-      const fontSize = Math.max(11, tr.scaleToCanvas(12));
+      const fontSize = Math.max(15, tr.scaleToCanvas(15));
       ctx.font = `bold ${fontSize}px sans-serif`;
       const tw = ctx.measureText(label).width;
       const pad = 3;
@@ -590,7 +607,7 @@ const CarouselUI = (() => {
   // Hit-test a tap (client coords) against the current side's boxes.
   // Returns the bbox object or null. Checks link badges first (for removal).
   function _hitTestReview(clientX, clientY) {
-    if (!_reviewTr) return { type: 'none' };
+    if (!_boxesVisible || !_reviewTr) return { type: 'none' };
     const s = _session();
     const side = s && s.sides[_sideIndex];
     if (!side) return { type: 'none' };
@@ -751,6 +768,7 @@ const CarouselUI = (() => {
         ActiveSession.propagateClassFromBox(_sideIndex, bboxId);
       }
     );
+    if (_editor.setBoxesVisible) _editor.setBoxesVisible(_boxesVisible);
   }
 
   function _destroyEditor() {
@@ -785,8 +803,13 @@ const CarouselUI = (() => {
       chip.disabled = editing ? false : !hasSel;
     });
 
+    const boxesBtn = _classBar.querySelector('[data-role="boxes"]');
     const linkBtn = _classBar.querySelector('[data-role="link"]');
     const delBtn = _classBar.querySelector('[data-role="delete"]');
+    if (boxesBtn) {
+      boxesBtn.classList.toggle('crsl-action--active', _boxesVisible);
+      boxesBtn.textContent = _boxesVisible ? 'Boxes on' : 'Boxes off';
+    }
     if (linkBtn) {
       linkBtn.classList.toggle('crsl-action--armed', !!_linkSource);
       linkBtn.textContent = _linkSource ? 'Cancel link' : 'Link';

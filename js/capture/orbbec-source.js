@@ -139,6 +139,8 @@ const OrbbecSource = (() => {
         valueScale: Number(frame.depthValueScale || 1),
         unit: frame.depthUnit || 'mm',
         alignedTo: frame.depthAlignedTo || 'color',
+        displayFloorMm: Number(frame.depthDisplayFloorMm || 250),
+        displayCeilingMm: Number(frame.depthDisplayCeilingMm || 7000),
       };
     }
 
@@ -284,8 +286,8 @@ const OrbbecSource = (() => {
         gotFirst = true;
         waiting.classList.add('orbbec-live__waiting--hidden');
       }
-      // No depth (depth disabled / underpowered): hide the PiP entirely.
-      if (lastRgb && !lastDepth) pip.classList.add('orbbec-live__pip--empty');
+      // No depth (depth disabled / underpowered): hide the PiP until a depth frame arrives.
+      pip.classList.toggle('orbbec-live__pip--empty', !!lastRgb && !lastDepth);
       _paint();
     }
 

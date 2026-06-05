@@ -19,8 +19,9 @@
  */
 
 const BBoxEditor = (() => {
-  // Handle size in canvas pixels
-  const HANDLE_R = 6;
+  // Handle size in canvas pixels. Tablet field use benefits from larger visible
+  // corners/edges; hit tolerance for touch remains wider below.
+  const HANDLE_R = 10;
   const MIN_BBOX_PX = 4; // minimum bbox size in image pixels
 
   // Default class for newly drawn bboxes (classId 1 = B2 in 0-indexed dataset)
@@ -38,6 +39,7 @@ const BBoxEditor = (() => {
   let _magEnabled = false;
   let _magZoom    = 3.8;
   let _magEl = null, _magCanvas = null, _magCtx = null;
+  let _boxesVisible = true;
 
   function _ensureMagEl() {
     if (_magEl) return;
@@ -273,7 +275,9 @@ const BBoxEditor = (() => {
       ctx.drawImage(image, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
     }
 
-    const lineW = Math.max(1.5, tr.scaleToCanvas(1.5));
+    if (!_boxesVisible) return;
+
+    const lineW = Math.max(3, tr.scaleToCanvas(2.4));
 
     bboxes.forEach((b, idx) => {
       const tl = tr.imageToCanvas(b.x1, b.y1);
@@ -296,7 +300,7 @@ const BBoxEditor = (() => {
 
       // Label: "#index className"
       const label = `#${idx + 1} ${b.className}`;
-      const fontSize = Math.max(11, tr.scaleToCanvas(12));
+      const fontSize = Math.max(15, tr.scaleToCanvas(15));
       ctx.font = `bold ${fontSize}px sans-serif`;
       const tw = ctx.measureText(label).width;
       const pad = 3;
@@ -312,7 +316,7 @@ const BBoxEditor = (() => {
         for (const h of handles) {
           ctx.fillStyle = '#fff';
           ctx.strokeStyle = color;
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = 2.5;
           ctx.beginPath();
           ctx.arc(h.cx, h.cy, HANDLE_R, 0, Math.PI * 2);
           ctx.fill();
@@ -772,6 +776,7 @@ const BBoxEditor = (() => {
     // classId is 0-indexed (0=B1, 1=B2, 2=B3, 3=B4) — matches keyboard logic.
     function setSelectedClass(classId) { _applyClass(classId); }
     function deleteSelected()          { _deleteSelected(); }
+    function setBoxesVisible(v) { _boxesVisible = !!v; _render(state); }
 
     function destroy() {
       if (destroyed) return;
@@ -790,14 +795,16 @@ const BBoxEditor = (() => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    return { syncBboxes, getSelectedId, destroy, setSelectedClass, deleteSelected };
+    return { syncBboxes, getSelectedId, destroy, setSelectedClass, deleteSelected, setBoxesVisible };
   }
 
-  // Static helpers so app.js can read/set magnifier state without an editor instance
+  // Static helpers so app.js can read/set overlay state without an editor instance.
   function getMagnifierEnabled() { return _magEnabled; }
   function setMagnifierGlobal(v) { _magEnabled = !!v; if (!_magEnabled) _hideMag(); }
+  function getBoxesVisible() { return _boxesVisible; }
+  function setBoxesVisibleGlobal(v) { _boxesVisible = !!v; }
 
-  return { create, getMagnifierEnabled, setMagnifierGlobal };
+  return { create, getMagnifierEnabled, setMagnifierGlobal, getBoxesVisible, setBoxesVisibleGlobal };
 })();
 
 window.BBoxEditor = BBoxEditor;

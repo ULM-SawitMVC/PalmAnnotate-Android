@@ -17,17 +17,33 @@ test('DepthViewer._toUint16 decodes raw little-endian uint16', () => {
   assert.deepEqual([...u], [1, 256, 65535]);
 });
 
-test('DepthViewer._range ignores zero (invalid) depth and scales to mm', () => {
+test('DepthViewer._range ignores invalid/out-of-display-range depth and scales to mm', () => {
   const { DepthViewer } = loadViewer();
-  const r = DepthViewer._range(new Uint16Array([0, 100, 0, 300]), 2);
-  assert.equal(r.minMm, 200);
+  const r = DepthViewer._range(new Uint16Array([0, 150, 0, 300, 8000, 65535, 100]), 2);
+  assert.equal(r.minMm, 300);
   assert.equal(r.maxMm, 600);
   assert.equal(r.valid, 2);
+  assert.equal(r.displayFloorMm, 250);
+  assert.equal(r.displayCeilingMm, 7000);
 });
 
-test('DepthViewer._depthColor maps invalid depth to black and valid depth into the colormap', () => {
+test('DepthViewer._range uses robust P2-P98 instead of raw min/max', () => {
+  const { DepthViewer } = loadViewer();
+  const samples = [];
+  for (let i = 0; i < 96; i++) samples.push(1000);
+  samples.push(250, 250, 7000, 7000);
+  const r = DepthViewer._range(new Uint16Array(samples), 1);
+  assert.equal(r.minMm, 1000);
+  assert.equal(r.maxMm, 1000 + 1);
+  assert.equal(r.observedMinMm, 250);
+  assert.equal(r.observedMaxMm, 7000);
+});
+
+test('DepthViewer._depthColor maps invalid/out-of-display-range depth to black and valid depth into the colormap', () => {
   const { DepthViewer } = loadViewer();
   assert.deepEqual(DepthViewer._depthColor(0, 0, 1000), [0, 0, 0]);
+  assert.deepEqual(DepthViewer._depthColor(249, 0, 1000), [0, 0, 0]);
+  assert.deepEqual(DepthViewer._depthColor(7001, 0, 8000), [0, 0, 0]);
   const mid = DepthViewer._depthColor(500, 0, 1000);
   assert.equal(mid.length, 3);
   assert.ok(mid.some(c => c > 0), 'a valid depth gets a non-black color');

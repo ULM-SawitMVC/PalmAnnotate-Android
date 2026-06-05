@@ -9,6 +9,7 @@ const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
 const sessionsJs = readFileSync(new URL('../js/sessions.js', import.meta.url), 'utf8');
 const style = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8');
 const carousel = readFileSync(new URL('../css/carousel.css', import.meta.url), 'utf8');
+const uxCompact = readFileSync(new URL('../css/ux-compact.css', import.meta.url), 'utf8');
 const capture = readFileSync(new URL('../css/capture.css', import.meta.url), 'utf8');
 
 test('critical UI buttons exist and are wired to click handlers', () => {
@@ -27,11 +28,10 @@ test('critical UI buttons exist and are wired to click handlers', () => {
     'btn-save-output',
     'btn-delete-bbox',
     'btn-detect-side',
-    'btn-toggle-magnifier',
+    'btn-toggle-boxes',
     'btn-prev-pair',
     'btn-next-pair',
     'btn-run-suggestions',
-    'btn-toggle-dedup-magnifier',
     'btn-toggle-dedup-suggestions',
     'btn-dedup-delete',
     'btn-toggle-panels',
@@ -63,21 +63,20 @@ test('critical UI buttons exist and are wired to click handlers', () => {
     /btnSaveOutput\.addEventListener\('click', \(\) => _enqueueOperation/,
     /btnDeleteBbox\.addEventListener\('click', \(\) =>/,
     /btnDetectSide\.addEventListener\('click', \(\) => _detectCurrentSide\(\)\)/,
-    /btnToggleMagnifier\.addEventListener\('click', \(\) =>/,
+    /btnToggleBoxes\.addEventListener\('click', \(\) =>/,
     /btnPrevPair\.addEventListener\('click', \(\) =>/,
     /btnNextPair\.addEventListener\('click', \(\) =>/,
     /btnRunSuggestions\.addEventListener\('click', \(\) =>/,
-    /btnToggleDedupMagnifier\.addEventListener\('click', \(\) =>/,
     /btnToggleDedupSuggestions\.addEventListener\('click', \(\) =>/,
     /btnDedupDelete\.addEventListener\('click', \(\) =>/,
     /getElementById\('btn-toggle-panels'\)\.addEventListener\('click', \(\) =>/,
     /btnMismatchCancel\.addEventListener\('click', \(\) =>/,
     /btnMismatchConfirm\.addEventListener\('click', \(\) =>/,
     /btnCompute\.addEventListener\('click', \(\) => _enqueueOperation/,
-    /btnExportYolo\.addEventListener\('click', \(\) =>/,
-    /btnExportJSON\.addEventListener\('click', \(\) =>/,
-    /btnExportCSV\.addEventListener\('click', \(\) =>/,
-    /btnExportIdentity\.addEventListener\('click', \(\) =>/,
+    /btnExportYolo\.addEventListener\('click', async \(\) =>/,
+    /btnExportJSON\.addEventListener\('click', async \(\) =>/,
+    /btnExportCSV\.addEventListener\('click', async \(\) =>/,
+    /btnExportIdentity\.addEventListener\('click', async \(\) =>/,
   ];
 
   for (const pattern of handlerChecks) {
@@ -141,6 +140,10 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(carousel, /body\.crsl-shell \.carousel-stage \{ flex: 1 1 0; min-height: 0; \}/);
   assert.match(carousel, /body\.crsl-shell \.carousel-bottom \{ flex: 0 0 auto/);
   assert.match(carousel, /body\.crsl-shell \.crsl-links \{ flex-wrap: nowrap; overflow-x: auto/);
+  assert.match(html, /<link rel="stylesheet" href="css\/ux-compact\.css">/);
+  assert.match(uxCompact, /body\.crsl-shell \.carousel-topbar[\s\S]*position:\s*absolute/);
+  assert.match(uxCompact, /body\.crsl-shell \.crsl-classbar[\s\S]*position:\s*absolute[\s\S]*flex-direction:\s*column/);
+  assert.match(uxCompact, /body\.crsl-shell \.crsl-actionrow[\s\S]*flex-wrap:\s*nowrap/);
 });
 
 test('capture-first session shell is present and wired (home ⇄ editor routing)', () => {

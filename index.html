@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/carousel.css">
   <link rel="stylesheet" href="css/sessions.css">
   <link rel="stylesheet" href="css/viewer.css">
+  <link rel="stylesheet" href="css/ux-compact.css">
 </head>
 <body>
 
@@ -172,9 +173,9 @@
               </div>
               <div class="toolbar-group">
                 <span class="toolbar-label">View</span>
-                <button class="btn btn--ghost btn--sm" id="btn-toggle-magnifier" title="Magnifier [M]">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-                  Magnifier
+                <button class="btn btn--ghost btn--sm active" id="btn-toggle-boxes" title="Show/hide bbox overlays">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  Boxes
                 </button>
               </div>
             </div>
@@ -185,6 +186,15 @@
 
             <div class="file-info" id="file-info"></div>
 
+            <details class="quality-card" id="tree-quality-card" open>
+              <summary class="quality-card__summary">
+                <span class="quality-card__title">Tree QA</span>
+                <span class="quality-card__badge" id="tree-quality-badge">Checking</span>
+              </summary>
+              <div class="quality-card__metrics" id="tree-quality-metrics"></div>
+              <div class="quality-card__issues" id="tree-quality-issues"></div>
+            </details>
+
             <div class="editor-hints">
               <p class="hints-title">Edit bbox</p>
               <p>Drag empty area -> new bbox</p>
@@ -194,7 +204,7 @@
               <p>[1-4] -> change class</p>
               <p>[Del] -> delete</p>
               <p>[Esc] -> clear selection</p>
-              <p>[M] -> magnifier on/off</p>
+              <p>Boxes -> show/hide overlays</p>
               <p class="hints-title hints-title--mt">Navigation</p>
               <p><kbd>[</kbd> / <kbd>]</kbd> -> previous/next tree</p>
               <p><kbd>Q</kbd> / <kbd>E</kbd> -> previous/next side</p>
@@ -224,10 +234,6 @@
           <button class="btn btn--outline btn--sm" id="btn-run-suggestions">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Run Suggestions
-          </button>
-          <button class="btn btn--ghost btn--sm active" id="btn-toggle-dedup-magnifier" title="Disable magnifier [M]">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="22" y2="22"/></svg>
-            Magnifier
           </button>
           <button class="btn btn--ghost btn--sm active" id="btn-toggle-dedup-suggestions" title="Hide automatic suggestions [S]">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -262,7 +268,6 @@ Shortcut:
 Left/Right arrows  pair
 R    run suggestions
 S    show/hide suggestions
-M    magnifier on/off
 1-4  change selected bbox class
 Del  delete selected bbox">?</button>
         </div>
@@ -390,6 +395,7 @@ Del  delete selected bbox">?</button>
   <script src="js/results.js"></script>
   <script src="js/project.js"></script>
   <script src="js/output-schema.js"></script>
+  <script src="js/quality-check.js"></script>
   <script src="js/fs-output.js"></script>
   <script src="js/persist/session-store.js"></script>
   <script src="js/capture/capture-source.js"></script>

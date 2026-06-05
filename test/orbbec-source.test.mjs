@@ -111,6 +111,8 @@ test('OrbbecSource capture carries raw depth sidecar when native frame includes 
           depthEncoding: 'uint16le',
           depthUnit: 'mm',
           depthAlignedTo: 'color',
+          depthDisplayFloorMm: 250,
+          depthDisplayCeilingMm: 7000,
         };
       },
     },
@@ -127,6 +129,8 @@ test('OrbbecSource capture carries raw depth sidecar when native frame includes 
     valueScale: 0.1,
     unit: 'mm',
     alignedTo: 'color',
+    displayFloorMm: 250,
+    displayCeilingMm: 7000,
   });
 });
 
@@ -190,10 +194,13 @@ test('OrbbecSource.mountPreview subscribes to frames, starts the pump, renders R
   assert.deepEqual(calls, ['perm', 'addListener:orbbecFrame', 'startPreview']);
   assert.ok(stage.querySelector('.orbbec-live'), 'live wrapper mounted into the stage');
 
-  // A pushed frame updates the RGB main view and the depth PiP.
-  frameCb({ rgb: 'AAAA', depth: 'BBBB', width: 1280, height: 720 });
+  // RGB-only frames temporarily hide the PiP; a later throttled depth frame restores it.
+  frameCb({ rgb: 'AAAA', width: 1280, height: 720 });
   assert.equal(stage.querySelector('.orbbec-live__main').src, 'data:image/jpeg;base64,AAAA');
+  assert.equal(stage.querySelector('.orbbec-live__pip').classList.contains('orbbec-live__pip--empty'), true);
+  frameCb({ depth: 'BBBB', width: 1280, height: 720 });
   assert.equal(stage.querySelector('.orbbec-live__pipimg').src, 'data:image/jpeg;base64,BBBB');
+  assert.equal(stage.querySelector('.orbbec-live__pip').classList.contains('orbbec-live__pip--empty'), false);
 
   await stop();
   assert.equal(removed.listener, true, 'frame listener removed on stop');

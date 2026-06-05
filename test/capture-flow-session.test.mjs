@@ -43,7 +43,7 @@ function driveCapture({ session, sideCount }) {
 async function shootAllSides(btn, title, sideCount) {
   for (let i = 1; i <= sideCount; i++) {
     (await btn('Capture')).click();
-    if (i < sideCount) await title(`Side ${i + 1} / ${sideCount}`);
+    if (i < sideCount) await title(`View ${i + 1} / ${sideCount}`);
   }
   (await btn('Save')).click();
 }
