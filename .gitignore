@@ -23,8 +23,9 @@ desktop.ini
 debug.log
 *.log
 
-# Local dataset (tidak perlu di-repo)
+# Local dataset / analysis outputs (tidak perlu di-repo)
 Damimas_Only/
+results/
 
 # wrangler files
 .wrangler
