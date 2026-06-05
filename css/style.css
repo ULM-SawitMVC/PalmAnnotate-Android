@@ -17,10 +17,31 @@
 
   --c-accent: #b8e04a;
   --c-accent-dim: rgba(184, 224, 74, 0.15);
+  /* Text/icon colour that rides ON an accent fill. Dark here (lime is bright);
+     the light theme flips it to white (the light accent is a deep green). This
+     is the "yin-yang" contrast token — accent buttons must use it, not a
+     hardcoded value, so text stays legible in both themes. */
+  --c-on-accent: #0c120c;
   --c-gold: #e4b84a;
   --c-emerald: #2dd47b;
   --c-red: #f06060;
   --c-warn: #e4b84a;
+
+  /* ── Elevation / glass / media (SINGLE SOURCE OF TRUTH) ───────────────────
+     Every translucent panel, full-screen backdrop and over-media scrim used to
+     be a hardcoded rgba() copy-pasted across css files, so theming meant editing
+     each one. They are now these tokens; the light theme re-defines them ONCE.
+       --c-overlay     full-screen backdrop behind panels / camera
+       --c-glass*      floating frosted chrome panels (toolbars, palettes, tabs)
+       --c-scrim       dark gradient over media so controls stay legible
+       --c-on-media    text/icon that ALWAYS sits on media (camera/photo) → light
+     (faint glass divider lines reuse --c-border, which the light theme flips.) */
+  --c-overlay: rgba(8, 14, 8, 0.92);
+  --c-glass: rgba(7, 12, 7, 0.72);
+  --c-glass-strong: rgba(7, 12, 7, 0.92);
+  --c-glass-soft: rgba(7, 12, 7, 0.5);
+  --c-scrim: rgba(0, 0, 0, 0.55);
+  --c-on-media: rgba(255, 255, 255, 0.9);
 
   /* Typography */
   --f-display: 'Instrument Serif', Georgia, serif;
@@ -121,7 +142,7 @@ input { font-family: inherit; }
   z-index: 100;
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  background: rgba(10, 15, 10, 0.8);
+  background: var(--c-glass);
   border-bottom: 1px solid var(--c-border);
 }
 
@@ -188,16 +209,16 @@ input { font-family: inherit; }
 
 .btn--primary {
   background: var(--c-accent);
-  color: var(--c-bg);
+  color: var(--c-on-accent);
 }
-.btn--primary:hover:not(:disabled) { background: #c8f05a; transform: translateY(-1px); box-shadow: 0 8px 30px rgba(184, 224, 74, 0.25); }
+.btn--primary:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); box-shadow: 0 8px 30px rgba(184, 224, 74, 0.25); }
 .btn--primary:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
 
 .btn--accent {
   background: var(--c-accent);
-  color: var(--c-bg);
+  color: var(--c-on-accent);
 }
-.btn--accent:hover { background: #c8f05a; }
+.btn--accent:hover { filter: brightness(1.06); }
 
 .btn--outline {
   background: transparent;
@@ -982,7 +1003,7 @@ input { font-family: inherit; }
 
 .mode-switch__btn.mode-switch__btn--active {
   background: var(--c-accent);
-  color: var(--c-bg);
+  color: var(--c-on-accent);
   border-color: transparent;
   box-shadow: 0 8px 20px rgba(184, 224, 74, 0.22);
 }
@@ -1156,7 +1177,7 @@ input { font-family: inherit; }
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: rgba(5, 11, 8, 0.85);
+  background: var(--c-glass-strong);
 }
 
 .tree-side-card__preview img,
@@ -1265,7 +1286,7 @@ input { font-family: inherit; }
 
 .result-toggle__btn--active {
   background: var(--c-accent);
-  color: var(--c-bg);
+  color: var(--c-on-accent);
 }
 
 /* ---- Footer ---- */
@@ -1819,9 +1840,9 @@ input { font-family: inherit; }
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--c-on-media);
   text-align: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--c-scrim);
   padding: 1px 8px;
   border-radius: 3px;
   pointer-events: none;
@@ -1839,8 +1860,8 @@ input { font-family: inherit; }
   z-index: 10;
   font-size: 0.65rem;
   font-family: var(--f-mono);
-  color: rgba(255, 255, 255, 0.75);
-  background: rgba(0, 0, 0, 0.6);
+  color: var(--c-on-media);
+  background: var(--c-scrim);
   padding: 2px 6px;
   border-radius: 3px;
   pointer-events: none;
@@ -1970,7 +1991,7 @@ input { font-family: inherit; }
 .sig-badge.sig-lo  { color: var(--c-red);     border-color: var(--c-red); }
 
 /* Small button variants */
-.btn-success { background: var(--c-emerald); color: var(--c-bg); border: none; border-radius: var(--r-sm); }
+.btn-success { background: var(--c-emerald); color: var(--c-on-accent); border: none; border-radius: var(--r-sm); }
 .btn-success:hover { opacity: 0.85; }
 .btn-danger  { background: var(--c-red); color: #fff; border: none; border-radius: var(--r-sm); }
 .btn-danger:hover { opacity: 0.85; }
@@ -2329,10 +2350,14 @@ kbd {
   border-radius: 8px;
   font-size: 0.82rem;
   font-family: var(--f-body);
-  color: #fff;
-  background: var(--c-surface);
+  /* Theme-aware via tokens (single source of truth): readable text on the
+     surface in BOTH dark and light modes. The type is conveyed by a token-
+     coloured left border, not by tinting the text — so contrast never breaks
+     when the surface flips to white in light mode. */
+  color: var(--c-text);
+  background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-soft);
   transform: translateY(12px);
   opacity: 0;
   transition: transform 0.25s ease, opacity 0.25s ease;
@@ -2344,18 +2369,9 @@ kbd {
   opacity: 1;
 }
 
-.toast--success {
-  border-left: 3px solid #22c55e;
-  color: #bbf7d0;
-}
-.toast--error {
-  border-left: 3px solid #ef4444;
-  color: #fecaca;
-}
-.toast--info {
-  border-left: 3px solid #3b82f6;
-  color: #bfdbfe;
-}
+.toast--success { border-left: 3px solid var(--c-emerald); }
+.toast--error   { border-left: 3px solid var(--c-red); }
+.toast--info    { border-left: 3px solid var(--c-accent); }
 
 /* ==== Save Status ==== */
 
@@ -2368,19 +2384,19 @@ kbd {
 }
 .save-status--saved {
   background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  color: var(--c-emerald);
 }
 .save-status--unsaved {
   background: rgba(250, 204, 21, 0.12);
-  color: #fbbf24;
+  color: var(--c-warn);
 }
 
-.tree-select option.option-saved { color: #4ade80; }
+.tree-select option.option-saved { color: var(--c-emerald); }
 
 .save-counter {
   font-family: var(--f-mono);
   font-size: 0.68rem;
-  color: #4ade80;
+  color: var(--c-emerald);
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.25);
   padding: 2px 7px;

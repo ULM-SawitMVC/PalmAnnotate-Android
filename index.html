@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- Supports both schemes; dark is the default, light activates with the OS. -->
+  <meta name="color-scheme" content="dark light">
   <title>PalmAnnotate</title>
   <!-- Fonts vendored locally for offline field use (no CDN). See css/fonts.css + assets/fonts/. -->
   <link rel="stylesheet" href="css/fonts.css">
@@ -12,6 +14,8 @@
   <link rel="stylesheet" href="css/sessions.css">
   <link rel="stylesheet" href="css/viewer.css">
   <link rel="stylesheet" href="css/ux-compact.css">
+  <!-- Light theme overrides — loaded last so they win under prefers-color-scheme: light. -->
+  <link rel="stylesheet" href="css/theme-light.css">
 </head>
 <body>
 
@@ -136,6 +140,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-5 5"/></svg>
           Results
         </button>
+        <button class="tab-close" id="tabs-close" type="button" aria-label="Hide editor tools" title="Hide editor tools">&times;</button>
       </div>
 
       <!-- ?? Tab: Annotation Editor ?? -->

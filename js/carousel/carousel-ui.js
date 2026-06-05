@@ -537,7 +537,9 @@ const CarouselUI = (() => {
     if (!_boxesVisible) return;
 
     const decor = _linkDecorForSide(side.sideIndex);
-    const lineW = Math.max(3, tr.scaleToCanvas(2.4));
+    // dpr-aware floor: a bare "3" is ~1.5 CSS px on a 2x tablet, too faint over
+    // busy field photos. ~3.5 CSS px keeps boxes obvious. (matches bbox-editor.)
+    const lineW = Math.max(3.5 * dpr, tr.scaleToCanvas(3.5));
 
     side.bboxes.forEach((b, idx) => {
       const btl = tr.imageToCanvas(b.x1, b.y1);

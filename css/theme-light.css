@@ -1,0 +1,65 @@
+/* ============================================================================
+   PalmAnnotate — Light theme (single source of truth)
+
+   The app is dark by default. The core design system now lives entirely in CSS
+   custom properties (see :root in style.css): surfaces, text, accent, and the
+   glass / overlay / scrim / on-media tokens that every translucent panel and
+   over-image scrim reference. So light mode is just a TOKEN RE-DEFINITION — one
+   place — and it propagates to every screen automatically. No per-selector
+   repainting, no scattered overrides.
+
+   Verified on-device: the Android WebView reflects the system setting
+   (prefers-color-scheme: dark === true when the tablet is dark), so this block
+   only activates in true light mode; dark mode is untouched.
+
+   One deliberate carve-out:
+     • Scrim / on-media tokens stay light-on-dark — they sit ON media (the live
+       camera feed or a captured photo), and the photo/camera viewport itself is
+       a hardcoded black backdrop (#000) in BOTH themes, exactly like every
+       gallery/camera app. That black is a MEDIA surface, not a dark-mode leak.
+       The capture CHROME (top check bar, action bar, metadata form, dots) now
+       follows light mode like the rest of the app — no forced-dark override.
+   ============================================================================ */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    /* Surfaces & text — tinted bg so white surfaces pop (no washed-out look);
+       strong borders + near-black green text for high contrast. */
+    --c-bg: #e7ede0;
+    --c-surface: #ffffff;
+    --c-surface-raised: #ffffff;
+    --c-border: rgba(20, 32, 13, 0.20);
+    --c-border-hover: rgba(20, 32, 13, 0.36);
+    --c-text: #131e0c;
+    --c-text-muted: #3a5531;
+    --c-text-dim: #587450;
+
+    /* Deep-green accent: white text rides on it (--c-on-accent) AND it reads as
+       text on the light surfaces. */
+    --c-accent: #3c6a12;
+    --c-accent-dim: rgba(60, 106, 18, 0.16);
+    --c-on-accent: #ffffff;
+    --c-gold: #946608;
+    --c-emerald: #178a4a;
+    --c-red: #c52f2f;
+    --c-warn: #946608;
+
+    /* Glass / overlay flip to light frosted; the whole app's chrome follows. */
+    --c-overlay: rgba(231, 237, 224, 0.92);
+    --c-glass: rgba(255, 255, 255, 0.82);
+    --c-glass-strong: rgba(255, 255, 255, 0.92);
+    --c-glass-soft: rgba(255, 255, 255, 0.6);
+    /* Scrim + on-media intentionally stay as-is: they sit on media (dark). */
+    --c-scrim: rgba(0, 0, 0, 0.55);
+    --c-on-media: rgba(255, 255, 255, 0.9);
+
+    --shadow-soft: 0 12px 30px rgba(20, 32, 13, 0.12);
+  }
+
+  /* Tone down the ambient brand glows so they don't smudge the light bg. */
+  .bg-glow--1 { background: radial-gradient(circle, rgba(45, 212, 123, 0.05), transparent 70%); }
+  .bg-glow--2 { background: radial-gradient(circle, rgba(78, 125, 24, 0.05), transparent 70%); }
+  .bg-grain { opacity: 0.02; }
+}

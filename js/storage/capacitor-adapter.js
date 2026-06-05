@@ -30,6 +30,8 @@ const CapacitorAdapter = (() => {
   const OUTPUT_JSON   = BASE + '/Output JSON';
   const OUTPUT_TXT    = BASE + '/Output TXT';
   const DATASET       = BASE + '/dataset';
+  const EXPORTS       = BASE + '/exports';
+  const SESSIONS_IDX  = BASE + '/sessions.json';
   const ENCODING      = 'utf8';
 
   let _baseEnsured = false;
@@ -53,7 +55,7 @@ const CapacitorAdapter = (() => {
     if (_baseEnsured) return;
     const fs = _fs();
     if (!fs) return;
-    const dirs = [BASE, OUTPUT_JSON, OUTPUT_TXT, DATASET];
+    const dirs = [BASE, OUTPUT_JSON, OUTPUT_TXT, DATASET, EXPORTS];
     for (const path of dirs) {
       try {
         await fs.mkdir({ path, directory: DIRECTORY, recursive: true });
@@ -197,6 +199,65 @@ const CapacitorAdapter = (() => {
       throw new Error('Invalid output file reference.');
     }
     return JSON.parse(_decode(res && res.data));
+  }
+
+  // ── Exports (native: write to PalmAnnotate/exports/) ────────────────────────
+  // The Results "Export …" buttons used a browser blob download, which the
+  // Android WebView silently ignores. On native we write the file to disk under
+  // PalmAnnotate/exports/ (reachable via USB/adb and mirrored to the SAF folder
+  // by the caller). Returns a dirName so the UI can tell the operator where.
+  async function saveExport(filename, content) {
+    const fs = _fs();
+    if (!fs) return { ok: false, method: 'none', error: 'Filesystem plugin unavailable.' };
+    try {
+      await _ensureBase();
+      const safeName = _safeFileName(filename, 'export.txt');
+      await fs.writeFile({
+        path: EXPORTS + '/' + safeName,
+        data: String(content == null ? '' : content),
+        directory: DIRECTORY,
+        encoding: ENCODING,
+        recursive: true,
+      });
+      return { ok: true, method: 'native', path: EXPORTS + '/' + safeName, dirName: 'PalmAnnotate/exports' };
+    } catch (e) {
+      console.warn('[CapacitorAdapter] saveExport failed:', e);
+      return { ok: false, method: 'none', error: (e && e.message) || String(e) };
+    }
+  }
+
+  // ── Sessions index (self-describing folder for resume) ──────────────────────
+  // Mirror the SessionStore sessions index to PalmAnnotate/sessions.json so the
+  // working folder describes its own sessions and a reopened folder can resume.
+  async function saveSessionsIndex(payload) {
+    const fs = _fs();
+    if (!fs) return { ok: false, error: 'Filesystem plugin unavailable.' };
+    try {
+      await _ensureBase();
+      await fs.writeFile({
+        path: SESSIONS_IDX,
+        data: JSON.stringify(payload, null, 2),
+        directory: DIRECTORY,
+        encoding: ENCODING,
+        recursive: true,
+      });
+      return { ok: true };
+    } catch (e) {
+      console.warn('[CapacitorAdapter] saveSessionsIndex failed:', e);
+      return { ok: false, error: (e && e.message) || String(e) };
+    }
+  }
+
+  /** Read + parse PalmAnnotate/sessions.json from app-external storage, or null. */
+  async function readSessionsIndex() {
+    const fs = _fs();
+    if (!fs) return null;
+    try {
+      const res = await fs.readFile({ path: SESSIONS_IDX, directory: DIRECTORY, encoding: ENCODING });
+      return JSON.parse(_decode(res && res.data));
+    } catch (e) {
+      return null; // missing on first run — expected
+    }
   }
 
   // ── Dataset persistence (capture-first flow) ────────────────────────────────
@@ -530,6 +591,7 @@ const CapacitorAdapter = (() => {
     hasOutputDir, hasLabelsDir, outputDirName, labelsDirName,
     verifyAccess,
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
+    saveExport, saveSessionsIndex, readSessionsIndex,
     persistDatasetImage, persistDatasetFile, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
     readDatasetBinary, readDatasetJsonAt,

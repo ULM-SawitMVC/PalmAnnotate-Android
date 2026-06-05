@@ -49,7 +49,7 @@
 
 .crsl-seg__btn--active {
   background: var(--c-accent);
-  color: #0c120c;
+  color: var(--c-on-accent);
 }
 
 .crsl-sidelabel {
@@ -70,9 +70,7 @@
   min-height: 0;
   overflow: hidden;
   border-radius: var(--r-lg);
-  background:
-    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.03), transparent 60%),
-    var(--c-bg);
+  background: var(--c-bg);
   border: 1px solid var(--c-border);
   touch-action: pan-y; /* allow vertical scroll; horizontal handled as swipe */
 }
@@ -139,7 +137,7 @@
   left: 50%;
   bottom: 16px;
   transform: translate(-50%, 12px);
-  background: rgba(12, 18, 12, 0.92);
+  background: var(--c-glass-strong);
   border: 1px solid var(--c-border-hover);
   color: var(--c-text);
   font-size: 0.85rem;
@@ -265,7 +263,7 @@
 .crsl-action--link.crsl-action--armed {
   background: var(--c-accent);
   border-color: var(--c-accent);
-  color: #0c120c;
+  color: var(--c-on-accent);
 }
 .crsl-action--del { border-color: color-mix(in srgb, var(--c-red) 55%, var(--c-border)); }
 .crsl-action--del:not(:disabled):active { background: color-mix(in srgb, var(--c-red) 22%, var(--c-surface-raised)); }
@@ -460,7 +458,7 @@
 .crsl-action--next {
   background: var(--c-accent);
   border-color: var(--c-accent);
-  color: #0c120c;
+  color: var(--c-on-accent);
   font-weight: 700;
 }
 .crsl-action--next:not(:disabled):active { transform: scale(0.97); }

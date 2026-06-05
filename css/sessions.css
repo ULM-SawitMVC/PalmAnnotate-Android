@@ -102,7 +102,7 @@
   border: none;
   border-radius: 16px;
   background: var(--c-accent);
-  color: #0c120c;
+  color: var(--c-on-accent);
   font-size: 1.05rem;
   font-weight: 700;
   cursor: pointer;
@@ -422,17 +422,57 @@
   .link-btn:active { transform: scale(0.98); }
 }
 
-/* ── Tablet 3:2 refinement — centre & widen the column ────────────────── */
+/* ── Tablet refinement — widen, then tile lists into a card grid ──────────── */
 
 @media (pointer: coarse) and (min-width: 720px) {
   .home__scroll {
-    max-width: 720px;
+    max-width: min(1120px, 100%);
     margin: 0 auto;
     width: 100%;
-    padding: var(--space-xl);
+    /* Tighter vertical rhythm than the phone so the whole home fits one tablet
+       screen instead of pushing the Export-folder row half under the gesture
+       nav bar. Keep a generous bottom pad so the last row always clears it. */
+    padding: var(--space-lg) var(--space-xl);
+    padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom, 0px));
+    gap: var(--space-md);
   }
   .home__hero h1 { font-size: 2rem; }
+  .stat-card { padding: var(--space-md); }
   .stat-card__num { font-size: 2.4rem; }
+
+  /* Don't pin the secondary actions to the very bottom edge on the tablet —
+     that auto-margin is what shoved the Export-folder row off-screen. Let them
+     flow right after the session list. */
+  .home__secondary { margin-top: var(--space-md); }
+
+  /* Sessions and trees tile into a responsive grid instead of a tall single
+     column, so a landscape tablet's width is actually used. Each .list-row
+     (main + 48px delete) becomes a card. auto-FIT (not auto-fill) collapses
+     empty trailing tracks, so one session fills the row and two split evenly —
+     no lonely narrow card stranded beside a big empty gap. The wider 360px
+     floor keeps it to ~2 comfortable columns, matching the 2-up stat cards. */
+  .session-list,
+  .pohon-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--space-md);
+    align-items: start;
+  }
+
+  /* The Start-Session form reads better at a comfortable column width than
+     stretched across the whole tablet. Scoped to .home__form so the SAME
+     .sheet__top header on the session-detail view stays full width (otherwise
+     its back/refresh buttons get centred in a narrow band, misaligned with the
+     full-width content below). */
+  .home__form .sheet__top,
+  .home__form .sheet__banner,
+  .home__form .form-card,
+  .home__form .form-card ~ .sheet__cta {
+    max-width: 620px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
 }
 
 @media (max-width: 380px) {
@@ -521,7 +561,7 @@
   cursor: pointer;
 }
 .pa-modal__btn--ghost { background: transparent; color: var(--c-text-muted); }
-.pa-modal__btn--primary { background: var(--c-accent); border-color: var(--c-accent); color: #0c120c; }
+.pa-modal__btn--primary { background: var(--c-accent); border-color: var(--c-accent); color: var(--c-on-accent); }
 .pa-modal__btn--danger { background: var(--c-red); border-color: var(--c-red); color: #fff; }
 
 @media (pointer: coarse) {

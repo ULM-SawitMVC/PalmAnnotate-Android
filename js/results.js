@@ -134,16 +134,56 @@ const Results = (() => {
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
   }
 
-  function exportYolo(session) {
+  /**
+   * Write one export file the right way for the platform: on native, to the
+   * Storage adapter (PalmAnnotate/exports/) + the SAF export folder mirror; on
+   * web, a browser download. Returns { ok, native, dirName }. Never throws — an
+   * export must not crash the Results tab.
+   */
+  async function _emit(filename, content, mimeType) {
+    const native = !!(window.Storage && Storage.isNative && Storage.isNative());
+    try {
+      if (native) {
+        const adapter = Storage.active();
+        const res = (adapter && adapter.saveExport)
+          ? await adapter.saveExport(filename, content)
+          : { ok: false };
+        if (window.SafStore && SafStore.isSupported && SafStore.isSupported()) {
+          try { await SafStore.writeText('exports/' + filename, content); } catch (_) {}
+        }
+        return { ok: !!(res && res.ok), native: true, dirName: (res && res.dirName) || 'PalmAnnotate/exports' };
+      }
+      _download(filename, content, mimeType);
+      return { ok: true, native: false, dirName: 'downloads' };
+    } catch (e) {
+      console.warn('[Results] export emit failed for', filename, e);
+      return { ok: false, native, error: (e && e.message) || String(e) };
+    }
+  }
+
+  /** Roll a set of per-file _emit results into one summary for the caller's toast. */
+  function _summary(results) {
+    const ok = results.filter(r => r && r.ok);
+    return {
+      count: ok.length,
+      total: results.length,
+      native: results.some(r => r && r.native),
+      dirName: (ok[0] && ok[0].dirName) || 'downloads',
+    };
+  }
+
+  async function exportYolo(session) {
+    const out = [];
     for (const side of session.sides) {
       if (!side.imageWidth) continue;
       const text = toYoloFormat(side.bboxes, side.imageWidth, side.imageHeight);
       const filename = `${session.treeName}_${side.sideIndex + 1}.txt`;
-      _download(filename, text, 'text/plain');
+      out.push(await _emit(filename, text, 'text/plain'));
     }
+    return _summary(out);
   }
 
-  function exportJSON(session, result) {
+  async function exportJSON(session, result) {
     const data = {
       ...ActiveSession.toJSON(),
       result: result ? {
@@ -155,15 +195,15 @@ const Results = (() => {
       } : null,
       exportedAt: new Date().toISOString(),
     };
-    _download(
+    return _summary([await _emit(
       `${session.treeName}_session.json`,
       JSON.stringify(data, null, 2),
       'application/json'
-    );
+    )]);
   }
 
-  function exportCSV(session, result) {
-    if (!result) return;
+  async function exportCSV(session, result) {
+    if (!result) return _summary([]);
     const { uniqueCount, rawCount, classCounts } = result;
     const header = 'tree_name,split,unique,raw,B1,B2,B3,B4';
     const row = [
@@ -176,11 +216,11 @@ const Results = (() => {
       classCounts.B3 || 0,
       classCounts.B4 || 0,
     ].join(',');
-    _download(`${session.treeName}_result.csv`, header + '\n' + row, 'text/csv');
+    return _summary([await _emit(`${session.treeName}_result.csv`, header + '\n' + row, 'text/csv')]);
   }
 
-  function exportIdentityJSON(session, result) {
-    if (!result || !result.clusters) return;
+  async function exportIdentityJSON(session, result) {
+    if (!result || !result.clusters) return _summary([]);
 
     const bunches = [];
     let bunchId = 1;
@@ -212,15 +252,15 @@ const Results = (() => {
       bunches,
     };
 
-    _download(
+    return _summary([await _emit(
       `${session.treeName}_identity.json`,
       JSON.stringify(data, null, 2),
       'application/json'
-    );
+    )]);
   }
 
-  function exportYoloWithMismatch(session, result) {
-    if (!result || !result.clusters) return;
+  async function exportYoloWithMismatch(session, result) {
+    if (!result || !result.clusters) return _summary([]);
 
     // Collect mismatch bbox IDs
     const mismatchIds = new Set();
@@ -231,6 +271,7 @@ const Results = (() => {
       }
     }
 
+    const out = [];
     for (const side of session.sides) {
       if (!side.imageWidth) continue;
 
@@ -239,14 +280,15 @@ const Results = (() => {
 
       // Main annotation file
       const text = toYoloFormat(normalBboxes, side.imageWidth, side.imageHeight);
-      _download(`${session.treeName}_${side.sideIndex + 1}.txt`, text, 'text/plain');
+      out.push(await _emit(`${session.treeName}_${side.sideIndex + 1}.txt`, text, 'text/plain'));
 
       // Mismatch annotation file (separate)
       if (mismatchBboxes.length > 0) {
         const mText = toYoloFormat(mismatchBboxes, side.imageWidth, side.imageHeight);
-        _download(`${session.treeName}_${side.sideIndex + 1}_mismatch.txt`, mText, 'text/plain');
+        out.push(await _emit(`${session.treeName}_${side.sideIndex + 1}_mismatch.txt`, mText, 'text/plain'));
       }
     }
+    return _summary(out);
   }
 
   return { compute, render, exportYolo, exportJSON, exportCSV, exportIdentityJSON, exportYoloWithMismatch };

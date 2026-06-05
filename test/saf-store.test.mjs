@@ -42,6 +42,13 @@ function makeSaf(overrides = {}) {
     },
     async hasFolder(args) { calls.push(['hasFolder', args]); return { has: true, name: 'PalmExport' }; },
     async writeFile(args) { calls.push(['writeFile', args]); return { ok: true }; },
+    async readFile(args) {
+      calls.push(['readFile', args]);
+      if (/sessions\.json$/.test(args.relPath)) {
+        return { ok: true, data: JSON.stringify({ version: 1, sessions: [{ id: 'sess_folder_1', variety: 'DAMIMAS', blok: 'A21B', trees: [] }] }) };
+      }
+      return { ok: false };
+    },
     async deletePath(args) { calls.push(['deletePath', args]); return { ok: true, removed: /_1\.jpg$/.test(args.relPath) }; },
     async releaseFolder(args) { calls.push(['releaseFolder', args]); },
   };
@@ -59,6 +66,17 @@ function loadSaf({ native = true, saf = makeSaf() } = {}) {
   });
   return { SafStore: ctx.SafStore, SessionStore: ctx.SessionStore, saf };
 }
+
+test('SafStore.readJson reads sessions.json from the chosen folder (resume path)', async () => {
+  const { SafStore } = loadSaf();
+  await SafStore.pickFolder();                       // remember a folder
+  const idx = await SafStore.readJson('sessions.json');
+  assert.ok(idx && Array.isArray(idx.sessions));
+  assert.equal(idx.sessions[0].id, 'sess_folder_1');
+  // No folder chosen → null (never throws).
+  const { SafStore: fresh } = loadSaf();
+  assert.equal(await fresh.readJson('sessions.json'), null);
+});
 
 test('SafStore is unsupported on web and degrades to no-ops (never throws)', async () => {
   const { SafStore } = loadSaf({ native: false });

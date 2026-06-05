@@ -294,6 +294,56 @@ const SessionStore = (() => {
   }
 
   /**
+   * Mirror the sessions index to a self-describing PalmAnnotate/sessions.json on
+   * disk (app-external) and to the SAF export folder, so reopening that folder
+   * can resume the sessions. Native-only, best-effort, never throws — the source
+   * of truth stays the key/value store above.
+   */
+  async function _mirrorSessionsIndex(sessions) {
+    try {
+      if (!(window.Storage && Storage.isNative && Storage.isNative())) return;
+      const payload = { version: 1, savedAt: new Date().toISOString(), sessions };
+      const adapter = Storage.active && Storage.active();
+      if (adapter && adapter.saveSessionsIndex) await adapter.saveSessionsIndex(payload);
+      if (window.SafStore && SafStore.isSupported && SafStore.isSupported()) {
+        try { await SafStore.writeJson('sessions.json', payload); } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('[SessionStore] mirror sessions index failed:', e);
+    }
+  }
+
+  /** Persist the sessions list AND mirror it to the folder index. */
+  async function _saveSessions(sessions) {
+    await _setJSON(K_SESSIONS, sessions);
+    await _mirrorSessionsIndex(sessions);
+    return sessions;
+  }
+
+  /**
+   * Merge a list of sessions (e.g. read back from a folder's sessions.json) into
+   * the store, deduped by id — existing sessions are kept, only genuinely new
+   * ones are added. Returns { imported, total }. Used to resume work after the
+   * operator re-picks a folder that already holds PalmAnnotate data.
+   */
+  async function importSessions(list) {
+    const incoming = Array.isArray(list) ? list.filter(s => s && s.id) : [];
+    if (!incoming.length) return { imported: 0, total: 0 };
+    const current = await getSessions();
+    const byId = new Set(current.map(s => s && s.id));
+    let imported = 0;
+    const merged = current.slice();
+    for (const s of incoming) {
+      if (byId.has(s.id)) continue;
+      byId.add(s.id);
+      merged.push(s);
+      imported += 1;
+    }
+    if (imported) await _saveSessions(merged);
+    return { imported, total: merged.length };
+  }
+
+  /**
    * Create and persist a new session locked to variety+blok.
    * @param {{variety:string, blok:string, sideCount?:number, autoId?:boolean, operator?:string}} opts
    * @returns {Promise<object>} the created session.
@@ -318,7 +368,7 @@ const SessionStore = (() => {
     };
     const sessions = await getSessions();
     sessions.push(session);
-    await _setJSON(K_SESSIONS, sessions);
+    await _saveSessions(sessions);
     // Remember the typed variety/block for next time's suggestions. Pass the raw
     // opts.variety (not the 'UNKNOWN' fallback) so a blank entry isn't cached.
     await rememberInput(String(opts.variety || '').trim(), blok);
@@ -341,7 +391,7 @@ const SessionStore = (() => {
     // Keep the group key consistent if variety/blok changed.
     merged.groupKey = groupKeyFor(merged.variety, merged.blok);
     sessions[idx] = merged;
-    await _setJSON(K_SESSIONS, sessions);
+    await _saveSessions(sessions);
     return merged;
   }
 
@@ -376,7 +426,7 @@ const SessionStore = (() => {
     session.nextId = Math.max(Number(session.nextId) || 1, entry.treeId + 1);
     session.updatedAt = new Date().toISOString();
     sessions[idx] = session;
-    await _setJSON(K_SESSIONS, sessions);
+    await _saveSessions(sessions);
     return session;
   }
 
@@ -408,7 +458,7 @@ const SessionStore = (() => {
       session.nextId = maxId + 1;
       session.updatedAt = new Date().toISOString();
       sessions[idx] = session;
-      await _setJSON(K_SESSIONS, sessions);
+      await _saveSessions(sessions);
     }
     return session;
   }
@@ -422,7 +472,7 @@ const SessionStore = (() => {
   async function removeSession(id) {
     const sessions = await getSessions();
     const next = sessions.filter(s => s && s.id !== id);
-    if (next.length !== sessions.length) await _setJSON(K_SESSIONS, next);
+    if (next.length !== sessions.length) await _saveSessions(next);
     return next;
   }
 
@@ -581,7 +631,7 @@ const SessionStore = (() => {
     getCapturedRegistry, addCapturedTree, removeCapturedTree,
     // sessions / groups
     getSessions, getSession, createSession, updateSession, addTreeToSession,
-    removeTreeFromSession, removeSession, homeStats, groupKeyFor,
+    removeTreeFromSession, removeSession, homeStats, groupKeyFor, importSessions,
     getInputCache, rememberInput,
     // snapshots
     saveSnapshot, loadSnapshot, clearSnapshot,

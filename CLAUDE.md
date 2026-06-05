@@ -177,7 +177,10 @@ as a normal disconnect and never assume software can keep the camera alive after
 - `dataset.js` — `DatasetManager`: groups image/label files into per-tree side objects (web + native).
 - `session.js` — `ActiveSession`: in-memory tree state, bbox CRUD, confirmed/suggested links, union-find clusters, serialization.
 - `dedup-utils.js` — pure geometry `suggestPairs()` cross-side duplicate suggester + `createUnionFind()`.
-- `results.js` — counting (`compute`), result tables, YOLO/JSON/CSV/identity exports.
+- `results.js` — counting (`compute`), result tables, YOLO/JSON/CSV/identity exports. Exports are
+  **async** and route through `_emit()`: on native they write via `adapter.saveExport(...)` into
+  `PalmAnnotate/exports/` (+ best-effort SAF mirror) — a blob/anchor download is a silent no-op in the
+  Android WebView, so never rely on it on-device; web still downloads.
 - `output-schema.js` — `OutputSchema`: canonical per-tree output JSON ⇄ session JSON.
 - `bbox-editor.js` / `dedup-ui.js` / `carousel/carousel-ui.js` — the three annotation surfaces (editor, dedup compare, touch carousel).
 - `canvas.js` — `CanvasRenderer`: class colours + detection drawing.
@@ -186,6 +189,29 @@ as a normal disconnect and never assume software can keep the camera alive after
 - `detect/detector.js` — on-device YOLO via onnxruntime-web (lazy-loaded; offline on Android).
 - `storage/` — `storage-adapter.js` (`Storage.active()` facade) + `fsa-adapter.js` (web File System Access) + `capacitor-adapter.js` (native Filesystem) + `saf-store.js` (optional SAF "export folder" — native only, mirrors captures to a user-picked public folder; see Android specifics). `persist/session-store.js` = autosave.
 - `project.js` / `fs-output.js` — thin facades over the active storage adapter.
+
+## Styling & theming (`css/`)
+
+- **Design tokens are the single source of truth.** All colours live as CSS custom properties in
+  `:root` (`css/style.css`): surfaces (`--c-bg`, `--c-surface`, `--c-surface-raised`), text
+  (`--c-text`, `--c-text-muted`, `--c-text-dim`), `--c-accent`/`--c-on-accent`, status
+  (`--c-emerald`/`--c-red`/`--c-warn`/`--c-gold`), and the translucent helpers
+  (`--c-glass`/`--c-glass-strong`/`--c-glass-soft`/`--c-overlay`/`--c-scrim`/`--c-on-media`). Style
+  with tokens, not literal hex/rgba — changing one token must reflow everywhere.
+- **Light mode is a pure token re-definition** in `css/theme-light.css` (loaded **last**, after
+  `ux-compact.css`), under `@media (prefers-color-scheme: light)`. The Android WebView reflects the
+  system setting, so this is system-driven. Don't repaint per-selector for light mode — flip the token.
+- **Three kinds of colour are intentionally literal (do NOT tokenize — flipping them is a bug):**
+  1. **Annotation class palette** B1 `#3b82f6` / B2 `#ef4444` / B3 `#f59e0b` / B4 `#8b5cf6` — the CSS
+     class buttons (`.btn-b1…`, `.class-b1…`) must match `CLASS_COLORS` in `js/yolo-io.js` /
+     `js/canvas.js` so a button equals the bbox drawn on canvas, in either theme.
+  2. **Media backdrops** — `#000` behind photos/camera/canvas and `rgba(0,0,0,…)` scrims/modal dimmers
+     stay dark in both themes (a photo viewer is black-backed everywhere).
+  3. **On-colour text** — `#fff` on saturated class/danger/accent buttons and the camera shutter.
+- The **capture flow follows the active theme** like everything else (its chrome uses tokens); only
+  the photo/camera viewport is the literal-black media surface above. There is **no** forced-dark pin.
+- Guard test: `test/ui-shell.test.mjs` ("design colours are centralized tokens …") asserts the chrome
+  reads tokens and light mode flips them in one place. Toast/status colours route through tokens too.
 
 ## Platform detection (used everywhere)
 
@@ -230,6 +256,11 @@ Web uses object URLs (`blob:`, revocable); native uses `Capacitor.convertFileSrc
   (`safFolderUri`/`safFolderName`) and re-verified each use; the picker UI is the "Export folder" row
   on the Sessions home (native only). `deletePath()` + `SafStore.deleteDatasetTree()` remove mirrored
   files during Delete Tree/Delete Session.
+- **Portable session index:** every session mutation also writes a self-describing
+  `PalmAnnotate/sessions.json` (app-external + SAF mirror) via `adapter.saveSessionsIndex(...)`. Boot
+  restores from it when Preferences is empty; re-picking an Export folder that already contains it
+  reads `SafStore.readJson('sessions.json')` (native `SafPlugin.readFile`) and `SessionStore.importSessions`
+  merges/dedupes by id — so the folder alone can resume work on a fresh install.
 - `AndroidManifest.xml` permissions: `INTERNET` + `ACCESS_COARSE/FINE_LOCATION` (for capture GPS).
   **Any runtime permission the WebView requests must be declared here or Android auto-denies it.**
 - Installed Capacitor plugins (`capacitor.plugins.json`): filesystem, camera, preferences.
@@ -259,3 +290,9 @@ breakpoints or the Android manifest, the guard tests are `ui-shell.test.mjs` and
   (every box defaults to class B2 for the expert to relabel). It never throws — failures return `[]`.
 - All capture/detector/storage public methods are intentionally non-throwing / degrade gracefully;
   preserve that contract.
+- The **magnifier/loupe is disabled** in both annotation surfaces (`_magEnabled = false` in
+  `bbox-editor.js` and `dedup-ui.js`) — removed by request. The toggle API is kept but defaults off;
+  don't re-enable it.
+- The carousel "More → Editor tools" reveals the docked tabs (`body.crsl-show-tabs`); the `#tabs-close`
+  "×" hides them again. "Next tree" that's cancelled at the camera returns to the session tree list
+  (`_showSessionDetail`), not the previous tree's annotation.

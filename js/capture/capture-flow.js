@@ -686,15 +686,20 @@ const CaptureFlow = (() => {
    *   { action: 'cancel' }          — abort the whole capture
    *   { action: 'retake', index }   — re-shoot one side, then return here
    */
-  function _renderCaptureQa(shots, sideCount, metadata) {
+  function _renderCaptureQa(shots, sideCount, metadata, opts) {
+    opts = opts || {};
     const report = window.QualityCheck && QualityCheck.analyzeCaptureShots
       ? QualityCheck.analyzeCaptureShots(shots, sideCount, metadata)
       : { status: 'ok', issues: [], metrics: {} };
+    // Only the actionable (non-info) issues are shown below, so the badge must
+    // count THOSE — otherwise a hidden info note made the badge read "2 issue(s)"
+    // while only one line was ever explained (the confusing GPS case).
+    const shown = (report.issues || []).filter(i => i.level !== 'info').slice(0, 5);
     const wrap = _el('details', `capture-qa capture-qa--${report.status}`);
     wrap.open = report.status !== 'ok';
     const summary = _el('summary', 'capture-qa__summary');
     summary.appendChild(_el('span', 'capture-qa__title', 'Pre-save check'));
-    summary.appendChild(_el('span', 'capture-qa__badge', report.status === 'ok' ? 'OK' : `${report.issues.length} issue(s)`));
+    summary.appendChild(_el('span', 'capture-qa__badge', shown.length ? `${shown.length} issue(s)` : 'OK'));
     wrap.appendChild(summary);
 
     const metrics = report.metrics || {};
@@ -705,9 +710,18 @@ const CaptureFlow = (() => {
     wrap.appendChild(metricRow);
 
     const list = _el('div', 'capture-qa__issues');
-    const issues = (report.issues || []).filter(i => i.level !== 'info').slice(0, 5);
-    if (!issues.length) list.appendChild(_el('p', 'capture-qa__issue capture-qa__issue--ok', 'Metadata, RGB views, and depth pair status look ready.'));
-    for (const it of issues) list.appendChild(_el('p', `capture-qa__issue capture-qa__issue--${it.level}`, it.message));
+    if (!shown.length) list.appendChild(_el('p', 'capture-qa__issue capture-qa__issue--ok', 'Metadata, RGB views, and depth pair status look ready.'));
+    for (const it of shown) list.appendChild(_el('p', `capture-qa__issue capture-qa__issue--${it.level}`, it.message));
+
+    // GPS is grabbed silently in the background during a session capture, so the
+    // review screen had no way to set it if the background fix failed/was slow —
+    // it just nagged "GPS missing" with no recourse. Give the operator a button.
+    if (metadata && !metadata.gps && typeof opts.onGps === 'function') {
+      const gpsBtn = _el('button', 'capture-btn capture-btn--outline capture-qa__gps', 'Get GPS');
+      gpsBtn.type = 'button';
+      gpsBtn.addEventListener('click', () => opts.onGps(gpsBtn));
+      list.appendChild(gpsBtn);
+    }
     wrap.appendChild(list);
     return wrap;
   }
@@ -716,18 +730,40 @@ const CaptureFlow = (() => {
     return new Promise((resolve) => {
       overlay.innerHTML = '';
       const urls = [];
-      const panel = _el('div', 'capture-panel capture-reviewall');
+      // Immersive, full-bleed review: the photo dominates the screen; chrome
+      // floats in a slim top strip and a pinned bottom action bar so nothing
+      // (e.g. Retake) gets clipped the way the old centered card did.
+      const panel = _el('div', 'capture-panel capture-reviewall capture-reviewall--immersive');
 
-      panel.appendChild(_el('h2', 'capture-title', 'Review views'));
-      panel.appendChild(_el('p', 'capture-subtitle',
-        `Swipe through the ${sideCount} views for this one tree. Retake any, then save.`));
-      panel.appendChild(_renderCaptureQa(shots, sideCount, metadata));
+      // ── Top strip: "Side x / N" + compact pre-save check ──────────────────
+      const topbar = _el('div', 'capture-reviewall__topbar');
+      const pageLabel = _el('span', 'capture-reviewall__pagelabel', `Side 1 / ${sideCount}`);
+      topbar.appendChild(pageLabel);
 
+      // The pre-save check is rebuilt in place when GPS is fetched, so the
+      // "GPS missing" warning + button flip to "GPS set" without leaving review.
+      let qaEl = null;
+      function _refreshQa() {
+        const next = _renderCaptureQa(shots, sideCount, metadata, { onGps: _handleGps });
+        if (qaEl && qaEl.parentNode) qaEl.parentNode.replaceChild(next, qaEl);
+        else topbar.appendChild(next);
+        qaEl = next;
+      }
+      async function _handleGps(btn) {
+        if (btn) { btn.disabled = true; btn.textContent = 'Locating…'; }
+        let gps = null;
+        try { gps = await _getPosition(); } catch (_) { gps = null; }
+        if (gps) { metadata.gps = gps; _refreshQa(); }
+        else if (btn) { btn.disabled = false; btn.textContent = 'GPS unavailable — retry'; }
+      }
+      _refreshQa();
+      panel.appendChild(topbar);
+
+      // ── Image strip (swipe carousel, fills remaining height) ──────────────
       const strip = _el('div', 'capture-reviewall__strip');
       for (let i = 0; i < sideCount; i++) {
         const shot = shots[i];
         const slide = _el('div', 'capture-reviewall__slide');
-        slide.appendChild(_el('span', 'capture-reviewall__badge', `Side ${i + 1}`));
         const img = _el('img', 'capture-reviewall__img');
         if (shot && shot.blob) {
           const url = URL.createObjectURL(shot.blob);
@@ -743,6 +779,20 @@ const CaptureFlow = (() => {
       }
       panel.appendChild(strip);
 
+      // ── Page dots (one per side; tap to jump) ─────────────────────────────
+      const dots = _el('div', 'capture-reviewall__dots');
+      const dotEls = [];
+      for (let i = 0; i < sideCount; i++) {
+        const dot = _el('button', 'capture-reviewall__dot' + (i === 0 ? ' is-active' : ''));
+        dot.type = 'button';
+        dot.setAttribute('aria-label', `Go to side ${i + 1}`);
+        dot.addEventListener('click', () => _scrollToSlide(i));
+        dots.appendChild(dot);
+        dotEls.push(dot);
+      }
+      panel.appendChild(dots);
+
+      // ── Bottom action bar ─────────────────────────────────────────────────
       const actions = _el('div', 'capture-actions capture-actions--review');
       const cancelBtn = _el('button', 'capture-btn capture-btn--ghost', 'Cancel');
       cancelBtn.type = 'button';
@@ -753,6 +803,31 @@ const CaptureFlow = (() => {
       panel.appendChild(actions);
 
       overlay.appendChild(panel);
+
+      // Keep the page label + active dot in sync with the swiped slide. Fully
+      // guarded so the headless dom-stub (no real layout/scroll) never throws.
+      let active = 0;
+      function _setActive(i) {
+        const clamped = Math.max(0, Math.min(sideCount - 1, i));
+        if (clamped === active) return;
+        active = clamped;
+        pageLabel.textContent = `Side ${clamped + 1} / ${sideCount}`;
+        dotEls.forEach((d, j) => d.classList.toggle('is-active', j === clamped));
+      }
+      function _scrollToSlide(i) {
+        const w = strip.clientWidth || 0;
+        try {
+          if (typeof strip.scrollTo === 'function') strip.scrollTo({ left: i * w, behavior: 'smooth' });
+          else strip.scrollLeft = i * w;
+        } catch (_) { try { strip.scrollLeft = i * w; } catch (__) {} }
+        _setActive(i);
+      }
+      if (typeof strip.addEventListener === 'function') {
+        strip.addEventListener('scroll', () => {
+          const w = strip.clientWidth || 1;
+          _setActive(Math.round((strip.scrollLeft || 0) / w));
+        });
+      }
 
       let settled = false;
       function done(val) {

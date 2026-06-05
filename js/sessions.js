@@ -236,8 +236,20 @@ const SessionsUI = (() => {
       safBtn.appendChild(safLabel);
       safBtn.addEventListener('click', async () => {
         const picked = await SafStore.pickFolder();
-        _toast(picked ? `Export folder: ${picked.name}` : 'No folder selected',
-          picked ? 'success' : 'info');
+        if (!picked) { _toast('No folder selected', 'info'); _renderHome(); return; }
+        // Resume: if the chosen folder already holds a PalmAnnotate/sessions.json,
+        // merge its sessions in so reopening a populated folder restores the work.
+        let resumed = 0;
+        try {
+          const idx = await SafStore.readJson('sessions.json');
+          if (idx && Array.isArray(idx.sessions) && window.SessionStore && SessionStore.importSessions) {
+            const r = await SessionStore.importSessions(idx.sessions);
+            resumed = (r && r.imported) || 0;
+          }
+        } catch (e) { console.warn('[SessionsUI] resume from folder failed:', e); }
+        _toast(resumed
+          ? `Export folder: ${picked.name} — resumed ${resumed} session(s)`
+          : `Export folder: ${picked.name}`, 'success');
         _renderHome();
       });
       scroll.appendChild(safBtn);
@@ -295,7 +307,9 @@ const SessionsUI = (() => {
     let cache = { varieties: [], bloks: [] };
     if (store) { try { cache = await store.getInputCache(); } catch (_) {} }
 
-    const scroll = _el('div', 'home__scroll');
+    // home__form scopes the tablet "centre at 620px" rule to the Start view so
+    // it never leaks into the session-detail header (which is full-width).
+    const scroll = _el('div', 'home__scroll home__form');
 
     const top = _el('header', 'sheet__top');
     const back = _iconBtn('sheet__icon-btn', 'back', 'Back');

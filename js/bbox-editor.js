@@ -277,7 +277,10 @@ const BBoxEditor = (() => {
 
     if (!_boxesVisible) return;
 
-    const lineW = Math.max(3, tr.scaleToCanvas(2.4));
+    // Box outline thickness. The canvas backing store is scaled by dpr, so the
+    // floor is dpr-aware (a bare "3" reads as ~1.5 CSS px on a 2x tablet — too
+    // faint over busy field photos). ~3.5 CSS px keeps boxes obvious.
+    const lineW = Math.max(3.5 * dpr, tr.scaleToCanvas(3.5));
 
     bboxes.forEach((b, idx) => {
       const tl = tr.imageToCanvas(b.x1, b.y1);

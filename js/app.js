@@ -359,7 +359,13 @@ document.addEventListener('DOMContentLoaded', () => {
     try { session = await SessionStore.getSession(sessionId); } catch (_) {}
     if (!session) { _showToast('Session unavailable; capture from the tree list.', 'error'); return; }
     const tree = await _capturePohon(session);
-    if (!tree) return; // cancelled
+    if (!tree) {
+      // Cancelled at the camera. Return to the owning session's tree list —
+      // NOT the previous tree's annotation (which is what staying put would
+      // show, since Next tree already saved + left that tree behind).
+      await _showSessionDetail(sessionId);
+      return;
+    }
     await _recordPohonInSession(sessionId, tree);
     _showToast(`Captured ${tree.name} (${tree.sides.length} views)`, 'success');
     await _openPohonByName(tree.name, sessionId);
@@ -1421,6 +1427,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function _activateTab(tabName) {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    // Reflect the active tab on <body> so the tablet shell can position chrome
+    // per-panel (e.g. nudge the carousel topbar below the docked tab bar).
+    ['carousel', 'annotation', 'dedup', 'results'].forEach(n =>
+      document.body.classList.toggle('crsl-tab-' + n, n === tabName));
     panels.forEach(p => p.classList.add('hidden'));
     const panel = document.getElementById('panel-' + tabName);
     if (panel) panel.classList.remove('hidden');
@@ -1440,6 +1450,18 @@ document.addEventListener('DOMContentLoaded', () => {
   tabs.forEach(tab => {
     tab.addEventListener('click', () => _activateTab(tab.dataset.tab));
   });
+
+  // The "×" on the revealed editor-tools bar hides it again (so the operator no
+  // longer has to reopen More → Editor tools just to dismiss it).
+  const tabsClose = document.getElementById('tabs-close');
+  if (tabsClose) {
+    tabsClose.addEventListener('click', () => {
+      document.body.classList.remove('crsl-show-tabs');
+      // Drop back to the touch Annotate surface so we never strand the operator
+      // on a hidden classic tab with no visible tab bar to switch away from.
+      if (document.body.classList.contains('crsl-shell')) _activateTab('carousel');
+    });
+  }
 
   // ── Side pills + Editor ────────────────────────────────────────────────────
 
@@ -1817,34 +1839,46 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }));
 
+  // Turn an export summary ({count,total,native,dirName}) into operator feedback.
+  // On native the files land on disk (the old blob download was a silent no-op),
+  // so confirm where; on web they download.
+  function _reportExport(label, summary) {
+    const s = summary || { count: 0, total: 0 };
+    if (!s.count) { _showToast(`${label}: nothing to export`, 'info'); return; }
+    if (s.native) _showToast(`${label}: ${s.count} file(s) saved to ${s.dirName}`, 'success');
+    else _showToast(`${label}: ${s.count} file(s) downloaded`, 'success');
+  }
+
   btnExportYolo.addEventListener('click', async () => {
     const session = ActiveSession.get();
     if (!session) return;
     if (!await _confirmQualityBeforeExport('Export YOLO')) return;
     // Use mismatch-aware export when results are computed
-    if (_lastResult) Results.exportYoloWithMismatch(session, _lastResult);
-    else Results.exportYolo(session);
+    const summary = _lastResult
+      ? await Results.exportYoloWithMismatch(session, _lastResult)
+      : await Results.exportYolo(session);
+    _reportExport('Export YOLO', summary);
   });
 
   btnExportJSON.addEventListener('click', async () => {
     const session = ActiveSession.get();
     if (!session) return;
     if (!await _confirmQualityBeforeExport('Export Session JSON')) return;
-    Results.exportJSON(session, _lastResult);
+    _reportExport('Export Session JSON', await Results.exportJSON(session, _lastResult));
   });
 
   btnExportCSV.addEventListener('click', async () => {
     const session = ActiveSession.get();
     if (!session) return;
     if (!await _confirmQualityBeforeExport('Export CSV')) return;
-    Results.exportCSV(session, _lastResult);
+    _reportExport('Export CSV', await Results.exportCSV(session, _lastResult));
   });
 
   btnExportIdentity.addEventListener('click', async () => {
     const session = ActiveSession.get();
     if (!session || !_lastResult) return;
     if (!await _confirmQualityBeforeExport('Export Identity JSON')) return;
-    Results.exportIdentityJSON(session, _lastResult);
+    _reportExport('Export Identity JSON', await Results.exportIdentityJSON(session, _lastResult));
   });
 
   // ── Global keyboard shortcuts ──────────────────────────────────────────────
@@ -1932,9 +1966,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // If the key/value sessions index is empty (e.g. app data was cleared) but the
+  // app-external PalmAnnotate/sessions.json survived, restore the sessions from
+  // it so the operator doesn't lose their session list. Best-effort, native-only.
+  async function _restoreSessionsFromDisk() {
+    if (!(Storage.isNative && Storage.isNative()) || !window.SessionStore) return;
+    try {
+      const existing = await SessionStore.getSessions();
+      if (existing && existing.length) return; // store already has sessions
+      const adapter = Storage.active && Storage.active();
+      const idx = adapter && adapter.readSessionsIndex ? await adapter.readSessionsIndex() : null;
+      if (idx && Array.isArray(idx.sessions) && idx.sessions.length && SessionStore.importSessions) {
+        const r = await SessionStore.importSessions(idx.sessions);
+        if (r && r.imported) console.info(`[Boot] resumed ${r.imported} session(s) from disk index`);
+      }
+    } catch (e) { console.warn('[Boot] restore sessions from disk failed:', e); }
+  }
+
   // Boot: repopulate captured pohon (native), then land on the Sessions home.
   async function _bootView() {
     try { await _restoreCapturedTrees(); } catch (e) { console.warn('[Boot] restore failed:', e); }
+    try { await _restoreSessionsFromDisk(); } catch (e) { console.warn('[Boot] restore sessions failed:', e); }
     await _showHome();
   }
   _bootView();

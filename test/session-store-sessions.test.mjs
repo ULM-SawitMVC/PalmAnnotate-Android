@@ -43,6 +43,48 @@ test('createSession locks variety+blok and seeds the auto-increment counter', as
   assert.equal(fetched.id, s.id);
 });
 
+test('importSessions merges new sessions and dedupes by id (resume from folder)', async () => {
+  const { SessionStore } = loadStore();
+  const a = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
+
+  const fromFolder = [
+    { id: a.id, variety: 'DAMIMAS', blok: 'A21B', trees: [] },     // already present → skipped
+    { id: 'sess_ext_1', variety: 'SUPER', blok: 'B03', trees: [{ name: 'SUPER_B03_0001' }] },
+    { id: 'sess_ext_2', variety: 'DURA', blok: 'C12', trees: [] },
+  ];
+  const r = await SessionStore.importSessions(fromFolder);
+  assert.equal(r.imported, 2, 'only the two genuinely-new sessions are imported');
+
+  const all = await SessionStore.getSessions();
+  assert.equal(all.length, 3);
+  assert.ok(all.find(s => s.id === 'sess_ext_1'));
+  // Idempotent: importing the same list again adds nothing.
+  const again = await SessionStore.importSessions(fromFolder);
+  assert.equal(again.imported, 0);
+});
+
+test('sessions index is mirrored to the folder on mutation when running native', async () => {
+  const indexWrites = [];
+  const safWrites = [];
+  const Storage = {
+    isNative: () => true,
+    active: () => ({ saveSessionsIndex: async (payload) => { indexWrites.push(payload); return { ok: true }; } }),
+  };
+  const SafStore = {
+    isSupported: () => true,
+    writeJson: async (relPath, obj) => { safWrites.push({ relPath, obj }); return { ok: true }; },
+  };
+  const quietConsole = { ...console, warn() {} };
+  const ctx = loadModule('js/persist/session-store.js', {
+    globals: { localStorage: makeLocalStorage(), console: quietConsole, Storage, SafStore },
+  });
+  await ctx.SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });
+
+  assert.ok(indexWrites.length >= 1, 'sessions.json written to app-external on create');
+  assert.equal(indexWrites.at(-1).sessions.length, 1);
+  assert.equal(safWrites.at(-1).relPath, 'sessions.json', 'mirrored to the SAF export folder too');
+});
+
 test('addTreeToSession appends pohon, dedupes by name, and advances nextId', async () => {
   const { SessionStore } = loadStore();
   const s = await SessionStore.createSession({ variety: 'DAMIMAS', blok: 'A21B' });

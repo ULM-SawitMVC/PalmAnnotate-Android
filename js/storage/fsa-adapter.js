@@ -341,6 +341,19 @@ const FsaAdapter = (() => {
     return side && side.labelFile ? side.labelFile.text() : null;
   }
 
+  // ── Exports (web: browser download) ─────────────────────────────────────────
+  // On the web the right "save" is a download; the platform-agnostic export path
+  // (results.js) calls this so it doesn't branch on platform itself.
+  async function saveExport(filename, content, mimeType) {
+    _download(filename, content, mimeType || 'application/octet-stream');
+    return { ok: true, method: 'download' };
+  }
+
+  // Web keeps the sessions index in localStorage (SessionStore); there is no
+  // folder index to mirror, so these are no-ops.
+  async function saveSessionsIndex() { return { ok: false, skipped: true }; }
+  async function readSessionsIndex() { return null; }
+
   return {
     isNative, isSupported,
     pickOutputDir, pickLabelsDir, clearLabelsDir, resetDirs,
@@ -350,6 +363,7 @@ const FsaAdapter = (() => {
     saveJSON, saveLabelFile, listOutputFiles, readJSON,
     persistDatasetImage, writeDatasetJson, deleteDatasetTree,
     readDatasetEntries, imageUrlFor, labelTextFor,
+    saveExport, saveSessionsIndex, readSessionsIndex,
   };
 })();
 

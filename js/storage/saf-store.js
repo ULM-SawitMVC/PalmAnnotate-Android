@@ -194,6 +194,26 @@ const SafStore = (() => {
     return _writeUtf8(relPath, text, 'writeText');
   }
 
+  /**
+   * Read + parse <folder>/PalmAnnotate/<relPath> as JSON, or null when there's
+   * no folder / file / parse fails. Used to resume sessions from a re-picked
+   * folder. Never throws.
+   */
+  async function readJson(relPath) {
+    const folder = await current();
+    if (!folder) return null;
+    const Saf = _plugin();
+    if (!Saf || typeof Saf.readFile !== 'function') return null;
+    try {
+      const r = await Saf.readFile({ treeUri: folder.uri, relPath: ROOT + relPath });
+      if (!r || r.ok !== true || r.data == null) return null;
+      return JSON.parse(String(r.data));
+    } catch (e) {
+      console.warn('[SafStore] readJson failed for', relPath, e);
+      return null;
+    }
+  }
+
   function _safeSegment(segment) {
     return String(segment || '')
       .trim()
@@ -243,7 +263,7 @@ const SafStore = (() => {
     return { ok: true, removed };
   }
 
-  return { isSupported, current, pickFolder, clearFolder, writeImage, writeBlob, writeJson, writeText, deleteDatasetTree };
+  return { isSupported, current, pickFolder, clearFolder, writeImage, writeBlob, writeJson, writeText, readJson, deleteDatasetTree };
 })();
 
 window.SafStore = SafStore;

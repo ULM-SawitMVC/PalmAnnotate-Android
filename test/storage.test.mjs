@@ -186,6 +186,39 @@ test('CapacitorAdapter writes JSON, labels, and captured data to the intended ap
   assert.equal(writes[3].encoding, 'utf8');
 });
 
+test('CapacitorAdapter.saveExport writes export files into PalmAnnotate/exports (not a blob download)', async () => {
+  const fsImpl = makeNativeFs();
+  const ctx = loadNativeStorage(fsImpl);
+
+  const res = await ctx.CapacitorAdapter.saveExport('DAMIMAS_A21B_0001_result.csv', 'tree_name,split\nX,field');
+  assert.equal(res.ok, true);
+  assert.equal(res.method, 'native');
+  assert.equal(res.dirName, 'PalmAnnotate/exports');
+
+  const write = fsImpl.calls.filter(([k]) => k === 'writeFile').map(([, a]) => a).pop();
+  assert.equal(write.path, 'PalmAnnotate/exports/DAMIMAS_A21B_0001_result.csv');
+  assert.equal(write.directory, 'EXTERNAL');
+  assert.equal(write.encoding, 'utf8');
+});
+
+test('CapacitorAdapter mirrors + reads back the sessions index (resume-from-disk)', async () => {
+  const fsImpl = makeNativeFs();
+  const ctx = loadNativeStorage(fsImpl);
+
+  // Missing on first run → null (no crash).
+  assert.equal(await ctx.CapacitorAdapter.readSessionsIndex(), null);
+
+  const payload = { version: 1, savedAt: '2026-06-05T00:00:00Z', sessions: [{ id: 'sess_1', variety: 'DAMIMAS' }] };
+  const saved = await ctx.CapacitorAdapter.saveSessionsIndex(payload);
+  assert.equal(saved.ok, true);
+
+  const write = fsImpl.calls.filter(([k]) => k === 'writeFile').map(([, a]) => a).pop();
+  assert.equal(write.path, 'PalmAnnotate/sessions.json');
+
+  const readBack = await ctx.CapacitorAdapter.readSessionsIndex();
+  assert.equal(readBack.sessions[0].id, 'sess_1');
+});
+
 test('Android dataset load reads Output TXT corrections outside dataset and prefers them over original labels', async () => {
   const fsImpl = makeNativeFs({ tree: true });
   const ctx = loadNativeStorage(fsImpl);

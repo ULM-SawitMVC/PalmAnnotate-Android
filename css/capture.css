@@ -14,7 +14,7 @@
   display: flex;
   align-items: stretch;
   justify-content: center;
-  background: rgba(8, 14, 8, 0.92);
+  background: var(--c-overlay);
   backdrop-filter: blur(10px) saturate(1.2);
   -webkit-backdrop-filter: blur(10px) saturate(1.2);
   color: var(--c-text);
@@ -145,9 +145,9 @@ select.capture-input {
 
 .capture-btn--primary {
   background: var(--c-accent);
-  color: var(--c-bg);
+  color: var(--c-on-accent);
 }
-.capture-btn--primary:hover:not(:disabled) { background: #c8f05a; }
+.capture-btn--primary:hover:not(:disabled) { filter: brightness(1.06); }
 
 .capture-btn--outline {
   background: transparent;
@@ -238,6 +238,38 @@ select.capture-input {
   transform: scale(1.25);
 }
 
+/* "Views" variant: each step carries a label (V1, V2…), so render real chips
+   instead of 12px dots — otherwise the label overflows the dot and collides
+   with the next one (the teardrop-looking mess). */
+.capture-progress__dots--views {
+  gap: var(--space-xs);
+}
+.capture-progress__dots--views .capture-dot {
+  width: auto;
+  height: auto;
+  min-width: 42px;
+  padding: 0.34rem 0.6rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--f-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--c-text-muted);
+  transform: none;
+}
+.capture-progress__dots--views .capture-dot--done,
+.capture-progress__dots--views .capture-dot--active {
+  color: var(--c-on-accent);
+  transform: none;
+}
+.capture-progress__dots--views .capture-dot--active {
+  box-shadow: 0 0 0 2px rgba(184, 224, 74, 0.28);
+}
+
 /* ---- Captured-frame preview (review step) ---- */
 .capture-preview {
   width: 100%;
@@ -298,7 +330,7 @@ select.capture-input {
   gap: var(--space-md);
   padding: var(--space-lg);
   padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), transparent);
+  background: linear-gradient(to top, var(--c-scrim), transparent);
 }
 
 /* Spacer mirrors the cancel button width so the shutter stays centered. */
@@ -626,7 +658,7 @@ select.capture-input {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #fff;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--c-scrim);
   border-radius: 999px;
 }
 
@@ -657,46 +689,137 @@ select.capture-input {
 /* ============================================
    End-of-capture review (swipe all shots)
    ============================================ */
-.capture-reviewall {
-  max-width: 760px;
+/* Immersive full-screen review: the photo fills the viewport; chrome floats in
+   a slim top strip + pinned bottom bar so the preview is large and uncropped and
+   nothing (Retake / Save) gets clipped. */
+.capture-reviewall--immersive {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.capture-reviewall__topbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  background: linear-gradient(180deg, var(--c-glass-strong), var(--c-glass-soft));
+  border-bottom: 1px solid var(--c-border);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+.capture-reviewall__pagelabel {
+  flex: 0 0 auto;
+  font-family: var(--f-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--c-text);
+  white-space: nowrap;
+}
+
+/* Compact the reused pre-save-check (details) so it sits inline in the strip. */
+.capture-reviewall__topbar .capture-qa {
+  flex: 0 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+}
+.capture-reviewall__topbar .capture-qa__summary { padding: 0.2rem 0.3rem; }
+.capture-reviewall__topbar .capture-qa__metrics { padding: 0 0.3rem 0.3rem; }
+.capture-reviewall__topbar .capture-qa__issues { padding: 0 0.3rem 0.3rem; }
+
+/* "Get GPS" recovery button inside the pre-save check. */
+.capture-qa__gps {
+  margin-top: 0.4rem;
+  min-height: 38px;
+  padding: 0 0.9rem;
+  font-size: 0.78rem;
+  border-radius: 10px;
 }
 
 .capture-reviewall__strip {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  gap: var(--space-md);
   overflow-x: auto;
+  overflow-y: hidden;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: var(--space-sm);
 }
 
 .capture-reviewall__slide {
+  position: relative;
   flex: 0 0 100%;
+  min-width: 0;
   scroll-snap-align: center;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: var(--space-sm);
-}
-
-.capture-reviewall__badge {
-  font-family: var(--f-mono);
-  font-size: 0.8rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--c-text-dim);
+  justify-content: center;
+  background: #000;
 }
 
 .capture-reviewall__img {
   width: 100%;
-  max-height: 56vh;
+  height: 100%;
+  max-height: none;
   object-fit: contain;
-  border-radius: var(--r-lg);
   background: #000;
-  border: 1px solid var(--c-border);
 }
 
+/* Retake floats over the photo (top-right) — out of flow, so it can't be
+   clipped by the strip the way the old in-column button was. */
 .capture-reviewall__retake {
-  align-self: center;
-  min-width: 140px;
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 1rem;
+  border-radius: 12px;
+  background: var(--c-glass);
+  border-color: var(--c-border-hover);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.capture-reviewall__dots {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: var(--space-sm) 0;
+}
+
+.capture-reviewall__dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--c-text-dim);
+  cursor: pointer;
+  transition: background 140ms var(--ease), transform 140ms var(--ease);
+}
+.capture-reviewall__dot.is-active {
+  background: var(--c-accent);
+  transform: scale(1.25);
+}
+
+/* Pinned bottom action bar (Cancel / Save). */
+.capture-reviewall--immersive .capture-actions--review {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-sm) var(--space-md)
+           calc(var(--space-sm) + env(safe-area-inset-bottom)) var(--space-md);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-glass-soft);
 }

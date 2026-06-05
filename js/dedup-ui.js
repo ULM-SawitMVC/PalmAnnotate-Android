@@ -48,7 +48,10 @@ const DedupUI = (() => {
   const MAG_ZOOM_MAX  = 8.0;
   const MAG_ZOOM_STEP = 0.3;
   let _magZoom = 3.8;          // adjustable via scroll wheel
-  let _magEnabled = true;
+  // Magnifier removed by request — the loupe got in the way during touch
+  // dedup. Disabled by default (matches the editor, which is also off); the
+  // show/hide plumbing stays so the public toggle API keeps working.
+  let _magEnabled = false;
   let _lastMagState = null;    // cached args for re-render on zoom change
 
   let _magEl = null, _magCanvas = null, _magCtx = null;
@@ -283,7 +286,8 @@ const DedupUI = (() => {
     const br = tr.imageToCanvas(img.naturalWidth, img.naturalHeight);
     ctx.drawImage(img, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
 
-    const lineW = Math.max(1.5, tr.scaleToCanvas(1.5));
+    // dpr-aware floor so boxes don't render hairline-thin on 2x tablet screens.
+    const lineW = Math.max(2.5 * dpr, tr.scaleToCanvas(2.5));
 
     // Bboxes
     bboxes.forEach((b, idx) => {

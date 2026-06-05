@@ -126,6 +126,43 @@ test('exportCSV(), exportJSON(), and exportIdentityJSON() produce expected downl
   assert.equal(identityJson.bunches.some(b => b.classMismatch), true);
 });
 
+test('exports write through the Storage adapter on native (not a no-op blob download)', async () => {
+  // Regression: the Android WebView ignores blob/anchor downloads, so the export
+  // buttons silently did nothing. They must route through Storage.saveExport.
+  const saved = [];
+  const safMirror = [];
+  const Storage = {
+    isNative: () => true,
+    active: () => ({
+      saveExport: async (filename, content) => {
+        saved.push({ filename, content });
+        return { ok: true, dirName: 'PalmAnnotate/exports' };
+      },
+    }),
+  };
+  const SafStore = {
+    isSupported: () => true,
+    writeText: async (relPath, content) => { safMirror.push({ relPath, content }); return { ok: true }; },
+  };
+  const { doc, URLStub, downloads } = makeDownloadDom();
+  const ActiveSession = { toJSON: () => ({ version: 1, treeName: 'DAMIMAS_A21B_0001', sides: [] }) };
+  const ctx = loadModule(['js/yolo-io.js', 'js/dedup-utils.js', 'js/results.js'], {
+    globals: { document: doc, URL: URLStub, Blob, ActiveSession, Storage, SafStore },
+  });
+  const session = makeSession();
+  const result = ctx.Results.compute(session);
+
+  const summary = await ctx.Results.exportCSV(session, result);
+  assert.equal(summary.native, true);
+  assert.equal(summary.count, 1);
+  assert.equal(downloads.length, 0, 'must not fall back to a blob download on native');
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].filename, 'DAMIMAS_A21B_0001_result.csv');
+  assert.match(saved[0].content, /DAMIMAS_A21B_0001,train,2,4/);
+  // Also mirrored into the SAF export folder under exports/.
+  assert.equal(safMirror[0].relPath, 'exports/DAMIMAS_A21B_0001_result.csv');
+});
+
 test('exportYoloWithMismatch() splits unresolved class-mismatch boxes into side-specific mismatch files', async () => {
   const { Results, downloads } = loadResults();
   const session = makeSession();

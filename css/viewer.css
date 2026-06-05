@@ -97,7 +97,7 @@
   cursor: pointer;
 }
 .depth-viewer__tab--active {
-  color: var(--c-bg);
+  color: var(--c-on-accent);
   background: var(--c-accent);
   border-color: transparent;
 }

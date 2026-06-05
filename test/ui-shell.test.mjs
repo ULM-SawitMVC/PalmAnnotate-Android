@@ -11,6 +11,9 @@ const style = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8')
 const carousel = readFileSync(new URL('../css/carousel.css', import.meta.url), 'utf8');
 const uxCompact = readFileSync(new URL('../css/ux-compact.css', import.meta.url), 'utf8');
 const capture = readFileSync(new URL('../css/capture.css', import.meta.url), 'utf8');
+const captureFlow = readFileSync(new URL('../js/capture/capture-flow.js', import.meta.url), 'utf8');
+const sessionsCss = readFileSync(new URL('../css/sessions.css', import.meta.url), 'utf8');
+const themeLight = readFileSync(new URL('../css/theme-light.css', import.meta.url), 'utf8');
 
 test('critical UI buttons exist and are wired to click handlers', () => {
   const requiredIds = [
@@ -146,6 +149,116 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(uxCompact, /body\.crsl-shell \.crsl-actionrow[\s\S]*flex-wrap:\s*nowrap/);
 });
 
+// Regression: on the tablet shell the revealed editor tabs (More → Editor tools)
+// used to be a `position: absolute` floating overlay. Tapping "Save Output Again"
+// rendered the Results stat cards into the panel, which overpainted/clipped the
+// floating bar — the tabs visually vanished and the operator could not switch
+// back to Annotate/Editor/Dedup. The fix docks the bar IN-FLOW so it always
+// reserves its own height and can never be overpainted by panel content.
+test('revealed editor tabs stay docked in-flow so they cannot vanish behind panel content', () => {
+  // Isolate the rule block for the revealed tab bar.
+  const m = uxCompact.match(/body\.crsl-shell\.crsl-show-tabs \.tabs\s*\{([\s\S]*?)\}/);
+  assert.ok(m, 'expected a body.crsl-shell.crsl-show-tabs .tabs rule');
+  const rule = m[1];
+
+  // It must be in-flow (relative), reserve space, and must NOT float (absolute),
+  // which is what let Results content paint over it.
+  assert.match(rule, /position:\s*relative/);
+  assert.doesNotMatch(rule, /position:\s*absolute/);
+  assert.match(rule, /flex:\s*0 0 auto/);
+
+  // Results must scroll within the remaining height and show a friendly empty
+  // state instead of a black void when nothing has been computed yet.
+  assert.match(uxCompact, /body\.crsl-shell #results-container[\s\S]*overflow-y:\s*auto/);
+  assert.match(uxCompact, /body\.crsl-shell #results-container:empty::after/);
+
+  // The shell tags <body> with the active tab so chrome can be positioned
+  // per-panel (e.g. nudging the carousel topbar below the docked bar).
+  assert.match(app, /classList\.toggle\('crsl-tab-'\s*\+\s*n/);
+});
+
+// Regression: the capture "Review views" screen used to be a narrow 760px card
+// with the photo capped at max-height:56vh + object-fit:contain — small,
+// letterboxed/cropped on a tablet, with the per-slide Retake clipped. It's now an
+// immersive full-bleed layout: the image strip flexes to fill, the photo is
+// uncropped, and Retake floats over the photo so it can't be clipped.
+test('capture Review views is immersive, full-bleed, and un-clips Retake', () => {
+  // Image strip fills the height between the top strip and the bottom bar.
+  const stripRule = capture.match(/\.capture-reviewall__strip\s*\{([\s\S]*?)\}/);
+  assert.ok(stripRule, 'expected a .capture-reviewall__strip rule');
+  assert.match(stripRule[1], /flex:\s*1/);
+
+  // The photo is large + uncropped, not capped at the old 56vh letterbox.
+  const imgRule = capture.match(/\.capture-reviewall__img\s*\{([\s\S]*?)\}/);
+  assert.ok(imgRule, 'expected a .capture-reviewall__img rule');
+  assert.match(imgRule[1], /object-fit:\s*contain/);
+  assert.doesNotMatch(imgRule[1], /max-height:\s*56vh/);
+
+  // Retake floats over the photo (absolute) so the strip can't clip it.
+  assert.match(capture, /\.capture-reviewall__retake\s*\{[\s\S]*?position:\s*absolute/);
+
+  // The immersive structure (top strip + page dots) is built in JS.
+  assert.match(captureFlow, /capture-reviewall--immersive/);
+  assert.match(captureFlow, /capture-reviewall__topbar/);
+  assert.match(captureFlow, /capture-reviewall__dots/);
+  // Button texts the capture-flow tests click by name are preserved.
+  assert.match(captureFlow, /'capture-btn capture-btn--outline capture-reviewall__retake', 'Retake'/);
+});
+
+// Sessions home / session-detail lists tile into a responsive card grid on wide
+// tablets instead of a tall single column wasting the horizontal space.
+test('sessions lists become a responsive card grid on wide tablets', () => {
+  assert.match(
+    sessionsCss,
+    /@media \(pointer: coarse\) and \(min-width: 720px\)[\s\S]*\.session-list,\s*\n\s*\.pohon-list\s*\{[\s\S]*?display:\s*grid[\s\S]*?auto-f(it|ill)/,
+  );
+});
+
+// Centralized theming: all glass/overlay/scrim/on-accent colours are design
+// tokens in style.css :root (single source of truth), and the light theme is a
+// pure token re-definition — no per-selector repainting. This is the structural
+// guard against colours drifting back into scattered hardcoded rgba().
+test('design colours are centralized tokens, and light mode flips them in one place', () => {
+  // The semantic tokens exist as a single source of truth.
+  for (const tok of ['--c-overlay', '--c-glass', '--c-glass-strong', '--c-glass-soft',
+                      '--c-scrim', '--c-on-media', '--c-on-accent']) {
+    assert.match(style, new RegExp(tok + ':\\s*'), `style.css :root must define ${tok}`);
+  }
+  // The chrome references the tokens instead of hardcoding dark rgba.
+  assert.match(style, /\.header\s*\{[\s\S]*background:\s*var\(--c-glass\)/);
+  assert.match(uxCompact, /\.carousel-topbar[\s\S]*background:\s*linear-gradient\([^)]*var\(--c-glass/);
+  assert.match(uxCompact, /\.crsl-classbar[\s\S]*background:\s*var\(--c-glass\)/);
+  assert.match(capture, /\.capture-overlay[\s\S]*background:\s*var\(--c-overlay\)/);
+
+  // Light theme: loaded last, scheme-declared, system-driven.
+  assert.match(html, /<link rel="stylesheet" href="css\/theme-light\.css">/);
+  assert.match(html, /<meta name="color-scheme" content="dark light">/);
+  assert.ok(
+    html.indexOf('css/theme-light.css') > html.indexOf('css/ux-compact.css'),
+    'theme-light.css must load after ux-compact.css',
+  );
+  assert.match(themeLight, /@media \(prefers-color-scheme: light\)/);
+  assert.match(themeLight, /color-scheme:\s*light/);
+  // It flips the tokens (surfaces, glass, on-accent) in one place …
+  assert.match(themeLight, /:root\s*\{[\s\S]*--c-bg:\s*#/);
+  assert.match(themeLight, /--c-glass:\s*rgba\(255/);
+  assert.match(themeLight, /--c-on-accent:\s*#ffffff/);
+  // Capture chrome follows light mode like everything else — NO forced-dark
+  // re-pin of the overlay (that made the whole capture screen read as dark mode
+  // even when the system was light). Only the photo/camera viewport stays black,
+  // which is a media backdrop in capture.css, not a theme token.
+  assert.doesNotMatch(themeLight, /\.capture-overlay\s*\{[\s\S]*--c-glass:\s*rgba\(7/);
+  assert.match(capture, /\.capture-reviewall__slide[\s\S]*background:\s*#000/);
+
+  // Toasts read off theme tokens (text = --c-text, type = token-coloured
+  // border) so they stay legible in light mode — no hardcoded light tints that
+  // vanish on the white light-mode surface.
+  assert.match(style, /\.toast\s*\{[\s\S]*color:\s*var\(--c-text\)/);
+  assert.match(style, /\.toast--success\s*\{\s*border-left:\s*3px solid var\(--c-emerald\)/);
+  assert.match(style, /\.toast--error\s*\{\s*border-left:\s*3px solid var\(--c-red\)/);
+  assert.doesNotMatch(style, /\.toast--success\s*\{[\s\S]*#bbf7d0/);
+});
+
 test('capture-first session shell is present and wired (home ⇄ editor routing)', () => {
   // index.html ships the home container, the header Home button, and loads the
   // Sessions stylesheet + controller.
@@ -204,4 +317,35 @@ test('dedup help and global shortcuts are exposed for keyboard and touch operato
   assert.match(app, /case 'r': case 'R':[\s\S]*ActiveSession\.runSuggestions\(\); DedupUI\.refresh\(\)/);
   assert.match(app, /case '1': case '2': case '3': case '4':[\s\S]*DedupUI\.changeSelectedClass\(e\.key\)/);
   assert.match(app, /case 'Delete': case 'Backspace':[\s\S]*DedupUI\.deleteSelected\(\)/);
+});
+
+test('revealed editor-tools bar has a close (x) control wired to hide it', () => {
+  // The operator could only dismiss the revealed tabs by reopening
+  // More -> Editor tools. There must be an explicit close button now.
+  assert.match(html, /id="tabs-close"/);
+  assert.match(app, /getElementById\('tabs-close'\)/);
+  assert.match(app, /classList\.remove\('crsl-show-tabs'\)/);
+  // CSS: hidden by default, shown only on the carousel shell when tabs revealed.
+  assert.match(uxCompact, /\.tab-close\s*\{\s*display:\s*none/);
+  assert.match(uxCompact, /body\.crsl-shell\.crsl-show-tabs \.tab-close/);
+});
+
+test('capture review pre-save check: honest issue count + GPS recovery button', () => {
+  // Badge must count the SHOWN (non-info) issues, not the raw list — otherwise a
+  // hidden info note made it read "2 issue(s)" with only one line explained.
+  assert.match(captureFlow, /const shown = \(report\.issues \|\| \[\]\)\.filter\(i => i\.level !== 'info'\)/);
+  assert.match(captureFlow, /shown\.length \? `\$\{shown\.length\} issue\(s\)` : 'OK'/);
+  // A "Get GPS" button appears on review when GPS is missing, wired to a fetch.
+  assert.match(captureFlow, /capture-qa__gps/);
+  assert.match(captureFlow, /'Get GPS'/);
+  assert.match(captureFlow, /async function _handleGps/);
+  assert.match(captureFlow, /metadata\.gps = gps; _refreshQa\(\)/);
+  // CSS for the button exists.
+  assert.match(capture, /\.capture-qa__gps/);
+});
+
+test('Next tree cancel returns to the session tree list, not the previous annotation', () => {
+  // Cancelling the camera during Next tree must navigate to the owning session
+  // detail, not strand the operator in the just-saved previous tree.
+  assert.match(app, /const tree = await _capturePohon\(session\);\s*\n\s*if \(!tree\) \{[\s\S]*_showSessionDetail\(sessionId\)/);
 });

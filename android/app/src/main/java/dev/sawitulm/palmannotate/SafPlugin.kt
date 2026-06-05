@@ -203,6 +203,60 @@ class SafPlugin : Plugin() {
         }
     }
 
+    // ── readFile ──────────────────────────────────────────────────────────────
+
+    /**
+     * Read <treeUri>/<relPath> as UTF-8 text. Resolves { ok:true, data } when the
+     * file exists, or { ok:false } when missing/unreadable (so JS can treat a
+     * never-exported folder as "nothing to resume"). Only small text files
+     * (sessions.json) are read this way.
+     */
+    @PluginMethod
+    fun readFile(call: PluginCall) {
+        val treeUriStr = call.getString("treeUri")
+        val relPath = call.getString("relPath")
+        if (treeUriStr.isNullOrBlank() || relPath.isNullOrBlank()) {
+            call.reject("treeUri and relPath are required")
+            return
+        }
+        try {
+            val tree = DocumentFile.fromTreeUri(context, Uri.parse(treeUriStr))
+            if (tree == null) {
+                call.resolve(JSObject().put("ok", false))
+                return
+            }
+            val segments = relPath.split('/').filter { it.isNotBlank() }
+            if (segments.isEmpty()) {
+                call.resolve(JSObject().put("ok", false))
+                return
+            }
+            var node: DocumentFile = tree
+            for (i in 0 until segments.size - 1) {
+                val child = node.findFile(segments[i])
+                if (child == null || !child.isDirectory) {
+                    call.resolve(JSObject().put("ok", false))
+                    return
+                }
+                node = child
+            }
+            val target = node.findFile(segments.last())
+            if (target == null || !target.isFile) {
+                call.resolve(JSObject().put("ok", false))
+                return
+            }
+            val text = context.contentResolver.openInputStream(target.uri)?.use { input ->
+                input.readBytes().toString(Charsets.UTF_8)
+            }
+            if (text == null) {
+                call.resolve(JSObject().put("ok", false))
+                return
+            }
+            call.resolve(JSObject().put("ok", true).put("data", text))
+        } catch (e: Exception) {
+            call.reject("readFile failed: ${e.message}", e)
+        }
+    }
+
     // ── deletePath ────────────────────────────────────────────────────────────
 
     /**

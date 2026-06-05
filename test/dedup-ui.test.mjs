@@ -237,3 +237,10 @@ test('DedupUI suggestion visibility and accept-all button drive session actions'
 
   assert.equal(calls.some(c => c.fn === 'confirmAllAutoForPair' && c.sideA === 0 && c.sideB === 1), true);
 });
+
+test('DedupUI magnifier is removed (disabled by default, no loupe on hover)', async () => {
+  // The operator asked for the loupe gone — it got in the way during touch
+  // dedup. It must start disabled so no .dedup-magnifier ever renders.
+  const { ctx } = loadDedup();
+  assert.equal(ctx.DedupUI.getMagnifierEnabled(), false);
+});
