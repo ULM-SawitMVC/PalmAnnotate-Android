@@ -294,13 +294,6 @@ const ActiveSession = (() => {
     addManualLink(link.sideA, link.bboxIdA, link.sideB, link.bboxIdB);
   }
 
-  function confirmAllAuto() {
-    if (!_state) return;
-    for (const [sideA, sideB] of ADJACENT_PAIRS) {
-      confirmAllAutoForPair(sideA, sideB);
-    }
-  }
-
   function confirmAllAutoForPair(sideA, sideB) {
     if (!_state) return;
     const autos = _state.suggestedLinks.filter(
@@ -641,7 +634,7 @@ const ActiveSession = (() => {
     loadTree, fromJSON, get,
     addBbox, removeBbox, updateBbox,
     setBboxClass, propagateClassFromBox, getClusterMembers, getMismatchedClusters,
-    runSuggestions, confirmLink, confirmAllAuto, confirmAllAutoForPair,
+    runSuggestions, confirmLink, confirmAllAutoForPair,
     rejectLink, addManualLink, removeConfirmedLink,
     isDirty, markClean, toJSON,
     get ADJACENT_PAIRS() { return ADJACENT_PAIRS; },
