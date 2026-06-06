@@ -7,6 +7,30 @@ adapters (`Storage`, capture sources, `Detector` runtime).
 
 > This file is the canonical agent guide. `AGENTS.md` points here — keep changes in this file.
 
+## Working contract (how to approach changes here)
+
+The operator has been burned by confident-but-wrong UI work. Follow this, especially for
+responsive / layout / device-facing changes:
+
+- **Don't overestimate or be overconfident.** State what is verified vs. assumed. If a change
+  can only be confirmed on the device, say so — don't claim it "works" or is "fixed" when it has
+  only been written and unit-tested. A green `npm test` checks source patterns, **not** real
+  on-device rendering.
+- **Research before building — you are expected to.** For non-trivial UI/UX, use the internet
+  (WebSearch / WebFetch) to find authoritative guidance (Material Design, Apple HIG, NN/g, Android
+  developer docs) and cite it, instead of guessing. Small phones (~9:16, 6–7″) and large→small
+  reflow are genuinely hard; ground decisions in real patterns: single-column reflow, ≥48dp tap
+  targets, ≥8dp spacing, ≤2 primary toolbar actions + overflow, progressive disclosure, full-bleed
+  canvas + floating tools, stack/swipe instead of side-by-side on phones.
+- **Test before declaring done.** Run `npm test`; add a guard test for the behaviour you changed.
+  Then build the APK (see the standing instruction below) — a red build is never "done".
+- **Avoid beginner mistakes:** mind the narrow CSS viewport the WebView reports in portrait
+  (~320–360px), don't absolutely-position controls that then overlap a centered cluster, keep one
+  source of truth (no duplicated markup per breakpoint), use the design tokens (no hardcoded
+  hex/rgba — see the styling section), and never hand-edit `www/` or `android/.../assets/public/`.
+- **When the user reverses a documented decision**, confirm the few genuine forks (AskUserQuestion),
+  then execute fully — don't silently half-apply.
+
 ## Big picture
 
 - **No build step for app logic.** The app is plain ES5/ES2017 **classic `<script>` files** (no
@@ -311,12 +335,25 @@ breakpoints or the Android manifest, the guard tests are `ui-shell.test.mjs` and
 - The carousel "More → Editor tools" reveals the docked tabs (`body.crsl-show-tabs`); the `#tabs-close`
   "×" hides them again. "Next tree" that's cancelled at the camera returns to the session tree list
   (`_showSessionDetail`), not the previous tree's annotation.
-- **Orientation:** Capture, Home and the touch **Annotate** carousel work in portrait; the width-hungry
-  **Annotation Editor / Deduplication / Results** tabs require landscape. A pure-CSS `#rotate-gate`
-  overlay (`@media (orientation: portrait)` + `body:not(.is-home).crsl-tab-{annotation,dedup,results}`)
-  covers them in portrait, with a "Use touch Annotate" escape button (`#rotate-gate-annotate`). There is
-  **no** `android:screenOrientation` lock (capture stays portrait 9:16). The **Deduplication** tab is the
-  left-right **2-pane** link surface (`.dedup-canvases` = `1fr 1fr` with a seam; tap a box on each side to link).
+- **Orientation / portrait phone support:** every surface now works on a normal 6–7″ phone in portrait
+  (~9:16). The `#rotate-gate` "rotate to landscape" overlay is **RETIRED** — its markup +
+  `#rotate-gate-annotate` escape button stay as an inert, always-hidden fallback, but it is no longer
+  shown in portrait. Instead the **PORTRAIT PHONE LAYER** at the bottom of `css/style.css`
+  (`@media (orientation: portrait) and (max-width: 768px)`) reflows the width-hungry tabs: the
+  **Annotation Editor** sidebar becomes a slim horizontal control strip over a canvas that fills the rest;
+  **Deduplication** stacks its two canvases **top/bottom** (`.dedup-canvases` → single column, seam runs
+  horizontally) — still tap a box on each to link, prev/next pair arrows kept; **Results** stacks into one
+  column. Landscape/tablet layouts above are untouched (additive). No `android:screenOrientation` lock
+  (capture stays portrait 9:16). Guard tests: `ui-shell.test.mjs` ("width-hungry surfaces reflow", "overflow
+  menu", "camera live controls wrap"). The research these reflows follow (Material app-bars / NN-g bottom
+  sheets / Android two-pane / adapt-desktop→mobile) is summarized in the work-contract below.
+- **Dense toolbars → `.overflow-menu`:** a responsive overflow component (Material "≤2 primary actions,
+  rest in overflow"). ONE source of truth: a `<details class="overflow-menu"><summary>More</summary>
+  <div class="overflow-menu__sheet">…</div></details>` whose wrapper boxes are `display: contents` on
+  wide/landscape (buttons flow inline in the toolbar exactly as before) and become a tap-to-open dropdown
+  only inside the portrait phone layer. Dedup's "Run Suggestions"/"Suggestions" live here; button **IDs are
+  preserved** so existing `app.js` listeners keep working. Add secondary actions here rather than widening
+  a toolbar. The touch **Annotate** carousel remains the primary portrait annotation surface.
 - **Export folder is required** before creating sessions/trees on native: `_ensureExportFolder()`
   (sessions.js) gates **New Session** and **Add Tree**, opening the SAF picker if none is set.
 - The global app header (`.header`) is **hidden on `body.is-home`** (home/start/session-detail) — those

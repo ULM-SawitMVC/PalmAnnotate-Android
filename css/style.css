@@ -1746,18 +1746,153 @@ kbd {
   line-height: 1.5;
 }
 
-/* Show the gate only in portrait, only on the landscape-required tabs, and never
-   on the Home/Session views (which are portrait-friendly and may leave a stale
-   crsl-tab-* class on <body>). */
-@media (orientation: portrait) {
-  body:not(.is-home).crsl-tab-annotation .rotate-gate,
-  body:not(.is-home).crsl-tab-dedup .rotate-gate,
-  body:not(.is-home).crsl-tab-results .rotate-gate {
-    display: flex;
-  }
-}
+/* Rotate gate RETIRED: Editor / Dedup / Results now reflow for portrait phones
+   (see "PORTRAIT PHONE LAYER" below), so the gate never shows. The markup +
+   `#rotate-gate-annotate` escape button are kept as an inert fallback only.
+   Previously this displayed the gate in portrait on those three tabs. */
 
 /* Unassigned-class warning accent on the editor's bbox counter — keeps boxes
    that still need a class visible to the operator. */
 #bbox-count.has-unassigned { color: var(--c-warn); font-weight: 600; }
 .crsl-sidelabel.has-unassigned { color: var(--c-warn); font-weight: 600; }
+
+/* ============================================================================
+   Responsive overflow menu  (Material app-bars: surface ≤2 primary actions,
+   collapse the rest into an overflow). One source of truth: the SAME buttons
+   render inline in a toolbar on wide/landscape screens and inside a "More"
+   dropdown on narrow portrait phones — no duplicated markup, IDs preserved.
+
+   Default (wide / landscape / desktop): the <details> and its sheet are
+   `display: contents`, so the wrapper boxes vanish and the action buttons flow
+   straight into the toolbar exactly as before. The "More" summary is hidden.
+   The portrait phone layer below flips this into a real dropdown.
+   ============================================================================ */
+.overflow-menu,
+.overflow-menu__sheet { display: contents; }
+.overflow-menu > summary { display: none; }
+.overflow-menu > summary::-webkit-details-marker { display: none; }
+.overflow-menu > summary::marker { content: ''; }
+
+/* ============================================================================
+   PORTRAIT PHONE LAYER — 6–7" phones, ~9:16
+   Researched reflow (Material app-bars/bottom, NN/g bottom sheets, Android
+   two-pane / SlidingPaneLayout, "adapt desktop→mobile"): single-column stack,
+   image-dominant canvases, dense toolbars collapse into a "More" overflow,
+   secondary content stays one tap away via progressive disclosure. The wide
+   landscape/tablet layouts above are NOT touched — this only applies in
+   portrait at phone widths.
+   ============================================================================ */
+@media (orientation: portrait) and (max-width: 768px) {
+
+  /* ---- Tabs: one comfortable, horizontally-scrolling row ---- */
+  .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab  { flex: 0 0 auto; min-height: 48px; }
+
+  /* ============ Annotation Editor: canvas dominates ============
+     The sidebar (class buttons, actions, QA, hints) becomes a slim control
+     strip across the top instead of a tall panel that steals image height. */
+  .annotation-layout { flex-direction: column; }
+
+  .annotation-sidebar {
+    width: 100%;
+    max-height: none;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    overflow-x: auto;
+    overflow-y: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--c-border);
+  }
+  .annotation-sidebar .side-pills {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: minmax(48px, auto);
+    flex: 0 0 auto;
+  }
+  .annotation-sidebar .editor-toolbar {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 0 0 auto;
+  }
+  .annotation-sidebar .toolbar-group { flex-direction: row; align-items: center; gap: 4px; }
+  .annotation-sidebar .toolbar-label { display: none; } /* colour/icon carry meaning; labels eat width */
+  .annotation-sidebar .class-buttons { grid-auto-flow: column; grid-template-columns: none; }
+  .annotation-sidebar .editor-hints,
+  .annotation-sidebar .file-info,
+  .annotation-sidebar .quality-card { display: none; } /* secondary — recoverable via touch Annotate / landscape */
+  .annotation-sidebar .bbox-stats { margin: 0 0 0 auto; flex: 0 0 auto; white-space: nowrap; }
+  .btn-class { min-width: 48px; min-height: 48px; }
+
+  .canvas-wrapper { flex: 1 1 auto; min-height: 0; }
+
+  /* ============ Dedup: stack the two views TOP / BOTTOM ============
+     (Android two-pane guidance: collapse side-by-side to one-at-a-time / stacked
+     on phones; keep the prev/next pair arrows.) */
+  .dedup-canvases {
+    grid-template-columns: 1fr;
+    grid-auto-rows: 1fr;
+  }
+  .dedup-canvases::before {            /* seam runs horizontally between the two */
+    top: 50%; bottom: auto;
+    left: 0; right: 0;
+    width: auto; height: 1px;
+  }
+  .dedup-canvas { min-height: 0; }
+  .dedup-canvas-block:first-child {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 215, 0, 0.55);
+  }
+  .dedup-canvas-block:first-child .dedup-canvas-info { left: 4px; right: auto; }
+
+  .dedup-header { flex-wrap: nowrap; gap: var(--space-xs); }
+  .dedup-panels { grid-template-columns: 1fr; max-height: 32dvh; }
+
+  /* ============ Results: single roomy column ============ */
+  .results-stats { flex-direction: column; }
+  .stat-card { width: 100%; }
+  .results-tables { grid-template-columns: 1fr; }
+
+  /* ---- Overflow "More" dropdown (activates only here) ---- */
+  .overflow-menu { display: inline-flex; position: relative; flex: 0 0 auto; }
+  .overflow-menu__sheet { display: none; }
+  .overflow-menu > summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0 0.8rem;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface-raised);
+    color: var(--c-text);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .overflow-menu[open] > .overflow-menu__sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 60;
+    min-width: 210px;
+    padding: 8px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface);
+    box-shadow: 0 18px 40px var(--c-scrim);
+  }
+  .overflow-menu__sheet > * {
+    width: 100%;
+    justify-content: flex-start;
+    min-height: 48px;
+  }
+}

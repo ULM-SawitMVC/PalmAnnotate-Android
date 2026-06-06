@@ -356,20 +356,45 @@ test('portrait: redundant global header is hidden on the home/session views', ()
   assert.match(style, /body\.is-home \.header\s*\{\s*display:\s*none/);
 });
 
-test('landscape-required tabs show a rotate gate in portrait', () => {
-  // Markup + an escape to the touch carousel.
+test('portrait phones: width-hungry surfaces reflow instead of a rotate gate', () => {
+  // The rotate gate is RETIRED — Editor/Dedup/Results now reflow for portrait.
+  // The markup + escape button stay as an inert, hidden fallback...
   assert.match(html, /id="rotate-gate"/);
-  assert.match(html, /id="rotate-gate-annotate"/);
-  assert.match(app, /getElementById\('rotate-gate-annotate'\)/);
-  assert.match(app, /_activateTab\('carousel'\)/);
-  // Hidden by default; shown only in portrait, only on the width-hungry classic
-  // tabs, never on the home views (which may leave a stale crsl-tab-* class).
   assert.match(style, /\.rotate-gate\s*\{[\s\S]*display:\s*none/);
-  assert.match(style, /@media \(orientation: portrait\)[\s\S]*body:not\(\.is-home\)\.crsl-tab-annotation \.rotate-gate/);
-  assert.match(style, /body:not\(\.is-home\)\.crsl-tab-dedup \.rotate-gate/);
-  assert.match(style, /body:not\(\.is-home\)\.crsl-tab-results \.rotate-gate/);
-  // The portrait-friendly Annotate carousel is NOT gated.
-  assert.doesNotMatch(style, /crsl-tab-carousel \.rotate-gate/);
+  // ...but it is NO LONGER force-shown in portrait on the classic tabs.
+  assert.doesNotMatch(style, /crsl-tab-annotation \.rotate-gate/);
+  assert.doesNotMatch(style, /crsl-tab-dedup \.rotate-gate/);
+
+  // Instead, a dedicated portrait phone layer reflows the surfaces.
+  assert.match(style, /@media \(orientation: portrait\) and \(max-width: 768px\)/);
+  const portrait = style.slice(style.indexOf('PORTRAIT PHONE LAYER'));
+  // Editor: sidebar stacks above a canvas that fills the rest.
+  assert.match(portrait, /\.annotation-layout\s*\{\s*flex-direction:\s*column/);
+  // Dedup: two canvases collapse to a single column (stack top/bottom).
+  assert.match(portrait, /\.dedup-canvases\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
+  // Results: stat cards stack into one column.
+  assert.match(portrait, /\.results-stats\s*\{\s*flex-direction:\s*column/);
+});
+
+test('responsive overflow menu: inline on wide, "More" dropdown on portrait', () => {
+  // Dense dedup actions live in ONE place (.overflow-menu): inline as a normal
+  // toolbar row on wide/landscape (display: contents), a dropdown on phones.
+  assert.match(html, /class="overflow-menu"/);
+  assert.match(html, /class="overflow-menu__sheet"/);
+  assert.match(style, /\.overflow-menu,\s*\n\s*\.overflow-menu__sheet\s*\{\s*display:\s*contents/);
+  assert.match(style, /\.overflow-menu > summary\s*\{\s*display:\s*none/);
+  const portrait = style.slice(style.indexOf('PORTRAIT PHONE LAYER'));
+  assert.match(portrait, /\.overflow-menu\[open\] > \.overflow-menu__sheet\s*\{[\s\S]*?position:\s*absolute/);
+});
+
+test('camera live controls wrap (no Cancel/Capture overlap) in narrow portrait', () => {
+  // On a ~320px-wide portrait WebView, Cancel + Find camera + Capture cannot
+  // share one row; they must WRAP, not pin Cancel absolute (which overlapped the
+  // centered Capture/Find-camera cluster — the 9:16 screenshot bug).
+  const pBlock = capture.slice(capture.indexOf('@media (orientation: portrait)'));
+  const pControls = pBlock.slice(0, pBlock.indexOf('@media (orientation: landscape)'));
+  assert.match(pControls, /\.capture-live__controls\s*\{[\s\S]*?flex-flow:\s*row wrap/);
+  assert.doesNotMatch(pControls, /\.capture-live__cancel\s*\{[^}]*position:\s*absolute/);
 });
 
 test('over-media capture controls use on-media tokens, not theme-flipping ones', () => {

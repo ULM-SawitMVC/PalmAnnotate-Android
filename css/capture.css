@@ -545,19 +545,27 @@ select.capture-input {
   border: 1px solid var(--c-on-media-border);
 }
 
-/* Phone / portrait: controls along the bottom, shutter centered. */
+/* Phone / portrait: controls along the bottom in a centered, WRAPPING row.
+   The WebView reports a narrow CSS width on this tablet (~320px in portrait), so
+   Cancel + Find camera + Capture cannot share one row. The old layout pinned
+   Cancel with position:absolute and centered the rest, which made the wide
+   "Find camera" + Capture cluster slide left UNDER the absolute Cancel (the
+   overlap in the 9:16 screenshot). Letting every control flow in a wrapping row
+   removes the overlap: when space runs out, Capture drops to its own line,
+   centered and prominent, with nothing stacked on top of anything else. */
 @media (orientation: portrait) {
   .capture-live__controls {
     left: 0;
     right: 0;
     bottom: 0;
-    flex-direction: row;
+    flex-flow: row wrap;
     justify-content: center;
-    padding: var(--space-lg);
-    padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+    align-items: center;
+    gap: var(--space-sm) var(--space-md);
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
     background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
   }
-  .capture-live__cancel { position: absolute; left: var(--space-lg); bottom: calc(var(--space-lg) + env(safe-area-inset-bottom)); }
 }
 
 /* Tablet / landscape: controls stacked on the right edge, shutter centered. */
