@@ -18,6 +18,9 @@ desktop.ini
 # Environment
 .env
 .env.local
+*.jks
+*.keystore
+android/keystore.properties
 
 # Debug logs
 debug.log

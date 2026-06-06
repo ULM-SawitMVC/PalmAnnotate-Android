@@ -3,6 +3,26 @@ apply plugin: 'com.android.application'
 // kotlin-gradle-plugin classpath is declared in the root build.gradle.
 apply plugin: 'kotlin-android'
 
+def signingProperties = new Properties()
+def signingPropertiesFile = rootProject.file('keystore.properties')
+if (signingPropertiesFile.exists()) {
+    signingPropertiesFile.withInputStream { signingProperties.load(it) }
+}
+
+def signingValue = { String envName, String propertyName ->
+    System.getenv(envName) ?: signingProperties.getProperty(propertyName)
+}
+def releaseKeystorePath = signingValue('PA_KEYSTORE', 'storeFile')
+def releaseStorePassword = signingValue('PA_KEYSTORE_PASS', 'storePassword')
+def releaseKeyAlias = signingValue('PA_KEY_ALIAS', 'keyAlias')
+def releaseKeyPassword = signingValue('PA_KEY_PASS', 'keyPassword')
+def releaseSigningConfigured = [
+    releaseKeystorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { it }
+
 android {
     namespace "dev.sawitulm.palmannotate"
     compileSdk rootProject.ext.compileSdkVersion
@@ -10,8 +30,8 @@ android {
         applicationId "dev.sawitulm.palmannotate"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode = (System.getenv('PA_VERSION_CODE') ?: '1').toInteger()
+        versionName = System.getenv('PA_VERSION_NAME') ?: '1.0'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -19,39 +39,41 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // ── Release signing (DISABLED template) ──────────────────────────────────
-    // To ship a signed release APK/AAB, generate a keystore and enable this block.
-    // Full step-by-step (keytool command + env vars): docs/android-build.md.
-    //
-    // The config reads credentials from environment variables so no secrets are
-    // committed. Set these in your shell/CI before `./gradlew assembleRelease`:
-    //   PA_KEYSTORE        absolute path to the .keystore/.jks (defaults to
-    //                      android/app/release.keystore when unset)
-    //   PA_KEYSTORE_PASS   keystore (store) password
-    //   PA_KEY_ALIAS       key alias inside the keystore
-    //   PA_KEY_PASS        key password (often the same as the store password)
-    //
-    // signingConfigs {
-    //     release {
-    //         storeFile file(System.getenv('PA_KEYSTORE') ?: 'release.keystore')
-    //         storePassword System.getenv('PA_KEYSTORE_PASS')
-    //         keyAlias System.getenv('PA_KEY_ALIAS')
-    //         keyPassword System.getenv('PA_KEY_PASS')
-    //     }
-    // }
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Uncomment the line below (and the signingConfigs block above) to
-            // sign release builds. See docs/android-build.md.
-            // signingConfig signingConfigs.release
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     // Match the Java 17 target Capacitor sets in capacitor.build.gradle so the
     // Kotlin and Java compilers agree on the JVM bytecode level.
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def buildsRelease = graph.allTasks.any {
+        it.name == 'assembleRelease' || it.name == 'bundleRelease'
+    }
+    if (buildsRelease && !releaseSigningConfigured) {
+        throw new GradleException(
+            'Release signing is not configured. Set PA_KEYSTORE, PA_KEYSTORE_PASS, ' +
+            'PA_KEY_ALIAS, and PA_KEY_PASS, or create android/keystore.properties.'
+        )
     }
 }
 

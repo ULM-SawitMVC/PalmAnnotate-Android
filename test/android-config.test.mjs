@@ -57,6 +57,22 @@ test('Android SDK and plugin dependencies cover current debug APK requirements',
   assert.match(appGradle, /implementation fileTree\(dir: 'libs', include: \['\*\.aar'\]\)/);
 });
 
+test('Android release builds require external signing credentials', () => {
+  const appGradle = read('android/app/build.gradle');
+  const rootIgnore = read('.gitignore');
+  const androidIgnore = read('android/.gitignore');
+
+  assert.match(appGradle, /PA_KEYSTORE/);
+  assert.match(appGradle, /PA_KEYSTORE_PASS/);
+  assert.match(appGradle, /PA_KEY_ALIAS/);
+  assert.match(appGradle, /PA_KEY_PASS/);
+  assert.match(appGradle, /signingConfig signingConfigs\.release/);
+  assert.match(appGradle, /Release signing is not configured/);
+  assert.match(rootIgnore, /\*\.jks/);
+  assert.match(rootIgnore, /android\/keystore\.properties/);
+  assert.match(androidIgnore, /keystore\.properties/);
+});
+
 test('Android manifest remains orientation-flexible for phone and tablet aspect ratios', () => {
   const manifest = read('android/app/src/main/AndroidManifest.xml');
 

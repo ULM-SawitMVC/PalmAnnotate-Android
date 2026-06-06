@@ -90,8 +90,8 @@ sideloading onto a test tablet, not for distribution.
 
 ## Build a release APK / AAB
 
-A release build is **unsigned by default** in this project (the signing config is
-a commented template — see below). Once signing is enabled:
+A release build requires signing credentials from environment variables or the
+Git-ignored `android/keystore.properties` file:
 
 ```bash
 cd android
@@ -99,12 +99,10 @@ cd android
 ./gradlew bundleRelease          # AAB -> app/build/outputs/bundle/release/ (Play)
 ```
 
-## Generate a keystore and enable signing
+## Generate a keystore and configure signing
 
-`android/app/build.gradle` contains a **commented** `signingConfigs { release { … } }`
-template plus a commented `signingConfig signingConfigs.release` line inside
-`buildTypes.release`. The template reads credentials from environment variables so
-**no secrets are committed**.
+`android/app/build.gradle` reads credentials externally so no secrets are
+committed. Release tasks stop with a clear error when credentials are absent.
 
 ### 1. Generate a keystore
 
@@ -152,18 +150,45 @@ $env:PA_KEY_ALIAS     = "palmannotate"
 $env:PA_KEY_PASS      = "********"
 ```
 
-### 3. Uncomment the signing config
+### 3. Optional local properties file
 
-In `android/app/build.gradle`, uncomment:
+Instead of setting environment variables for every local build, create the
+Git-ignored `android/keystore.properties`:
 
-1. the entire `signingConfigs { release { … } }` block (above `buildTypes`), and
-2. the `signingConfig signingConfigs.release` line inside `buildTypes.release`.
+```properties
+storeFile=C:/Users/your-user/PalmAnnotate-release.jks
+storePassword=********
+keyAlias=palmannotate
+keyPassword=********
+```
 
 Then `./gradlew assembleRelease` produces a signed APK. Verify with:
 
 ```bash
 $ANDROID_HOME/build-tools/<version>/apksigner verify --print-certs \
   android/app/build/outputs/apk/release/app-release.apk
+```
+
+## Automated GitHub Release
+
+`.github/workflows/android-release.yml` runs when a tag matching `v*` is pushed.
+It tests the project, syncs the Capacitor assets, builds a signed release APK,
+and attaches it to a new GitHub Release.
+
+The repository must have these GitHub Actions secrets:
+
+| Secret | Value |
+|---|---|
+| `PA_KEYSTORE_BASE64` | Base64 encoding of the release `.jks` file |
+| `PA_KEYSTORE_PASS` | Keystore password |
+| `PA_KEY_ALIAS` | `palmannotate` |
+| `PA_KEY_PASS` | Key password |
+
+Publish a version with:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ## Current Android native integrations
