@@ -42,7 +42,7 @@ test('Android app id, namespace, strings, and Capacitor config stay aligned', ()
   assert.match(strings, /<string name="package_name">dev\.sawitulm\.palmannotate<\/string>/);
 });
 
-test('Android SDK and plugin dependencies cover current debug APK requirements', () => {
+test('Android SDK and plugin dependencies cover the optimized debug APK', () => {
   const variables = read('android/variables.gradle');
   const appGradle = read('android/app/build.gradle');
   const pkg = JSON.parse(read('package.json'));
@@ -54,7 +54,13 @@ test('Android SDK and plugin dependencies cover current debug APK requirements',
   assert.equal(pkg.dependencies['@capacitor/filesystem'].startsWith('^6.'), true);
   assert.equal(pkg.dependencies['@capacitor/camera'].startsWith('^6.'), true);
   assert.equal(pkg.dependencies['@capacitor/preferences'].startsWith('^6.'), true);
-  assert.match(appGradle, /implementation fileTree\(dir: 'libs', include: \['\*\.aar'\]\)/);
+  assert.match(appGradle, /abiFilters 'arm64-v8a'/);
+  assert.match(appGradle, /exclude 'jni\/armeabi-v7a\/\*\*'/);
+  assert.match(appGradle, /exclude 'assets\/armeabi-v7a\/\*\*'/);
+  assert.match(appGradle, /exclude 'assets\/arm64-v8a\/extensions\/firmwareupdater\/\*\*'/);
+  assert.match(appGradle, /implementation slimOrbbecFiles/);
+  assert.match(appGradle, /debug \{[\s\S]*minifyEnabled true[\s\S]*shrinkResources true/);
+  assert.match(appGradle, /release \{[\s\S]*minifyEnabled true[\s\S]*shrinkResources true/);
 });
 
 test('Android release builds require external signing credentials', () => {

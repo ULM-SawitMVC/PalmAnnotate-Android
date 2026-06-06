@@ -19,3 +19,14 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor discovers plugin methods through annotations and reflection.
+-keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+-keepclassmembers class * {
+    @com.getcapacitor.PluginMethod <methods>;
+}
+
+# Preserve native bridge plugins and Orbbec SDK/JNI names.
+-keep class dev.sawitulm.palmannotate.OrbbecPlugin { *; }
+-keep class dev.sawitulm.palmannotate.SafPlugin { *; }
+-keep class com.orbbec.** { *; }

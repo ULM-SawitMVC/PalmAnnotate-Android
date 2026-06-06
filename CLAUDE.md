@@ -1,3 +1,19 @@
+﻿# Current APK build direction: arm64 + size optimization
+
+The Android build is intentionally optimized for the current 64-bit ARM device fleet:
+
+- APK ABI is restricted to `arm64-v8a`; `armeabi-v7a` is not packaged.
+- R8 code minification and Android resource shrinking are enabled for debug and release.
+- Gradle generates a slim Orbbec AAR from the untouched vendor AAR. The generated AAR removes
+  the 32-bit libraries and the unused Orbbec firmware-updater extension.
+- The original vendor AAR remains in `android/app/libs/`, so these exclusions are reversible.
+
+Verified on June 6, 2026: `app-debug.apk` decreased from `89,953,872` bytes (85.8 MiB) to
+`42,259,713` bytes (40.3 MiB), a reduction of about **52.0%**. The optimized APK installed and
+launched successfully on the Xiaomi Pad 6 with `primaryCpuAbi=arm64-v8a`, with no startup crash.
+Any future Orbbec SDK upgrade must preserve these exclusions and retest USB detection, RGB/depth
+preview, capture, stop/reopen, and cable detach/reconnect on a physical Orbbec camera.
+
 # PalmAnnotate — Agent Guide
 
 Oil-palm fresh-fruit-bunch (FFB) image annotation tool. **Dual-target from one codebase:**
