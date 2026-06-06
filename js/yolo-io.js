@@ -3,16 +3,30 @@
 // Class mapping: YOLO classId → display name (Damimas dataset: 0-indexed, 0=B1…3=B4)
 const CLASS_MAP = { 0: 'B1', 1: 'B2', 2: 'B3', 3: 'B4' };
 
+// Unassigned sentinel: detected/newly-drawn boxes start WITHOUT a class so the
+// expert assigns one explicitly (no default-B2 bias). classId -1 / name 'U' is
+// rendered grey and is EXCLUDED from YOLO .txt (which needs an integer 0–3) —
+// it is still kept in the Output JSON so unassigned boxes are never lost.
+const UNASSIGNED_CLASS_ID = -1;
+const UNASSIGNED_CLASS_NAME = 'U';
+
 // Display colors per class (matches CanvasRenderer.getClassColor)
 const CLASS_COLORS = {
   B1: '#3b82f6',
   B2: '#ef4444',
   B3: '#f59e0b',
   B4: '#8b5cf6',
+  U:  '#9ca3af', // unassigned — neutral grey
 };
 
-// Valid annotation class IDs (0–3 in this dataset)
+// Valid annotation class IDs (0–3 in this dataset). Unassigned (-1) is NOT here,
+// so parse rejects it and YOLO serialize skips it.
 const VALID_CLASS_IDS = new Set([0, 1, 2, 3]);
+
+// Whether a box carries a real assigned class (vs. the unassigned sentinel).
+function isAssignedClassId(classId) {
+  return VALID_CLASS_IDS.has(classId);
+}
 
 /**
  * Parse a YOLO label file text into pixel-coordinate bbox objects.
@@ -60,7 +74,11 @@ function parseYoloLabel(text, imgW, imgH) {
  * @returns {string}       - YOLO label file content
  */
 function toYoloFormat(bboxes, imgW, imgH) {
-  return bboxes.map(b => {
+  // Unassigned ('U' / classId -1) boxes are skipped: YOLO needs an integer class
+  // 0–3 and writing a 5th class would corrupt the B1–B4 dataset. They survive in
+  // the Output JSON instead (see OutputSchema). Callers can diff counts to know
+  // how many were dropped.
+  return bboxes.filter(b => isAssignedClassId(b.classId)).map(b => {
     const cx = ((b.x1 + b.x2) / 2) / imgW;
     const cy = ((b.y1 + b.y2) / 2) / imgH;
     const w  = (b.x2 - b.x1) / imgW;

@@ -178,7 +178,9 @@ const ActiveSession = (() => {
   function setBboxClass(sideIndex, bboxId, classId, opts = {}) {
     if (!_state) return [];
     const propagate = opts.propagate !== false;
-    const className = (typeof CLASS_MAP !== 'undefined' && CLASS_MAP[classId]) || ('C' + classId);
+    const className = (typeof CLASS_MAP !== 'undefined' && CLASS_MAP[classId])
+      || ((typeof UNASSIGNED_CLASS_ID !== 'undefined' && classId === UNASSIGNED_CLASS_ID)
+            ? UNASSIGNED_CLASS_NAME : ('C' + classId));
     const targets = propagate
       ? getClusterMembers(sideIndex, bboxId)
       : [{ sideIndex, bboxId }];

@@ -820,6 +820,7 @@ const CarouselUI = (() => {
     if (delBtn) delBtn.disabled = editing ? false : !hasSel;
 
     // Selected-bbox readout / armed-link prompt.
+    _selInfoEl.classList.remove('has-unassigned');
     if (_linkSource) {
       _selInfoEl.textContent = `Linking from ${_sideLabel(_linkSource.sideIndex)} — tap target`;
     } else if (!editing && hasSel) {
@@ -828,7 +829,15 @@ const CarouselUI = (() => {
       const bbox = side && side.bboxes.find(b => b.id === selected);
       _selInfoEl.textContent = `${_sideLabel(_sideIndex)} · ${bbox ? bbox.className : ''} selected`;
     } else {
-      _selInfoEl.textContent = `${_sideLabel(_sideIndex)} · ${_sideCount()} sides`;
+      // Tree-wide count of boxes still without a class ('U'); flag it so the
+      // operator classes them before saving (they are skipped from YOLO).
+      const s = _session();
+      const unassigned = s ? s.sides.reduce((n, sd) =>
+        n + sd.bboxes.filter(b => !(b.classId >= 0 && b.classId <= 3)).length, 0) : 0;
+      _selInfoEl.textContent = unassigned
+        ? `${_sideLabel(_sideIndex)} · ${unassigned} unassigned`
+        : `${_sideLabel(_sideIndex)} · ${_sideCount()} sides`;
+      _selInfoEl.classList.toggle('has-unassigned', unassigned > 0);
     }
   }
 

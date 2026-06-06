@@ -192,7 +192,10 @@ const SessionsUI = (() => {
     const primary = _el('button', 'home__primary');
     primary.type = 'button';
     primary.innerHTML = ICONS.plus + '<span>New Session</span>';
-    primary.addEventListener('click', () => _renderStart());
+    primary.addEventListener('click', async () => {
+      if (!(await _ensureExportFolder())) return;
+      _renderStart();
+    });
     scroll.appendChild(primary);
 
     // Recent / resumable sessions.
@@ -235,21 +238,7 @@ const SessionsUI = (() => {
       safLabel.textContent = `Export folder: ${cur ? cur.name : 'Not set'}`;
       safBtn.appendChild(safLabel);
       safBtn.addEventListener('click', async () => {
-        const picked = await SafStore.pickFolder();
-        if (!picked) { _toast('No folder selected', 'info'); _renderHome(); return; }
-        // Resume: if the chosen folder already holds a PalmAnnotate/sessions.json,
-        // merge its sessions in so reopening a populated folder restores the work.
-        let resumed = 0;
-        try {
-          const idx = await SafStore.readJson('sessions.json');
-          if (idx && Array.isArray(idx.sessions) && window.SessionStore && SessionStore.importSessions) {
-            const r = await SessionStore.importSessions(idx.sessions);
-            resumed = (r && r.imported) || 0;
-          }
-        } catch (e) { console.warn('[SessionsUI] resume from folder failed:', e); }
-        _toast(resumed
-          ? `Export folder: ${picked.name} — resumed ${resumed} session(s)`
-          : `Export folder: ${picked.name}`, 'success');
+        await _pickExportFolder();
         _renderHome();
       });
       scroll.appendChild(safBtn);
@@ -293,6 +282,44 @@ const SessionsUI = (() => {
     });
     li.appendChild(del);
     return li;
+  }
+
+  // Open the system folder picker, remember it as the Export folder, and resume
+  // any sessions already stored in it. Returns the picked folder, or null when
+  // cancelled / unavailable. Shared by the Export-folder row and the create gate.
+  async function _pickExportFolder() {
+    if (!(window.SafStore && SafStore.pickFolder)) return null;
+    const picked = await SafStore.pickFolder();
+    if (!picked) { _toast('No folder selected', 'info'); return null; }
+    // Resume: if the chosen folder already holds a PalmAnnotate/sessions.json,
+    // merge its sessions in so reopening a populated folder restores the work.
+    let resumed = 0;
+    try {
+      const idx = await SafStore.readJson('sessions.json');
+      if (idx && Array.isArray(idx.sessions) && window.SessionStore && SessionStore.importSessions) {
+        const r = await SessionStore.importSessions(idx.sessions);
+        resumed = (r && r.imported) || 0;
+      }
+    } catch (e) { console.warn('[SessionsUI] resume from folder failed:', e); }
+    _toast(resumed
+      ? `Export folder: ${picked.name} — resumed ${resumed} session(s)`
+      : `Export folder: ${picked.name}`, 'success');
+    return picked;
+  }
+
+  // Gate for creating sessions/trees: every captured tree must mirror into a
+  // browsable Export folder, so on native we require one to be set first. When
+  // it isn't, open the picker inline so the operator can set it without hunting
+  // for the row. Returns true when an Export folder is in place (or when SAF
+  // doesn't apply — web), false when the operator declined to pick one.
+  async function _ensureExportFolder() {
+    if (!(window.SafStore && SafStore.isSupported && SafStore.isSupported())) return true;
+    let cur = null;
+    try { cur = await SafStore.current(); } catch (_) {}
+    if (cur) return true;
+    _toast('Select an Export folder first', 'error');
+    const picked = await _pickExportFolder();
+    return !!picked;
   }
 
   // ── Start-Session view ──────────────────────────────────────────────────────
@@ -461,7 +488,10 @@ const SessionsUI = (() => {
     const addBtn = _el('button', 'sheet__cta');
     addBtn.type = 'button';
     addBtn.innerHTML = ICONS.plus + '<span>Add Tree</span>';
-    addBtn.addEventListener('click', () => _addPohon(id, addBtn));
+    addBtn.addEventListener('click', async () => {
+      if (!(await _ensureExportFolder())) return;
+      _addPohon(id, addBtn);
+    });
     scroll.appendChild(addBtn);
 
     // Tree list.

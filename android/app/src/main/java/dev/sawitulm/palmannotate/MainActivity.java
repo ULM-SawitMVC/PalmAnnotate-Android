@@ -6,12 +6,18 @@ import android.os.Bundle;
 import android.webkit.PermissionRequest;
 
 import androidx.activity.OnBackPressedCallback;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
 
 public class MainActivity extends BridgeActivity {
+
+    // A WebView camera request awaiting the runtime CAMERA permission dialog.
+    private PermissionRequest pendingCameraRequest;
+    private static final int RC_WEBVIEW_CAMERA = 0x7C0;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // Register native plugins BEFORE the Capacitor bridge initialises.
@@ -44,12 +50,15 @@ public class MainActivity extends BridgeActivity {
      *
      * We take over the camera-only WebView request and resolve it ourselves,
      * never going through that buggy request path: grant it directly when the
-     * runtime permission is already held, otherwise deny (the web capture flow
-     * then falls back to the file picker). The runtime CAMERA permission is
-     * obtained up-front, through the Camera plugin's own correct permission API,
-     * by the JS capture flow (CaptureFlow._ensureCameraPermission) before any
-     * getUserMedia call — so by the time this fires the permission is held and we
-     * grant immediately: one clean prompt, no crash, camera works first try.
+     * runtime permission is already held; otherwise request the runtime CAMERA
+     * permission ONCE through the Activity and grant/deny this WebView request
+     * from {@link #onRequestPermissionsResult}. (The previous version denied
+     * immediately when the permission wasn't yet held, which forced the operator
+     * to back out, re-enter capture, and grant a SECOND time before the camera
+     * streamed.) The JS flow still pre-grants up-front via the Camera plugin, so
+     * the common path hits the has-permission branch and grants with no second
+     * dialog; the request-on-demand branch is the safety net for the race where
+     * the pre-grant hasn't propagated yet. Either way the camera works first try.
      * Non-camera requests fall through to Capacitor's default handling.
      */
     private void installCameraPermissionWorkaround() {
@@ -74,18 +83,49 @@ public class MainActivity extends BridgeActivity {
                     boolean hasCamera = ContextCompat.checkSelfPermission(
                         MainActivity.this, Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED;
+                    if (hasCamera) {
+                        try { request.grant(resources); }
+                        catch (IllegalStateException alreadySettled) { /* never crash */ }
+                        return;
+                    }
+                    // Not held yet — request it ONCE through the Activity and grant
+                    // this WebView request from the result, instead of denying and
+                    // making the operator re-enter capture to grant a second time.
+                    pendingCameraRequest = request;
                     try {
-                        if (hasCamera) {
-                            request.grant(resources);
-                        } else {
-                            request.deny();
-                        }
-                    } catch (IllegalStateException alreadySettled) {
-                        // Defensive: never let a double-resolve crash the Activity.
+                        ActivityCompat.requestPermissions(
+                            MainActivity.this,
+                            new String[]{ Manifest.permission.CAMERA },
+                            RC_WEBVIEW_CAMERA
+                        );
+                    } catch (Exception e) {
+                        pendingCameraRequest = null;
+                        try { request.deny(); }
+                        catch (IllegalStateException alreadySettled) { /* never crash */ }
                     }
                 });
             }
         });
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == RC_WEBVIEW_CAMERA) {
+            PermissionRequest req = pendingCameraRequest;
+            pendingCameraRequest = null;
+            boolean granted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (req != null) {
+                try {
+                    if (granted) req.grant(req.getResources());
+                    else req.deny();
+                } catch (IllegalStateException alreadySettled) {
+                    // Defensive: never let a double-resolve crash the Activity.
+                }
+            }
+            return;
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     }
 
     private void handlePalmAnnotateBack() {

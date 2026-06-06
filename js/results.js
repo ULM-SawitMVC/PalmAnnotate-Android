@@ -31,6 +31,13 @@ const Results = (() => {
 
     const rawCount = allBboxes.length;
 
+    // Boxes the expert hasn't assigned a class to yet (the 'U' sentinel). These
+    // are kept in the Output JSON but excluded from YOLO .txt; surface the count
+    // so the UI can warn before save and YOLO export can report what it dropped.
+    const _assigned = (cid) => (typeof isAssignedClassId !== 'undefined')
+      ? isAssignedClassId(cid) : (cid >= 0 && cid <= 3);
+    const unassignedCount = allBboxes.reduce((n, b) => n + (_assigned(b.classId) ? 0 : 1), 0);
+
     // Build union-find from confirmed links
     const allIds = allBboxes.map(b => b._nodeId);
     const allIdSet = new Set(allIds);
@@ -70,7 +77,7 @@ const Results = (() => {
       else classCounts.other++;
     }
 
-    return { uniqueCount, rawCount, linkedCount, classCounts, sideCounts, clusters };
+    return { uniqueCount, rawCount, linkedCount, unassignedCount, classCounts, sideCounts, clusters };
   }
 
   // ── Display ────────────────────────────────────────────────────────────────

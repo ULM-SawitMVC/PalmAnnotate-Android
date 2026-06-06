@@ -35,8 +35,11 @@ const Detector = (() => {
     classAware: false,
   };
 
-  // Neutral default class the expert re-labels (classId 1 = 'B2').
-  const DEFAULT_CLASS_ID = 1;
+  // Detect-only: every box is emitted UNASSIGNED ('U' / -1) so the expert picks
+  // a class explicitly — no default-B2 bias. Falls back to literals when yolo-io.js
+  // isn't loaded (standalone detector unit tests).
+  const DET_CLASS_ID = (typeof UNASSIGNED_CLASS_ID !== 'undefined') ? UNASSIGNED_CLASS_ID : -1;
+  const DET_CLASS_NAME = (typeof UNASSIGNED_CLASS_NAME !== 'undefined') ? UNASSIGNED_CLASS_NAME : 'U';
 
   // Web CDN for the ORT runtime + matching wasm dist (offline req is Android).
   const ORT_VERSION  = '1.19.0';
@@ -412,13 +415,12 @@ const Detector = (() => {
 
       const kept = _nms(raw, cfg.iouThreshold, cfg.maxBoxes);
 
-      // Detect-only: emit the neutral default class for every box. The expert
-      // re-labels each one; we never trust a real class from the model.
-      const className = (typeof CLASS_MAP !== 'undefined' && CLASS_MAP[DEFAULT_CLASS_ID]) || 'B2';
+      // Detect-only: emit UNASSIGNED for every box. The expert assigns the class;
+      // we never trust a real class from the model.
       return kept.map((b, i) => ({
         id: 'det' + i,
-        classId: DEFAULT_CLASS_ID,
-        className,
+        classId: DET_CLASS_ID,
+        className: DET_CLASS_NAME,
         x1: b.x1,
         y1: b.y1,
         x2: b.x2,

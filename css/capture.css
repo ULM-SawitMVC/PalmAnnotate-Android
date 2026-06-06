@@ -346,9 +346,9 @@ select.capture-input {
   font-family: var(--f-body);
   font-size: 1rem;
   font-weight: 600;
-  color: var(--c-text);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--c-border-hover);
+  color: var(--c-on-media);
+  background: rgba(0, 0, 0, 0.35); /* media scrim — dark in both themes (allowed) */
+  border: 1px solid var(--c-on-media-border);
   border-radius: var(--r-md);
   cursor: pointer;
 }
@@ -478,7 +478,7 @@ select.capture-input {
   justify-content: center;
   padding: var(--space-xl);
   text-align: center;
-  color: var(--c-text-muted);
+  color: var(--c-on-media); /* sits directly on the camera — light in both themes */
   font-size: 1rem;
 }
 
@@ -504,6 +504,11 @@ select.capture-input {
 
 .capture-live__progress .capture-title { font-size: 1.4rem; }
 .capture-live__progress .capture-progress { gap: var(--space-sm); }
+/* Top-bar text sits over the live camera (dark) — pin it to on-media so it stays
+   readable in light mode too (the shared .capture-title/.capture-subtitle follow
+   the theme on the metadata form, which is correct there). */
+.capture-live__top .capture-title,
+.capture-live__top .capture-subtitle { color: var(--c-on-media); }
 
 /* Inline source / tree-id controls in the top bar. */
 .capture-source--inline {
@@ -535,9 +540,9 @@ select.capture-input {
 
 .capture-live__cancel {
   min-height: 56px;
-  color: var(--c-text);
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--c-border-hover);
+  color: var(--c-on-media);
+  background: rgba(0, 0, 0, 0.4); /* media scrim — dark in both themes (allowed) */
+  border: 1px solid var(--c-on-media-border);
 }
 
 /* Phone / portrait: controls along the bottom, shutter centered. */
@@ -577,16 +582,17 @@ select.capture-input {
   gap: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
   background: rgba(0, 0, 0, 0.42);
-  border: 1px solid var(--c-border-hover);
+  border: 1px solid var(--c-on-media-border);
   border-radius: var(--r-md);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
-.capture-live__source .capture-source__label { color: var(--c-text); }
+.capture-live__source .capture-source__label { color: var(--c-on-media); }
 .capture-live__source .capture-source__select {
   min-height: 48px;
   width: auto;
   min-width: 128px;
+  color: var(--c-on-media);
   background: rgba(0, 0, 0, 0.5);
 }
 
@@ -594,9 +600,9 @@ select.capture-input {
 .capture-live__refresh {
   min-height: 48px;
   padding: 0 var(--space-md);
-  color: var(--c-text);
+  color: var(--c-on-media);
   background: rgba(0, 0, 0, 0.42);
-  border-color: var(--c-border-hover);
+  border-color: var(--c-on-media-border);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }

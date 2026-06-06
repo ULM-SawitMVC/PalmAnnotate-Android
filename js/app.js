@@ -1188,6 +1188,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // Write corrected YOLO .txt labels into the labels folder if configured.
       const labelsOk = await _saveCorrectedLabels(snapshot, datasetTree, outputJson);
       if (labelsOk === false) return false;
+      // Behaviour log (suggestion vs final) — best-effort, never blocks the save.
+      try { await _saveAnnotLog(snapshot); } catch (_) {}
       _savedSnapshotSignatures.set(snapshot.treeName, _snapshotSignature(snapshot));
       if (activeSession && activeSession.treeName === snapshot.treeName && ActiveSession.markClean) {
         ActiveSession.markClean();
@@ -1233,8 +1235,10 @@ document.addEventListener('DOMContentLoaded', () => {
         continue;
       }
       const content = toYoloFormat(side.bboxes, side.imageWidth, side.imageHeight);
-      const imageInfo = outputJson && outputJson.images && outputJson.images[`side_${side.sideIndex + 1}`];
-      const expected = imageInfo ? (imageInfo.annotations || []).length : side.bboxes.length;
+      // toYoloFormat skips UNASSIGNED ('U') boxes (YOLO needs class 0–3), so the
+      // written line count must match the ASSIGNED boxes only — not every
+      // annotation in the Output JSON (which keeps 'U' boxes too).
+      const expected = side.bboxes.filter(b => b.classId >= 0 && b.classId <= 3).length;
       if (_countYoloLines(content) !== expected) {
         failed++;
         console.warn('[Labels] blocked count mismatch:', filename);
@@ -1257,6 +1261,55 @@ document.addEventListener('DOMContentLoaded', () => {
       return false;
     }
     return true;
+  }
+
+  // ── Annotation behaviour log (suggestion vs final) ──────────────────────────
+  // Persist, per side, what the detector proposed (the suggestion baseline kept
+  // in side.originalBboxes) vs what the expert ended up with (side.bboxes). This
+  // lets an analyst measure how much annotators change the model's output (boxes
+  // moved/added/deleted, and the class they assigned to each). Best-effort and
+  // native-only — never blocks the save.
+  function _annotLogShape(b) {
+    const shape = {
+      id: b.id,
+      classId: b.classId,
+      className: b.className,
+      bbox_pixel: [Math.round(b.x1), Math.round(b.y1), Math.round(b.x2), Math.round(b.y2)],
+    };
+    if (typeof b.score === 'number') shape.score = Number(b.score.toFixed(4));
+    return shape;
+  }
+
+  async function _saveAnnotLog(snapshot) {
+    if (!snapshot || !Array.isArray(snapshot.sides)) return;
+    const native = !!(window.Storage && Storage.isNative && Storage.isNative());
+    if (!native) return; // best-effort behaviour log — native dataset store only
+    const adapter = Storage.active();
+    if (!adapter || !adapter.writeDatasetJson) return;
+    const live = ActiveSession.get();
+    const split = snapshot.split && snapshot.split !== 'unknown' ? snapshot.split : 'field';
+    for (const side of snapshot.sides) {
+      // Prefer the live session's detector baseline; fall back to the snapshot.
+      const liveSide = live && live.treeName === snapshot.treeName ? live.sides[side.sideIndex] : null;
+      const suggestions = (liveSide && liveSide.originalBboxes) || side.originalBboxes || [];
+      const log = {
+        tree_name: snapshot.treeName,
+        side_index: side.sideIndex,
+        side_label: side.label,
+        width: side.imageWidth,
+        height: side.imageHeight,
+        generated_at: new Date().toISOString(),
+        suggestion_count: suggestions.length,
+        final_count: (side.bboxes || []).length,
+        suggestions: suggestions.map(_annotLogShape),
+        final: (side.bboxes || []).map(_annotLogShape),
+      };
+      const rel = `annotlog/${split}/${snapshot.treeName}_${side.sideIndex + 1}.json`;
+      try { await adapter.writeDatasetJson(rel, log); } catch (_) {}
+      if (window.SafStore && SafStore.isSupported && SafStore.isSupported() && SafStore.writeJson) {
+        try { await SafStore.writeJson('dataset/' + rel, log); } catch (_) {}
+      }
+    }
   }
 
   function _originalLabelFilename(session, side, dSide) {
@@ -1463,6 +1516,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Rotate gate (shown in portrait over the width-hungry classic tabs): let the
+  // operator drop to the touch Annotate carousel, which works in portrait,
+  // instead of being stuck until they can rotate the device.
+  const rotateGateAnnotate = document.getElementById('rotate-gate-annotate');
+  if (rotateGateAnnotate) {
+    rotateGateAnnotate.addEventListener('click', () => {
+      document.body.classList.remove('crsl-show-tabs');
+      _activateTab('carousel');
+    });
+  }
+
   // ── Side pills + Editor ────────────────────────────────────────────────────
 
   function _activateSidePill(sideIndex) {
@@ -1552,7 +1616,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const session = ActiveSession.get();
     if (!session) return;
     const count = session.sides[sideIndex].bboxes.length;
-    bboxCount.textContent = `${count} bbox`;
+    // Tree-wide count of boxes the expert hasn't classed yet ('U'); surface it so
+    // they know what still needs a class (those boxes are skipped from YOLO).
+    const unassigned = session.sides.reduce((n, s) =>
+      n + s.bboxes.filter(b => !(b.classId >= 0 && b.classId <= 3)).length, 0);
+    bboxCount.textContent = unassigned
+      ? `${count} bbox · ${unassigned} unassigned`
+      : `${count} bbox`;
+    if (bboxCount) bboxCount.classList.toggle('has-unassigned', unassigned > 0);
     _renderQualityPanel();
   }
 

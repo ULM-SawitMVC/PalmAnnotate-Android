@@ -349,3 +349,74 @@ test('Next tree cancel returns to the session tree list, not the previous annota
   // detail, not strand the operator in the just-saved previous tree.
   assert.match(app, /const tree = await _capturePohon\(session\);\s*\n\s*if \(!tree\) \{[\s\S]*_showSessionDetail\(sessionId\)/);
 });
+
+test('portrait: redundant global header is hidden on the home/session views', () => {
+  // Home/Start/Detail carry their own header; in portrait the global header's
+  // brand text is hidden, which used to leave an orphaned lone logo top-left.
+  assert.match(style, /body\.is-home \.header\s*\{\s*display:\s*none/);
+});
+
+test('landscape-required tabs show a rotate gate in portrait', () => {
+  // Markup + an escape to the touch carousel.
+  assert.match(html, /id="rotate-gate"/);
+  assert.match(html, /id="rotate-gate-annotate"/);
+  assert.match(app, /getElementById\('rotate-gate-annotate'\)/);
+  assert.match(app, /_activateTab\('carousel'\)/);
+  // Hidden by default; shown only in portrait, only on the width-hungry classic
+  // tabs, never on the home views (which may leave a stale crsl-tab-* class).
+  assert.match(style, /\.rotate-gate\s*\{[\s\S]*display:\s*none/);
+  assert.match(style, /@media \(orientation: portrait\)[\s\S]*body:not\(\.is-home\)\.crsl-tab-annotation \.rotate-gate/);
+  assert.match(style, /body:not\(\.is-home\)\.crsl-tab-dedup \.rotate-gate/);
+  assert.match(style, /body:not\(\.is-home\)\.crsl-tab-results \.rotate-gate/);
+  // The portrait-friendly Annotate carousel is NOT gated.
+  assert.doesNotMatch(style, /crsl-tab-carousel \.rotate-gate/);
+});
+
+test('over-media capture controls use on-media tokens, not theme-flipping ones', () => {
+  // The Cancel / Find camera / source controls sit over the live camera (dark in
+  // both themes). They must read light regardless of app theme, so they use the
+  // on-media token family — NOT --c-text/--c-border-hover which flip in light mode.
+  assert.match(style, /--c-on-media-border:\s*rgba\(255,\s*255,\s*255/);
+  // The on-media border token must NOT be redefined by the light theme (stays light).
+  assert.doesNotMatch(themeLight, /--c-on-media-border/);
+  for (const sel of ['.capture-live__cancel', '.capture-live__refresh', '.capture-cam__cancel']) {
+    const block = capture.slice(capture.indexOf(sel));
+    const decl = block.slice(0, block.indexOf('}'));
+    assert.match(decl, /color:\s*var\(--c-on-media\)/, `${sel} text uses --c-on-media`);
+    assert.doesNotMatch(decl, /color:\s*var\(--c-text\)/, `${sel} must not use flipping --c-text`);
+  }
+  // Top-bar title/subtitle over the camera are pinned to on-media too.
+  assert.match(capture, /\.capture-live__top \.capture-title[\s\S]*?color:\s*var\(--c-on-media\)/);
+});
+
+test('unassigned class: no default, grey render, YOLO-skip, status + behaviour log', () => {
+  const yolo = readFileSync(new URL('../js/yolo-io.js', import.meta.url), 'utf8');
+  const canvas = readFileSync(new URL('../js/canvas.js', import.meta.url), 'utf8');
+  const detector = readFileSync(new URL('../js/detect/detector.js', import.meta.url), 'utf8');
+  const results = readFileSync(new URL('../js/results.js', import.meta.url), 'utf8');
+  // Sentinel + grey colour + YOLO skip.
+  assert.match(yolo, /UNASSIGNED_CLASS_ID\s*=\s*-1/);
+  assert.match(yolo, /UNASSIGNED_CLASS_NAME\s*=\s*'U'/);
+  assert.match(yolo, /filter\(b => isAssignedClassId\(b\.classId\)\)/);
+  assert.match(canvas, /U:\s*'#9ca3af'/);
+  // Detector + editors no longer default to B2.
+  assert.match(detector, /classId:\s*DET_CLASS_ID/);
+  assert.doesNotMatch(detector, /DEFAULT_CLASS_ID\s*=\s*1/);
+  // compute() surfaces the unassigned count; the UI shows it.
+  assert.match(results, /unassignedCount/);
+  assert.match(app, /unassigned/);
+  assert.match(app, /has-unassigned/);
+  // Suggestion-vs-final behaviour log written at save time.
+  assert.match(app, /async function _saveAnnotLog/);
+  assert.match(app, /annotlog\/\$\{split\}\/\$\{snapshot\.treeName\}/);
+  assert.match(app, /suggestions: suggestions\.map\(_annotLogShape\)/);
+});
+
+test('creating sessions/trees requires an Export folder first (native)', () => {
+  // New Session and Add Tree both gate on a chosen Export folder so every
+  // captured tree mirrors into a browsable location.
+  assert.match(sessionsJs, /async function _ensureExportFolder\(\)/);
+  assert.match(sessionsJs, /SafStore\.isSupported[\s\S]*SafStore\.current\(\)/);
+  assert.match(sessionsJs, /if \(!\(await _ensureExportFolder\(\)\)\) return;\s*\n\s*_renderStart\(\)/);
+  assert.match(sessionsJs, /if \(!\(await _ensureExportFolder\(\)\)\) return;\s*\n\s*_addPohon\(id, addBtn\)/);
+});

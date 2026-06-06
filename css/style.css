@@ -42,6 +42,12 @@
   --c-glass-soft: rgba(7, 12, 7, 0.5);
   --c-scrim: rgba(0, 0, 0, 0.55);
   --c-on-media: rgba(255, 255, 255, 0.9);
+  /* Border for controls sitting ON media (over the camera/photo). Like the two
+     tokens above it stays light in BOTH themes (the light theme does NOT flip
+     it) — over-media chrome has a dark scrim backdrop, so its text/border must
+     read light regardless of the app theme. Use this instead of --c-border-hover
+     on any control layered over the live camera or a captured photo. */
+  --c-on-media-border: rgba(255, 255, 255, 0.35);
 
   /* Typography */
   --f-display: 'Instrument Serif', Georgia, serif;
@@ -190,6 +196,13 @@ input { font-family: inherit; }
   display: flex;
   justify-content: flex-end;
 }
+
+/* The Sessions home / Start / session-detail views carry their own header
+   (hero title, or a "Session" bar with back/refresh) and the dataset toolbar is
+   hidden there anyway — so the global app header would just be a redundant lone
+   logo (and in portrait its brand text is hidden, leaving an orphaned glyph
+   top-left). Hide it on those views; the annotation workspace still shows it. */
+body.is-home .header { display: none; }
 
 /* ---- Buttons ---- */
 .btn {
@@ -1690,3 +1703,61 @@ kbd {
     transform: none;
   }
 }
+
+/* ============================================================================
+   Rotate gate — landscape requirement for width-hungry annotation surfaces
+   (Annotation Editor / Deduplication / Results). Capture, Home and the touch
+   Annotate carousel stay usable in portrait, so this only covers those three
+   classic tabs and only while in portrait. Rotating to landscape hides it via
+   the orientation media query — no JS needed for visibility.
+   ============================================================================ */
+.rotate-gate {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: var(--c-bg);
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+}
+.rotate-gate__card {
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+}
+.rotate-gate__icon {
+  width: 64px;
+  height: 64px;
+  color: var(--c-accent);
+}
+.rotate-gate__title {
+  font-family: var(--f-display);
+  font-size: 1.5rem;
+  color: var(--c-text);
+}
+.rotate-gate__text {
+  color: var(--c-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+/* Show the gate only in portrait, only on the landscape-required tabs, and never
+   on the Home/Session views (which are portrait-friendly and may leave a stale
+   crsl-tab-* class on <body>). */
+@media (orientation: portrait) {
+  body:not(.is-home).crsl-tab-annotation .rotate-gate,
+  body:not(.is-home).crsl-tab-dedup .rotate-gate,
+  body:not(.is-home).crsl-tab-results .rotate-gate {
+    display: flex;
+  }
+}
+
+/* Unassigned-class warning accent on the editor's bbox counter — keeps boxes
+   that still need a class visible to the operator. */
+#bbox-count.has-unassigned { color: var(--c-warn); font-weight: 600; }
+.crsl-sidelabel.has-unassigned { color: var(--c-warn); font-weight: 600; }

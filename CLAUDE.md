@@ -196,8 +196,14 @@ as a normal disconnect and never assume software can keep the camera alive after
   `:root` (`css/style.css`): surfaces (`--c-bg`, `--c-surface`, `--c-surface-raised`), text
   (`--c-text`, `--c-text-muted`, `--c-text-dim`), `--c-accent`/`--c-on-accent`, status
   (`--c-emerald`/`--c-red`/`--c-warn`/`--c-gold`), and the translucent helpers
-  (`--c-glass`/`--c-glass-strong`/`--c-glass-soft`/`--c-overlay`/`--c-scrim`/`--c-on-media`). Style
+  (`--c-glass`/`--c-glass-strong`/`--c-glass-soft`/`--c-overlay`/`--c-scrim`/`--c-on-media`/`--c-on-media-border`). Style
   with tokens, not literal hex/rgba — changing one token must reflow everywhere.
+- **Controls layered over media** (over the live camera or a captured photo — e.g.
+  `.capture-live__cancel`/`__refresh`/`__source`, `.capture-cam__cancel`, the live top-bar title) must
+  use the **on-media token family** (`--c-on-media` text, `--c-on-media-border` border, dark
+  `--c-scrim`/`rgba(0,0,0,…)` backdrop). These tokens stay light-on-dark in **both** themes (the light
+  theme does NOT flip them). Using `--c-text`/`--c-border-hover` there is a bug: they flip dark in light
+  mode and vanish over the dark camera. Guard test: `ui-shell.test.mjs` ("over-media capture controls").
 - **Light mode is a pure token re-definition** in `css/theme-light.css` (loaded **last**, after
   `ux-compact.css`), under `@media (prefers-color-scheme: light)`. The Android WebView reflects the
   system setting, so this is system-driven. Don't repaint per-selector for light mode — flip the token.
@@ -286,8 +292,17 @@ breakpoints or the Android manifest, the guard tests are `ui-shell.test.mjs` and
 
 - Respect the `<script>` load order in `index.html`; a new module that depends on `CLASS_MAP`,
   `createUnionFind`, etc. must load after its dependency.
-- The detector assumes a single-class YOLOv8-style export (`[1, 4+nc, N]`) and is **detect-only**
-  (every box defaults to class B2 for the expert to relabel). It never throws — failures return `[]`.
+- The detector assumes a single-class YOLOv8-style export (`[1, 4+nc, N]`) and is **detect-only**.
+  Detected and newly-drawn boxes start **UNASSIGNED** (`classId -1` / `className 'U'`, sentinel in
+  `yolo-io.js`) — there is **no default-B2**; the expert assigns a class explicitly. Unassigned boxes
+  render **grey** (`CanvasRenderer.getClassColor('U')`), are **kept in the Output JSON** (`class 'U'`)
+  but **skipped from YOLO `.txt`** (`toYoloFormat` filters via `isAssignedClassId`, since YOLO needs an
+  integer class 0–3). `Results.compute()` exposes `unassignedCount`; the editor (`#bbox-count`) and
+  carousel (`.crsl-sidelabel`) show "N unassigned" (warn-coloured). The detector never throws — `[]`.
+- **Annotation behaviour log (suggestion vs final):** on save, `_saveAnnotLog` (app.js) writes a
+  per-side sidecar `dataset/annotlog/{split}/{TREE}_{side}.json` (app-external + SAF mirror) recording
+  the detector baseline (`side.originalBboxes` → `suggestions`) vs the expert's result (`side.bboxes`
+  → `final`), for studying how much annotators change the model output. Best-effort; never blocks save.
 - All capture/detector/storage public methods are intentionally non-throwing / degrade gracefully;
   preserve that contract.
 - The **magnifier/loupe is disabled** in both annotation surfaces (`_magEnabled = false` in
@@ -296,3 +311,13 @@ breakpoints or the Android manifest, the guard tests are `ui-shell.test.mjs` and
 - The carousel "More → Editor tools" reveals the docked tabs (`body.crsl-show-tabs`); the `#tabs-close`
   "×" hides them again. "Next tree" that's cancelled at the camera returns to the session tree list
   (`_showSessionDetail`), not the previous tree's annotation.
+- **Orientation:** Capture, Home and the touch **Annotate** carousel work in portrait; the width-hungry
+  **Annotation Editor / Deduplication / Results** tabs require landscape. A pure-CSS `#rotate-gate`
+  overlay (`@media (orientation: portrait)` + `body:not(.is-home).crsl-tab-{annotation,dedup,results}`)
+  covers them in portrait, with a "Use touch Annotate" escape button (`#rotate-gate-annotate`). There is
+  **no** `android:screenOrientation` lock (capture stays portrait 9:16). The **Deduplication** tab is the
+  left-right **2-pane** link surface (`.dedup-canvases` = `1fr 1fr` with a seam; tap a box on each side to link).
+- **Export folder is required** before creating sessions/trees on native: `_ensureExportFolder()`
+  (sessions.js) gates **New Session** and **Add Tree**, opening the SAF picker if none is set.
+- The global app header (`.header`) is **hidden on `body.is-home`** (home/start/session-detail) — those
+  views carry their own header, so it would otherwise be a redundant lone logo (orphaned in portrait).

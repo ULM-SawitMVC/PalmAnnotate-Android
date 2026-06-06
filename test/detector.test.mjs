@@ -40,8 +40,8 @@ function makeOrt(output) {
 }
 
 function loadDetector(output) {
-  // Concatenate yolo-io.js so CLASS_MAP is in scope (as in the real browser),
-  // making the detect-only className resolve to 'B2' via CLASS_MAP[1].
+  // Concatenate yolo-io.js so the UNASSIGNED sentinel is in scope (as in the real
+  // browser), making the detect-only className resolve to 'U'.
   const ctx = loadModule(['js/yolo-io.js', 'js/detect/detector.js'], {
     globals: { fetch: fakeFetch, ort: makeOrt(output) },
   });
@@ -79,8 +79,8 @@ test('detect(): thresholds, un-letterboxes, NMS-dedups, forces detect-only class
   assert.equal(boxes.length, 2, 'A and C survive; B suppressed, D/E filtered');
 
   const [a, c] = boxes;
-  // Detect-only contract: neutral class id 1 / 'B2' on every box.
-  for (const b of boxes) { assert.equal(b.classId, 1); assert.equal(b.className, 'B2'); }
+  // Detect-only contract: every box is UNASSIGNED ('U' / -1) — no default-B2 bias.
+  for (const b of boxes) { assert.equal(b.classId, -1); assert.equal(b.className, 'U'); }
   assert.deepEqual([a.id, c.id], ['det0', 'det1']);
 
   // A un-letterboxed: x/0.5, (y-80)/0.5.

@@ -36,7 +36,9 @@ const DedupUI = (() => {
   let _drawState = null;
   const DRAG_THRESHOLD_PX = 3;   // image px
   const MIN_NEW_BBOX_PX   = 4;   // image px
-  const DEFAULT_NEW_CLASS_ID = 1; // B2
+  // Newly drawn bboxes start UNASSIGNED ('U' / -1) — no default-B2 bias.
+  const NEW_CLASS_ID = (typeof UNASSIGNED_CLASS_ID !== 'undefined') ? UNASSIGNED_CLASS_ID : -1;
+  const NEW_CLASS_NAME = (typeof UNASSIGNED_CLASS_NAME !== 'undefined') ? UNASSIGNED_CLASS_NAME : 'U';
 
   // Cached bboxes/highlights for magnifier use in mousemove
   let _lastBboxesLeft     = [], _lastBboxesRight     = [];
@@ -722,11 +724,10 @@ const DedupUI = (() => {
         const x2 = Math.min(img.naturalWidth,  Math.max(_drawState.ix0, _drawState.ix1));
         const y2 = Math.min(img.naturalHeight, Math.max(_drawState.iy0, _drawState.iy1));
         if (x2 - x1 >= MIN_NEW_BBOX_PX && y2 - y1 >= MIN_NEW_BBOX_PX) {
-          const classId = DEFAULT_NEW_CLASS_ID;
           const newBbox = {
             id: _newBboxId(),
-            classId,
-            className: CLASS_MAP[classId],
+            classId: NEW_CLASS_ID,
+            className: NEW_CLASS_NAME,
             x1, y1, x2, y2,
           };
           ActiveSession.addBbox(_drawState.sideIdx, newBbox);

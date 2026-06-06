@@ -94,3 +94,16 @@ test('parse -> serialize -> parse round-trips coordinates', () => {
     }
   }
 });
+
+test('toYoloFormat skips unassigned (classId -1 / U) boxes — YOLO needs class 0-3', () => {
+  const { toYoloFormat } = load();
+  const W = 100, H = 100;
+  const boxes = [
+    { classId: 2, x1: 10, y1: 10, x2: 30, y2: 30 },   // assigned (B3)
+    { classId: -1, x1: 40, y1: 40, x2: 60, y2: 60 },  // unassigned 'U'
+    { classId: 0, x1: 70, y1: 70, x2: 90, y2: 90 },   // assigned (B1)
+  ];
+  const lines = toYoloFormat(boxes, W, H).split('\n').filter(Boolean);
+  assert.equal(lines.length, 2, 'only the two assigned boxes are serialized');
+  assert.ok(lines.every(l => l.startsWith('2 ') || l.startsWith('0 ')), 'no class -1 line written');
+});

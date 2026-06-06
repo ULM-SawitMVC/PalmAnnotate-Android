@@ -86,7 +86,9 @@ test('BBoxEditor draws, reclasses, and deletes a bbox through pointer/touch-safe
   pointer(canvas, 'pointerup', 120, 120);
 
   assert.equal(updates.at(-1).length, 1);
-  assert.equal(updates.at(-1)[0].className, 'B2');
+  // Newly drawn boxes start UNASSIGNED ('U') — no default-B2 bias.
+  assert.equal(updates.at(-1)[0].className, 'U');
+  assert.equal(updates.at(-1)[0].classId, -1);
   assert.equal(editor.getSelectedId(), updates.at(-1)[0].id);
 
   editor.setSelectedClass(2);

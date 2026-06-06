@@ -164,6 +164,22 @@ test('Native activity uses a full-screen WebView and delegates Android Back to t
   assert.match(activity, /if \(!consumed\) finish\(\)/);
 });
 
+test('Native camera permission request-on-demand grants the WebView request on first try', () => {
+  const activity = read('android/app/src/main/java/dev/sawitulm/palmannotate/MainActivity.java');
+
+  // Camera-only WebView requests are handled by our own WebChromeClient.
+  assert.match(activity, /onPermissionRequest\(final PermissionRequest request\)/);
+  // When the runtime permission isn't held yet, request it ONCE through the
+  // Activity instead of denying (the old deny() forced a back-out + 2nd grant).
+  assert.match(activity, /ActivityCompat\.requestPermissions\([\s\S]*Manifest\.permission\.CAMERA[\s\S]*RC_WEBVIEW_CAMERA/);
+  // The result handler grants/denies the pending WebView request, guarded so a
+  // double-resolve can never crash the Activity.
+  assert.match(activity, /public void onRequestPermissionsResult\(/);
+  assert.match(activity, /pendingCameraRequest/);
+  assert.match(activity, /req\.grant\(req\.getResources\(\)\)/);
+  assert.match(activity, /catch \(IllegalStateException/);
+});
+
 test('Capacitor sync output contains the app shell, Android storage code, and offline detector vendor files', () => {
   const publicRoot = join(root, 'android/app/src/main/assets/public');
   const required = [

@@ -24,8 +24,10 @@ const BBoxEditor = (() => {
   const HANDLE_R = 10;
   const MIN_BBOX_PX = 4; // minimum bbox size in image pixels
 
-  // Default class for newly drawn bboxes (classId 1 = B2 in 0-indexed dataset)
-  const DEFAULT_CLASS_ID = 1;
+  // Newly drawn bboxes start UNASSIGNED ('U' / -1) — the expert assigns a class
+  // explicitly (no default-B2 bias). Falls back to literals for standalone tests.
+  const NEW_CLASS_ID = (typeof UNASSIGNED_CLASS_ID !== 'undefined') ? UNASSIGNED_CLASS_ID : -1;
+  const NEW_CLASS_NAME = (typeof UNASSIGNED_CLASS_NAME !== 'undefined') ? UNASSIGNED_CLASS_NAME : 'U';
 
   let _idSeq = 0;
   function _newId() { return 'nb' + (_idSeq++); }
@@ -544,11 +546,10 @@ const BBoxEditor = (() => {
         const x2 = Math.max(dragState.ix0, dragState.ix1);
         const y2 = Math.max(dragState.iy0, dragState.iy1);
         if (x2 - x1 >= MIN_BBOX_PX && y2 - y1 >= MIN_BBOX_PX) {
-          const classId = DEFAULT_CLASS_ID;
           const newBbox = {
             id: _newId(),
-            classId,
-            className: CLASS_MAP[classId],
+            classId: NEW_CLASS_ID,
+            className: NEW_CLASS_NAME,
             x1, y1, x2, y2,
           };
           bboxes.push(newBbox);

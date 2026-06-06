@@ -384,6 +384,22 @@ Del  delete selected bbox">?</button>
   <!-- Toast container -->
   <div class="toast-container" id="toast-container"></div>
 
+  <!-- Rotate gate: the Annotation Editor / Deduplication / Results surfaces need
+       landscape width. In portrait, CSS shows this over those tabs (Capture,
+       Home and the touch Annotate carousel stay usable in portrait). -->
+  <div class="rotate-gate" id="rotate-gate" role="dialog" aria-live="polite">
+    <div class="rotate-gate__card">
+      <svg class="rotate-gate__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="6" width="13" height="12" rx="2"/>
+        <path d="M18 9l3 3-3 3"/>
+        <path d="M21 12h-5"/>
+      </svg>
+      <h2 class="rotate-gate__title">Rotate to landscape</h2>
+      <p class="rotate-gate__text">This view needs a wider screen. Turn your device sideways to use it.</p>
+      <button type="button" class="btn btn--outline" id="rotate-gate-annotate">Use touch Annotate instead</button>
+    </div>
+  </div>
+
   <!-- Scripts - load order matters -->
   <script src="js/yolo-io.js"></script>
   <!-- Storage abstraction (must load before dataset/project/fs-output) -->

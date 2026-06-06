@@ -27,6 +27,7 @@ const CanvasRenderer = {
       B4: '#8b5cf6',
       B5: '#06b6d4',
       B6: '#ec4899',
+      U:  '#9ca3af', // unassigned — neutral grey (no class chosen yet)
     };
     if (explicit[key]) return explicit[key];
 
