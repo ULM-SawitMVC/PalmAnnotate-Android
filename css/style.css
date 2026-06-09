@@ -136,9 +136,11 @@ input { font-family: inherit; }
 }
 
 .bg-glow {
+  /* No Gaussian-blur filter here — a permanently-composited 120px blur layer
+     is expensive in the Android WebView (same jank class as backdrop-filter,
+     which is banned). The soft falloff comes from the gradient itself. */
   position: fixed;
   border-radius: 50%;
-  filter: blur(120px);
   pointer-events: none;
   z-index: 0;
 }
@@ -148,7 +150,7 @@ input { font-family: inherit; }
   height: 600px;
   top: -200px;
   right: -100px;
-  background: radial-gradient(circle, rgba(45, 212, 123, 0.08), transparent 70%);
+  background: radial-gradient(circle, rgba(45, 212, 123, 0.07) 0%, rgba(45, 212, 123, 0.03) 45%, transparent 72%);
 }
 
 .bg-glow--2 {
@@ -156,7 +158,7 @@ input { font-family: inherit; }
   height: 500px;
   bottom: -150px;
   left: -100px;
-  background: radial-gradient(circle, rgba(184, 224, 74, 0.06), transparent 70%);
+  background: radial-gradient(circle, rgba(184, 224, 74, 0.05) 0%, rgba(184, 224, 74, 0.02) 45%, transparent 72%);
 }
 
 /* ---- Header ---- */
@@ -512,7 +514,7 @@ body.is-home .header { display: none; }
   border: 1px solid var(--c-border);
   border-radius: var(--r-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
 .side-pill:hover { background: var(--c-surface-raised); color: var(--c-text); }
 .side-pill.active { background: var(--c-accent-dim); color: var(--c-accent); border-color: rgba(184,224,74,0.3); }
@@ -1075,6 +1077,9 @@ kbd {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.6);
+  /* Inset padding (incl. injected safe areas) so the modal box below can cap
+     at 100% height and never extend under the status bar / gesture nav. */
+  padding: calc(12px + var(--pa-safe-top)) 12px calc(12px + var(--pa-safe-bottom));
 }
 .modal-overlay.hidden { display: none; }
 
@@ -1086,6 +1091,11 @@ kbd {
   max-width: 480px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+  /* Tall content (e.g. the mismatch list on a short landscape phone) must
+     scroll inside .modal__body instead of pushing the footer off-screen. */
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
 }
 
 .modal--wide {
@@ -1155,6 +1165,7 @@ kbd {
 .modal__header {
   padding: 20px 24px 12px;
   border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
 }
 .modal__title {
   font-family: var(--f-heading);
@@ -1173,6 +1184,8 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .modal__footer {
@@ -1180,6 +1193,7 @@ kbd {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 /* Form elements inside modal */

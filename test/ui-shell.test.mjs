@@ -561,6 +561,45 @@ test('dedup offers landscape on phone without locking orientation', () => {
   assert.match(phone, /\.dedup-rotate-hint\s*\{[\s\S]*?display:\s*block/);
 });
 
+test('modals cap to the safe viewport and scroll inside, never clipping the footer', () => {
+  // Class-2 clip bug: .modal had no max-height, so a tall body (e.g. the
+  // mismatch list on a short landscape phone) pushed the footer buttons
+  // off-screen with no way to scroll. The overlay folds in the injected
+  // safe-area insets and the card caps at 100% with an internally-scrolling
+  // body (header/footer pinned via flex-shrink:0).
+  const overlay = style.match(/\.modal-overlay \{[\s\S]*?\n\}/)[0];
+  assert.match(overlay, /--pa-safe-top/, 'modal overlay must pad by the injected top inset');
+  assert.match(overlay, /--pa-safe-bottom/, 'modal overlay must pad by the injected bottom inset');
+  const modal = style.match(/\n\.modal \{[\s\S]*?\n\}/)[0];
+  assert.match(modal, /max-height:\s*100%/, '.modal must cap at the overlay content box');
+  assert.match(modal, /flex-direction:\s*column/);
+  const body = style.match(/\.modal__body \{[\s\S]*?\n\}/)[0];
+  assert.match(body, /overflow-y:\s*auto/, '.modal__body must scroll when content is tall');
+  assert.match(body, /min-height:\s*0/, 'flex child needs min-height:0 for overflow to engage');
+  const footer = style.match(/\.modal__footer \{[\s\S]*?\n\}/)[0];
+  assert.match(footer, /flex-shrink:\s*0/, 'footer must not be squeezed out');
+
+  // Same treatment for the sessions confirm dialog.
+  const paModal = sessionsCss.match(/\.pa-modal \{[\s\S]*?\n\}/)[0];
+  assert.match(paModal, /--pa-safe-top/);
+  assert.match(paModal, /--pa-safe-bottom/);
+  const paCard = sessionsCss.match(/\.pa-modal__card \{[\s\S]*?\n\}/)[0];
+  assert.match(paCard, /max-height:\s*100%/);
+  assert.match(paCard, /overflow-y:\s*auto/);
+});
+
+test('smoothness: no permanently-composited filter blur layers either', () => {
+  // Same WebView jank class as backdrop-filter: an always-on filter:blur()
+  // (the ambient .bg-glow used blur(120px)) keeps a large blurred layer
+  // composited on every frame. Soft falloff must come from gradients instead.
+  for (const [name, css] of [['style', style], ['capture', capture], ['ux-compact', uxCompact],
+                             ['sessions', sessionsCss], ['carousel', carousel], ['phone', phone],
+                             ['viewer', viewerCss]]) {
+    assert.doesNotMatch(css, /filter:\s*blur/, `${name}.css must not use filter: blur(...)`);
+    assert.doesNotMatch(css, /transition:\s*all/, `${name}.css: transition specific properties, not 'all'`);
+  }
+});
+
 test('creating sessions/trees requires an Export folder first (native)', () => {
   // New Session and Add Tree both gate on a chosen Export folder so every
   // captured tree mirrors into a browsable location.

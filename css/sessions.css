@@ -531,12 +531,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-lg);
+  /* Fold in the injected safe areas so the card caps inside the visible
+     screen (status bar / gesture nav) on edge-to-edge Android. */
+  padding: calc(var(--space-lg) + var(--pa-safe-top)) var(--space-lg)
+           calc(var(--space-lg) + var(--pa-safe-bottom));
   background: rgba(0, 0, 0, 0.62);
 }
 .pa-modal__card {
   width: 100%;
   max-width: 360px;
+  max-height: 100%;
+  overflow-y: auto;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
   border-radius: 18px;
