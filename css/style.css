@@ -1668,7 +1668,9 @@ kbd {
   padding-bottom: env(safe-area-inset-bottom);
 }
 .toast-container {
-  padding-bottom: max(0px, env(safe-area-inset-bottom));
+  /* --pa-safe-bottom (not raw env): lift toasts above the system gesture bar on
+     no-notch Android, where env(safe-area-inset-bottom) is 0. */
+  padding-bottom: var(--pa-safe-bottom);
 }
 
 /* Crisper tactile feedback: on touch devices a quick scale-down on press reads

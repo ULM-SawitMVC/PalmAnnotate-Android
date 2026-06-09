@@ -14,6 +14,7 @@ const phone = readFileSync(new URL('../css/phone.css', import.meta.url), 'utf8')
 const capture = readFileSync(new URL('../css/capture.css', import.meta.url), 'utf8');
 const captureFlow = readFileSync(new URL('../js/capture/capture-flow.js', import.meta.url), 'utf8');
 const sessionsCss = readFileSync(new URL('../css/sessions.css', import.meta.url), 'utf8');
+const viewerCss = readFileSync(new URL('../css/viewer.css', import.meta.url), 'utf8');
 const themeLight = readFileSync(new URL('../css/theme-light.css', import.meta.url), 'utf8');
 
 test('critical UI buttons exist and are wired to click handlers', () => {
@@ -459,6 +460,26 @@ test('capture full-bleed chrome uses --pa-safe-* insets, not raw env() (no-notch
   assert.match(capture, /\.capture-reviewall--immersive \.capture-actions--review[\s\S]*?var\(--pa-safe-bottom\)/);
   // The Orbbec depth PiP rides below the (now taller) top bar.
   assert.match(capture, /\.orbbec-live__pip[\s\S]*?top:\s*calc\(78px \+ var\(--pa-safe-top\)\)/);
+});
+
+test('edge-to-edge surfaces clear the status bar / nav via injected insets, not raw env()', () => {
+  // The whole app draws edge-to-edge, so any fixed/topmost surface that uses raw
+  // env(safe-area-inset-*) is 0 on the no-notch device and slides under the
+  // clock / behind the gesture nav. These topmost/bottommost surfaces (which have
+  // NO global header above them) must use the MainActivity-injected --pa-safe-*.
+
+  // Sessions home is the topmost element (header hidden on is-home) — hero must
+  // clear the clock; bottom must clear the gesture nav. (Both base + tablet rule.)
+  for (const m of sessionsCss.match(/\.home__scroll[\s\S]*?\}/g) || []) {
+    if (/padding-top/.test(m)) {
+      assert.match(m, /padding-top:\s*max\(var\(--space-lg\), var\(--pa-safe-top\)\)/);
+      assert.doesNotMatch(m, /padding-top:[^;]*env\(/, 'home__scroll top must not use raw env()');
+    }
+  }
+  // Carousel "More" bottom sheet — Cancel button must clear the gesture nav.
+  assert.match(viewerCss, /\.more-menu__sheet[\s\S]*?padding-bottom:\s*calc\(var\(--space-lg\) \+ var\(--pa-safe-bottom\)\)/);
+  // Toasts lift above the gesture bar.
+  assert.match(style, /\.toast-container\s*\{[\s\S]*?padding-bottom:\s*var\(--pa-safe-bottom\)/);
 });
 
 test('unassigned class: no default, grey render, YOLO-skip, status + behaviour log', () => {

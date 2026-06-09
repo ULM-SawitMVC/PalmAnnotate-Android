@@ -28,9 +28,11 @@
   /* The global app header is hidden on the home/session views, so this scroller
      is the topmost element. Pad past the status bar / camera cutout (edge-to-edge)
      so the Back / refresh row is never under a system "dead zone", and past the
-     gesture-nav bar at the bottom. env() resolves to the real inset on-device. */
-  padding-top: max(var(--space-lg), env(safe-area-inset-top, 0px));
-  padding-bottom: calc(var(--space-2xl) + env(safe-area-inset-bottom, 0px));
+     gesture-nav bar at the bottom. Use --pa-safe-* (the MainActivity-injected
+     insets) NOT raw env(): on a no-notch device env(safe-area-inset-top) is 0,
+     so the hero title slid under the status-bar clock. */
+  padding-top: max(var(--space-lg), var(--pa-safe-top));
+  padding-bottom: calc(var(--space-2xl) + var(--pa-safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
@@ -438,8 +440,8 @@
        screen instead of pushing the Export-folder row half under the gesture
        nav bar. Keep a generous bottom pad so the last row always clears it. */
     padding: var(--space-lg) var(--space-xl);
-    padding-top: max(var(--space-lg), env(safe-area-inset-top, 0px));
-    padding-bottom: calc(var(--space-xl) + env(safe-area-inset-bottom, 0px));
+    padding-top: max(var(--space-lg), var(--pa-safe-top));
+    padding-bottom: calc(var(--space-xl) + var(--pa-safe-bottom));
     gap: var(--space-md);
   }
   .home__hero h1 { font-size: 2rem; }

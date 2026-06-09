@@ -19,7 +19,10 @@
   flex-direction: column;
   gap: var(--space-sm);
   padding: var(--space-lg);
-  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  /* --pa-safe-bottom (not raw env): this sheet is anchored to the bottom of a
+     fixed full-screen overlay; on no-notch Android env() is 0, so the Cancel
+     button sat behind the system gesture nav. */
+  padding-bottom: calc(var(--space-lg) + var(--pa-safe-bottom));
   background: var(--c-surface, #141a14);
   border: 1px solid var(--c-border);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
