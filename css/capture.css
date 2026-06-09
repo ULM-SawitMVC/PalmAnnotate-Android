@@ -15,8 +15,9 @@
   align-items: stretch;
   justify-content: center;
   background: var(--c-overlay);
-  backdrop-filter: blur(10px) saturate(1.2);
-  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  /* No backdrop-filter: a full-screen live blur stalls the Android WebView
+     (~1s freeze when opening this overlay / the More menu). --c-overlay is
+     already 92% opaque, so a solid scrim reads the same and paints instantly. */
   color: var(--c-text);
   font-family: var(--f-body);
   /* Respect notches / home indicators on phones. */
@@ -329,7 +330,10 @@ select.capture-input {
   justify-content: space-between;
   gap: var(--space-md);
   padding: var(--space-lg);
-  padding-bottom: calc(var(--space-lg) + env(safe-area-inset-bottom));
+  /* --pa-safe-bottom (not raw env): this overlay is fixed over the edge-to-edge
+     WebView and on a no-notch Android device env() is 0, so the shutter bar slid
+     behind the system nav. --sat/--sab are injected by MainActivity. */
+  padding-bottom: calc(var(--space-lg) + var(--pa-safe-bottom));
   background: linear-gradient(to top, var(--c-scrim), transparent);
 }
 
@@ -405,7 +409,7 @@ select.capture-input {
   .capture-cam__bar {
     gap: var(--space-sm);
     padding: var(--space-md);
-    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--space-md) + var(--pa-safe-bottom));
   }
 
   .capture-cam__cancel {
@@ -493,10 +497,12 @@ select.capture-input {
   justify-content: space-between;
   gap: var(--space-md);
   flex-wrap: wrap;
-  padding: calc(var(--space-md) + env(safe-area-inset-top))
-           calc(var(--space-md) + env(safe-area-inset-right))
+  /* --pa-safe-* (not raw env): clears the status bar on no-notch Android where
+     env(safe-area-inset-top) is 0 but the bar still draws over the camera. */
+  padding: calc(var(--space-md) + var(--pa-safe-top))
+           calc(var(--space-md) + var(--pa-safe-right))
            var(--space-md)
-           calc(var(--space-md) + env(safe-area-inset-left));
+           calc(var(--space-md) + var(--pa-safe-left));
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
   pointer-events: none;
 }
@@ -563,7 +569,7 @@ select.capture-input {
     align-items: center;
     gap: var(--space-sm) var(--space-md);
     padding: var(--space-md);
-    padding-bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
+    padding-bottom: calc(var(--space-md) + var(--pa-safe-bottom));
     background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
   }
 }
@@ -577,10 +583,10 @@ select.capture-input {
     flex-direction: column-reverse;
     justify-content: center;
     padding: var(--space-lg);
-    padding-right: calc(var(--space-lg) + env(safe-area-inset-right));
+    padding-right: calc(var(--space-lg) + var(--pa-safe-right));
     background: linear-gradient(to left, rgba(0, 0, 0, 0.6), transparent);
   }
-  .capture-live__cancel { position: absolute; top: calc(var(--space-lg) + env(safe-area-inset-top)); right: var(--space-lg); }
+  .capture-live__cancel { position: absolute; top: calc(var(--space-lg) + var(--pa-safe-top)); right: var(--space-lg); }
 }
 
 /* ---- Source switch, docked in the control cluster (beside the shutter) ---- */
@@ -592,8 +598,6 @@ select.capture-input {
   background: rgba(0, 0, 0, 0.42);
   border: 1px solid var(--c-on-media-border);
   border-radius: var(--r-md);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
 }
 .capture-live__source .capture-source__label { color: var(--c-on-media); }
 .capture-live__source .capture-source__select {
@@ -611,8 +615,6 @@ select.capture-input {
   color: var(--c-on-media);
   background: rgba(0, 0, 0, 0.42);
   border-color: var(--c-on-media-border);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
 }
 
 /* ============================================
@@ -634,8 +636,8 @@ select.capture-input {
 .orbbec-live__pip {
   position: absolute;
   z-index: 2;
-  top: calc(78px + env(safe-area-inset-top));
-  right: calc(var(--space-md) + env(safe-area-inset-right));
+  top: calc(78px + var(--pa-safe-top));
+  right: calc(var(--space-md) + var(--pa-safe-right));
   width: 34%;
   max-width: 260px;
   min-width: 120px;
@@ -695,8 +697,8 @@ select.capture-input {
   .orbbec-live__pip {
     top: auto;
     right: auto;
-    bottom: calc(var(--space-md) + env(safe-area-inset-bottom));
-    left: calc(var(--space-md) + env(safe-area-inset-left));
+    bottom: calc(var(--space-md) + var(--pa-safe-bottom));
+    left: calc(var(--space-md) + var(--pa-safe-left));
   }
 }
 
@@ -723,10 +725,14 @@ select.capture-input {
   justify-content: space-between;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
+  /* Topmost element of the immersive review — clear the status bar / cutout.
+     --pa-safe-* (not raw env): no-notch Android reports env()=0 yet the WebView
+     draws under the real status bar. */
+  padding-top: max(var(--space-sm), var(--pa-safe-top));
+  padding-left: max(var(--space-md), var(--pa-safe-left));
+  padding-right: max(var(--space-md), var(--pa-safe-right));
   background: linear-gradient(180deg, var(--c-glass-strong), var(--c-glass-soft));
   border-bottom: 1px solid var(--c-border);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
 }
 
 .capture-reviewall__pagelabel {
@@ -800,8 +806,6 @@ select.capture-input {
   border-radius: 12px;
   background: var(--c-glass);
   border-color: var(--c-border-hover);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 .capture-reviewall__dots {
@@ -833,7 +837,7 @@ select.capture-input {
   flex: 0 0 auto;
   margin: 0;
   padding: var(--space-sm) var(--space-md)
-           calc(var(--space-sm) + env(safe-area-inset-bottom)) var(--space-md);
+           calc(var(--space-sm) + var(--pa-safe-bottom)) var(--space-md);
   border-top: 1px solid var(--c-border);
   background: var(--c-glass-soft);
 }

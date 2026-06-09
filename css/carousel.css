@@ -314,71 +314,9 @@
   .crsl-edge { width: 44px; }
 }
 
-/* Android portrait phones around 9:20 through 9:16 keep the one-side editor
-   dominant by trimming optional chrome and making actions wrap predictably. */
-@media (pointer: coarse) and (max-width: 480px) and (min-aspect-ratio: 9 / 20) and (max-aspect-ratio: 9 / 16) {
-  .carousel-root {
-    gap: var(--space-xs);
-    padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
-  }
-
-  .carousel-topbar {
-    gap: var(--space-xs);
-    flex-wrap: nowrap;
-  }
-
-  .crsl-seg {
-    flex: 0 0 auto;
-  }
-
-  .crsl-seg__btn {
-    min-height: 44px;
-    padding: 0 0.75rem;
-    font-size: 0.84rem;
-  }
-
-  .crsl-sidelabel {
-    font-size: 0.78rem;
-  }
-
-  .carousel-bottom {
-    gap: var(--space-xs);
-    flex-shrink: 0;
-  }
-
-  .crsl-thumbs {
-    display: none;
-  }
-
-  .crsl-dots {
-    gap: 0.35rem;
-  }
-
-  .crsl-classbar {
-    gap: 0.4rem;
-  }
-
-  .crsl-classbar__spacer {
-    display: none;
-  }
-
-  .crsl-chip {
-    flex: 1 1 calc(25% - 0.4rem);
-    min-width: 0;
-    min-height: 44px;
-    padding: 0 0.3rem;
-  }
-
-  .crsl-action {
-    flex: 1 1 calc(50% - 0.4rem);
-    min-height: 44px;
-    padding: 0 0.6rem;
-  }
-
-  .crsl-edge {
-    width: 44px;
-  }
-}
+/* (Narrow-phone aspect-band carousel rules removed — superseded by the single
+   ≤600px layer in css/phone.css, which un-floats the whole carousel instead of
+   trimming an aspect band. Tablet rules below are unchanged.) */
 
 /* 4:3 tablets keep thumbnail navigation visible without letting it compete
    with the main canvas. */
@@ -497,3 +435,7 @@ body.crsl-shell .crsl-actionrow { gap: 0.4rem; }
 body.crsl-shell .crsl-action { padding: 0 0.85rem; }
 body.crsl-shell .crsl-chip { padding: 0 0.7rem; min-width: 48px; }
 body.crsl-shell .crsl-thumb { width: 56px; height: 42px; }
+
+/* Narrow-phone (≤600px) carousel overrides — including the single-screen top-bar
+   de-cramp that used to live here — now live in css/phone.css (the one
+   consolidated phone layer, loaded last). Tablet/desktop carousel rules stay. */

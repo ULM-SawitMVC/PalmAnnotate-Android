@@ -186,6 +186,36 @@ test('Native activity uses a full-screen WebView and delegates Android Back to t
   assert.match(activity, /if \(!consumed\) finish\(\)/);
 });
 
+test('Native activity draws edge-to-edge AND injects the real system insets as CSS vars', () => {
+  const activity = read('android/app/src/main/java/dev/sawitulm/palmannotate/MainActivity.java');
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  const style = read('css/style.css');
+
+  // Edge-to-edge: the WebView fills the whole screen (under status bar / cutout /
+  // gesture nav).
+  assert.match(activity, /setDecorFitsSystemWindows\(getWindow\(\), false\)/);
+  assert.match(activity, /setStatusBarColor\(Color\.TRANSPARENT\)/);
+  assert.match(activity, /setNavigationBarColor\(Color\.TRANSPARENT\)/);
+  assert.match(activity, /LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES/);
+  // Keyboard must resize the view (not cover capture-form inputs) under edge-to-edge.
+  assert.match(manifest, /android:windowSoftInputMode="adjustResize"/);
+
+  // CRITICAL: env(safe-area-inset-top) only reports the display CUTOUT on Android,
+  // NOT the status bar — so on a no-notch device it is 0 and top bars slide under
+  // the clock. The activity must measure the REAL system bars and inject them as
+  // --sat/--sab so CSS can pad correctly regardless of notch.
+  assert.match(activity, /private void injectSafeAreaInsets\(\)/);
+  assert.match(activity, /setOnApplyWindowInsetsListener/);
+  assert.match(activity, /WindowInsetsCompat\.Type\.systemBars\(\)/);
+  assert.match(activity, /setProperty\('--sat'/);
+  assert.match(activity, /setProperty\('--sab'/);
+  assert.match(activity, /injectSafeAreaInsets\(\);/);
+
+  // style.css must define the injected vars (default 0 for web) and the helper.
+  assert.match(style, /--sat:\s*0px/);
+  assert.match(style, /--pa-safe-top:\s*max\(var\(--sat\), env\(safe-area-inset-top\)\)/);
+});
+
 test('Native camera permission request-on-demand grants the WebView request on first try', () => {
   const activity = read('android/app/src/main/java/dev/sawitulm/palmannotate/MainActivity.java');
 

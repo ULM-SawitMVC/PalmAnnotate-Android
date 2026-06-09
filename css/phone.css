@@ -1,0 +1,456 @@
+/* ============================================================================
+   phone.css — THE single, ordered home for narrow-phone (≤600px) layout.
+
+   WHY THIS FILE EXISTS
+   The phone overrides used to be scattered across three files with four
+   different breakpoints (carousel.css aspect-bands, ux-compact.css "PHONE
+   LAYER" @600px, style.css "PORTRAIT PHONE LAYER" @768px). They overlapped and
+   fought each other — which is why the same screen rendered two different ways.
+   Everything that targets a small phone now lives HERE, in reading order, under
+   ONE breakpoint, loaded LAST (after ux-compact.css) so it wins cleanly.
+
+   SCOPE — phones only. The Xiaomi Pad 6 reports ~800px CSS width in portrait, so
+   the ≤600px query never fires on it: the tablet/landscape layouts in style.css,
+   carousel.css and ux-compact.css are left completely untouched ("tablet is
+   already perfect"). This file is the 20:9 / ~360px phone layer.
+
+   SECTIONS
+     0. Status-bar dead zone — pad EVERY top bar by the real system inset.
+     1. Bottom navigation — the 4 tabs become a fixed, single-row bottom nav.
+     2. Annotate (touch carousel) — un-float the chrome into one flow stack.
+     3. Annotation Editor — sidebar collapses to a control strip over the canvas.
+     4. Deduplication — stack the two canvases; header wraps.
+     5. Results — single column.
+     6. Overflow "More" menu — inline buttons collapse to a dropdown.
+     7. Landscape phone — keep navigation reachable while comparing side-by-side.
+   ============================================================================ */
+
+@media (max-width: 600px) {
+
+  /* ===== 0. STATUS-BAR DEAD ZONE ===========================================
+     The app draws edge-to-edge (MainActivity), and on a no-notch device
+     env(safe-area-inset-top) is 0 — so the real status-bar height arrives via
+     --sat (see style.css). Pad the TOPMOST bar of every surface by --pa-safe-top
+     so nothing ever sits under the clock. (Bottom is handled by the nav below.) */
+  body.crsl-shell .carousel-topbar,
+  .annotation-layout .annotation-sidebar,
+  .dedup-header,
+  .results-header {
+    padding-top: calc(6px + var(--pa-safe-top));
+  }
+
+  /* ===== 1. BOTTOM NAVIGATION ===============================================
+     Four equal-width destinations on a thumb-reach fixed bar; the long inline
+     label is collapsed (font-size:0) and the short one is drawn via ::after, so
+     "Annotation Editor" never clips to "nnotate". */
+  .tabs,
+  body.crsl-shell .tabs,
+  body.crsl-shell.crsl-show-tabs .tabs {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    z-index: 90;
+    gap: 0;
+    margin: 0;
+    padding: 4px 0 calc(4px + var(--pa-safe-bottom));
+    background: var(--c-surface);
+    border-top: 1px solid var(--c-border);
+    border-bottom: none;
+    overflow: visible;
+    justify-content: space-around;
+  }
+
+  .tabs .tab,
+  body.crsl-shell.crsl-show-tabs .tabs .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 5px 2px;
+    min-height: 52px;
+    border-bottom: none;
+    border-top: 2px solid transparent;
+    /* !important + the doubled selector beat carousel.css's
+       `body.crsl-shell.crsl-show-tabs .tab { font-size: 0.82rem }` (specificity
+       0,3,1) which otherwise un-collapsed the long label → the DOUBLE-LABEL bug
+       ("Annotation Editor" stacked over "Editor"). */
+    font-size: 0 !important;
+    line-height: 1;
+  }
+  .tabs .tab svg { display: block; width: 21px; height: 21px; }
+  .tabs .tab::after {
+    content: attr(data-short);
+    font-size: 0.66rem;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .tabs .tab.active {
+    color: var(--c-accent);
+    border-bottom-color: transparent;
+    border-top-color: var(--c-accent);
+  }
+  /* The "× hide tools" button is meaningless when the nav is always present. */
+  .tab-close,
+  body.crsl-shell.crsl-show-tabs .tab-close { display: none !important; }
+
+  /* Reserve the nav's height so panel content / carousel chrome never hides
+     behind the fixed bar. The bar is 60px tall (4 top + 52 tab + 4 bottom);
+     reserve 64px so the last row (e.g. Detect/Save/Next) keeps a ~4px gap above
+     it instead of being clipped. --pa-safe-bottom is referenced once here and
+     once in the nav's own padding, so the two stay in lockstep. */
+  .editor-area,
+  body.crsl-shell .editor-area {
+    padding: 0 0 calc(64px + var(--pa-safe-bottom));
+  }
+
+  /* ===== 2. ANNOTATE (touch carousel) =======================================
+     The tablet shell positions the carousel chrome into opposite corners; on a
+     360px phone those corners collide (filmstrip-behind-buttons). Un-float it all
+     into a single vertical flow: top bar, then a canvas that takes the remaining
+     height, then the controls stacked below. Nothing absolute → nothing overlaps.
+     Carousel Review/Edit + bunch-linking JS is untouched. */
+  body.crsl-shell .carousel-root {
+    gap: 6px;
+    padding: 0;
+  }
+
+  /* Top bar back in flow; padded off the status bar by section 0 above. */
+  body.crsl-shell .carousel-topbar {
+    position: static;
+    inset: auto;
+    margin: 0;
+    border: none;
+    border-bottom: 1px solid var(--c-border);
+    border-radius: 0;
+    background: var(--c-surface);
+    padding-right: 8px;
+    padding-bottom: 5px;
+    padding-left: 8px;
+    min-height: 0;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* De-cramp the top bar's INTERNAL layout: drop the empty tree-name label
+     (identity is one tap away via Home/More) and let the side label be the one
+     flexible, ellipsised item so Home + browse arrows + Review/Edit + More never
+     collide on a ~360px row. */
+  body.crsl-shell .crsl-topnav { flex: 0 1 auto; min-width: 0; gap: 2px; }
+  body.crsl-shell .crsl-treelabel { display: none; }
+  body.crsl-shell .crsl-seg { flex: 0 0 auto; }
+  body.crsl-shell .crsl-sidelabel { flex: 1 1 auto; min-width: 0; }
+  body.crsl-shell .crsl-topbtn--more { flex: 0 0 auto; }
+
+  /* Stage keeps whatever height is left after the flowing chrome. It MUST be
+     allowed to shrink (min-height:0) — a min-height floor here forces the column
+     past the reserved area and the overflow:hidden editor-area clips the bottom
+     action row (Detect/Save/Next). The image absorbs any shrink instead. */
+  body.crsl-shell .carousel-stage { flex: 1 1 0; min-height: 0; }
+
+  /* Controls: one flowing column under the canvas. */
+  body.crsl-shell .carousel-bottom {
+    position: static;
+    inset: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px 0;
+    pointer-events: auto;
+  }
+  body.crsl-shell .crsl-classbar,
+  body.crsl-shell .crsl-actionrow,
+  body.crsl-shell .crsl-thumbs,
+  body.crsl-shell .crsl-links {
+    position: static;
+    inset: auto;
+    left: auto;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    max-width: none;
+    width: 100%;
+    box-shadow: none;
+  }
+  /* Class chips: B1–B4 share one tidy row of equal-width buttons; the secondary
+     actions (Boxes / Link / Delete) wrap to the next row instead of crowding. */
+  body.crsl-shell .crsl-classbar {
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+  body.crsl-shell .crsl-chip { flex: 1 1 18%; min-width: 52px; }
+  body.crsl-shell .crsl-classbar__spacer { display: none; }
+  /* Action row: Detect / Save / Next each stretch to fill the row evenly so the
+     primary "Next tree" is a comfortable, predictable target. */
+  body.crsl-shell .crsl-actionrow {
+    flex-flow: row wrap;
+    gap: 6px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+  }
+  body.crsl-shell .crsl-action--detect,
+  body.crsl-shell .crsl-action--save,
+  body.crsl-shell .crsl-action--next { flex: 1 1 auto; }
+  /* The thumbnail strip is the persistent side switcher; keep it scrollable. */
+  body.crsl-shell .crsl-thumbs {
+    display: flex;
+    overflow-x: auto;
+    padding: 0;
+    background: transparent;
+  }
+  body.crsl-shell .crsl-dots { display: none; }
+
+  /* ===== 3. ANNOTATION EDITOR ===============================================
+     The tall left sidebar becomes a full-width control strip ABOVE a canvas that
+     fills the rest. Scoped `.annotation-layout .annotation-sidebar` (0,2,0) so it
+     out-specifies both the earlier max-width:640 `display:grid` rule and
+     ux-compact's `.annotation-sidebar { width:132px }`. */
+  .annotation-layout { flex-direction: column; }
+  .annotation-layout .annotation-sidebar {
+    display: flex;
+    width: 100%;
+    max-height: none;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-sm);
+    padding-right: var(--space-sm);
+    padding-bottom: var(--space-sm);
+    padding-left: var(--space-sm);
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--c-border);
+  }
+  /* Sides get their own full-width row, scrolling horizontally for 8 sides, so
+     they never squeeze the class/action controls below. */
+  .annotation-sidebar .side-pills {
+    display: flex;
+    flex: 1 1 100%;
+    gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .annotation-sidebar .side-pill { flex: 0 0 auto; min-width: 56px; }
+  .annotation-sidebar .editor-toolbar {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1 1 auto;
+  }
+  .annotation-sidebar .toolbar-group { flex-direction: row; align-items: center; gap: 4px; }
+  .annotation-sidebar .toolbar-label { display: none; } /* colour/icon carry meaning; labels eat width */
+  .annotation-sidebar .class-buttons { display: flex; gap: 4px; }
+  .annotation-sidebar .editor-hints,
+  .annotation-sidebar .file-info,
+  .annotation-sidebar .quality-card { display: none; } /* secondary — recoverable via touch Annotate / landscape */
+  .annotation-sidebar .bbox-stats { margin: 0 0 0 auto; flex: 0 0 auto; white-space: nowrap; }
+  .btn-class { min-width: 48px; min-height: 48px; }
+  .canvas-wrapper { flex: 1 1 auto; min-height: 0; }
+
+  /* ===== 4. DEDUPLICATION ===================================================
+     Stack the two views top/bottom (Android two-pane guidance: collapse
+     side-by-side to stacked on phones); keep the prev/next pair arrows. */
+  .dedup-canvases {
+    grid-template-columns: 1fr;
+    grid-auto-rows: 1fr;
+  }
+  .dedup-canvases::before {            /* seam runs horizontally between the two */
+    top: 50%; bottom: auto;
+    left: 0; right: 0;
+    width: auto; height: 1px;
+  }
+  .dedup-canvas { min-height: 0; }
+  .dedup-canvas-block:first-child {
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 215, 0, 0.55);
+  }
+  .dedup-canvas-block:first-child .dedup-canvas-info { left: 4px; right: auto; }
+
+  /* Header WRAPS so "Compute & Mark Complete" can't be clipped off the right
+     edge: pair-nav takes the top row centred, More + Compute share the row below
+     with Compute stretching to fill. */
+  .dedup-header {
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-sm);
+    overflow-x: visible;
+  }
+  .dedup-pair-nav { flex: 1 1 100%; justify-content: center; }
+  #btn-compute { flex: 1 1 auto; }
+  .dedup-help { order: 9; }
+  .dedup-panels { grid-template-columns: 1fr; max-height: 32dvh; }
+
+  /* Hidden by default (style.css); shown only here. Auto-hides in landscape,
+     which is wider than 600px. No android:screenOrientation lock. */
+  .dedup-rotate-hint {
+    display: block;
+    margin: 6px 8px 0;
+    padding: 7px 10px;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--c-text-muted);
+    background: var(--c-surface-raised);
+    border: 1px solid var(--c-border);
+    border-radius: 10px;
+  }
+
+  /* ===== 5. RESULTS =========================================================
+     Single roomy column. */
+  .results-stats { flex-direction: column; }
+  .stat-card { width: 100%; }
+  .results-tables { grid-template-columns: 1fr; }
+
+  /* Friendly empty state instead of a black void before any compute. */
+  body.crsl-shell #panel-results,
+  body.crsl-shell #panel-dedup { overflow: hidden; }
+  body.crsl-shell #results-container {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.crsl-shell #results-container:empty::after {
+    content: "No results yet — open Deduplication and tap “Compute & Mark Complete” to count unique bunches for this tree.";
+    display: block;
+    max-width: 30rem;
+    margin: 18vh auto 0;
+    padding: 0 2rem;
+    text-align: center;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--c-text-muted);
+  }
+
+  /* ===== 6. OVERFLOW "MORE" MENU ============================================
+     Dense secondary actions (e.g. dedup's Run Suggestions / Suggestions) live in
+     ONE place — display:contents inline on wide screens, a tap dropdown here. */
+  .overflow-menu { display: inline-flex; position: relative; flex: 0 0 auto; }
+  .overflow-menu__sheet { display: none; }
+  .overflow-menu > summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 48px;
+    min-width: 48px;
+    padding: 0 0.9rem;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface-raised);
+    color: var(--c-text);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    list-style: none; /* belt-and-braces: no default disclosure triangle */
+  }
+  .overflow-menu > summary::-webkit-details-marker { display: none; }
+  /* Clean caret affordance instead of a literal "···": a CSS chevron that points
+     down when closed and flips up when open — signals "opens a menu" without the
+     ambiguous ellipsis the operator flagged. */
+  .overflow-menu > summary::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform 0.18s var(--ease);
+  }
+  .overflow-menu[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+
+  /* Anchor the sheet to the button's LEFT edge so it opens INTO the screen. The
+     More button sits at the left of the wrapped dedup row, so the old `right: 0`
+     pushed the 210px sheet off the left edge where #panel-dedup's overflow:hidden
+     clipped it in half (operator screenshot). left:0 keeps it fully on-screen.
+     max-width + the panel guard below stop it overflowing the right edge too. */
+  .overflow-menu[open] > .overflow-menu__sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: calc(100% + 6px);
+    z-index: 60;
+    min-width: 210px;
+    max-width: min(280px, calc(100vw - 24px));
+    padding: 8px;
+    border: 1px solid var(--c-border);
+    border-radius: var(--r-md);
+    background: var(--c-surface);
+    box-shadow: 0 18px 40px var(--c-scrim);
+  }
+  .overflow-menu__sheet > * {
+    width: 100%;
+    justify-content: flex-start;
+    min-height: 48px;
+  }
+}
+
+/* ===== 7. LANDSCAPE PHONE ===================================================
+   A landscape phone is wide (≈800px CSS) but SHORT (≈360px CSS tall), so the
+   ≤600px width query above stops firing and the bottom nav would vanish —
+   leaving no on-screen way to leave Dedup ("couldnt back ... button hidden in
+   landscape"). Key off the short height (the Pad 6 is ~800px tall in landscape,
+   so it is excluded) to keep a slim fixed bottom nav reachable while the two
+   dedup canvases sit side-by-side. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .tabs,
+  body.crsl-shell .tabs,
+  body.crsl-shell.crsl-show-tabs .tabs {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    z-index: 90;
+    gap: 0;
+    margin: 0;
+    padding: 2px max(0px, var(--pa-safe-right)) calc(2px + var(--pa-safe-bottom)) max(0px, var(--pa-safe-left));
+    background: var(--c-surface);
+    border-top: 1px solid var(--c-border);
+    justify-content: space-around;
+  }
+  .tabs .tab,
+  body.crsl-shell.crsl-show-tabs .tabs .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 4px;
+    border-top: 2px solid transparent;
+    border-bottom: none;
+    font-size: 0 !important;
+  }
+  .tabs .tab svg { display: block; width: 19px; height: 19px; }
+  .tabs .tab::after {
+    content: attr(data-short);
+    font-size: 0.72rem;
+    font-weight: 600;
+  }
+  .tabs .tab.active { color: var(--c-accent); border-top-color: var(--c-accent); }
+  .tab-close,
+  body.crsl-shell.crsl-show-tabs .tab-close { display: none !important; }
+  /* Reserve the slim nav height + clear the status bar at the top. */
+  .editor-area,
+  body.crsl-shell .editor-area { padding: 0 0 calc(48px + var(--pa-safe-bottom)); }
+  body.crsl-shell .carousel-topbar,
+  .annotation-layout .annotation-sidebar,
+  .dedup-header,
+  .results-header { padding-top: calc(4px + var(--pa-safe-top)); }
+}

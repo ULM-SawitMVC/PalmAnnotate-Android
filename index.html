@@ -14,6 +14,9 @@
   <link rel="stylesheet" href="css/sessions.css">
   <link rel="stylesheet" href="css/viewer.css">
   <link rel="stylesheet" href="css/ux-compact.css">
+  <!-- Single consolidated narrow-phone (≤600px) layer — loaded after the tablet
+       sheets so its overrides win; the tablet layout is never touched. -->
+  <link rel="stylesheet" href="css/phone.css">
   <!-- Light theme overrides — loaded last so they win under prefers-color-scheme: light. -->
   <link rel="stylesheet" href="css/theme-light.css">
 </head>
@@ -124,19 +127,19 @@
 
       <!-- Tabs -->
       <div class="tabs" id="tabs">
-        <button class="tab" data-tab="carousel">
+        <button class="tab" data-tab="carousel" data-short="Annotate">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M19 8v8M22 10v4"/></svg>
           Annotate
         </button>
-        <button class="tab active" data-tab="annotation">
+        <button class="tab active" data-tab="annotation" data-short="Editor">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           Annotation Editor
         </button>
-        <button class="tab" data-tab="dedup">
+        <button class="tab" data-tab="dedup" data-short="Dedup">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           Deduplication
         </button>
-        <button class="tab" data-tab="results">
+        <button class="tab" data-tab="results" data-short="Results">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-4-4-5 5"/></svg>
           Results
         </button>
@@ -239,7 +242,7 @@
           <!-- Secondary dedup actions collapse into a "More" overflow on portrait
                phones; they render inline on wide/landscape screens (.overflow-menu). -->
           <details class="overflow-menu">
-            <summary aria-label="More dedup actions" title="More">&#8943; More</summary>
+            <summary aria-label="More dedup actions" title="More">More</summary>
             <div class="overflow-menu__sheet">
           <button class="btn btn--outline btn--sm" id="btn-run-suggestions">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -283,6 +286,10 @@ S    show/hide suggestions
 1-4  change selected bbox class
 Del  delete selected bbox">?</button>
         </div>
+
+        <!-- Shown only on portrait phones (CSS): comparing two sides is easier
+             side-by-side. We never lock orientation — this just suggests it. -->
+        <p class="dedup-rotate-hint" role="note">↺ Rotate to landscape for a side-by-side compare</p>
 
         <div class="dedup-canvases">
           <div class="dedup-canvas-block">

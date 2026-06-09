@@ -10,6 +10,7 @@ const sessionsJs = readFileSync(new URL('../js/sessions.js', import.meta.url), '
 const style = readFileSync(new URL('../css/style.css', import.meta.url), 'utf8');
 const carousel = readFileSync(new URL('../css/carousel.css', import.meta.url), 'utf8');
 const uxCompact = readFileSync(new URL('../css/ux-compact.css', import.meta.url), 'utf8');
+const phone = readFileSync(new URL('../css/phone.css', import.meta.url), 'utf8');
 const capture = readFileSync(new URL('../css/capture.css', import.meta.url), 'utf8');
 const captureFlow = readFileSync(new URL('../js/capture/capture-flow.js', import.meta.url), 'utf8');
 const sessionsCss = readFileSync(new URL('../css/sessions.css', import.meta.url), 'utf8');
@@ -129,9 +130,13 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(style, /@media \(pointer: coarse\) and \(min-width: 641px\) and \(max-width: 1180px\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.tabs[\s\S]*flex-wrap:\s*nowrap/);
   assert.match(style, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.tree-save-status,\s*\.save-counter[\s\S]*display:\s*none/);
-  assert.match(carousel, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.crsl-thumbs[\s\S]*display:\s*none/);
-  assert.match(carousel, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.crsl-action[\s\S]*min-height:\s*44px/);
-  assert.match(style, /@media \(pointer: coarse\) and \(min-aspect-ratio: 3 \/ 2\) and \(max-width: 1280px\)/);
+  // (The carousel aspect-band phone rule was removed — narrow-phone carousel
+  // layout is now the un-float stack in css/phone.css; the thumbnail strip is the
+  // persistent side switcher there rather than hidden.)
+  // 3:2 (and 16:9, which is wider) tablet refinements. The cap is 1600px so they
+  // actually fire on the Xiaomi Pad 6 (~1440px CSS wide in landscape); the old
+  // 1280px cap excluded the real device.
+  assert.match(style, /@media \(pointer: coarse\) and \(min-aspect-ratio: 3 \/ 2\) and \(max-width: 1600px\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)/);
   assert.match(carousel, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)[\s\S]*\.crsl-thumb[\s\S]*width:\s*56px/);
 
@@ -365,15 +370,34 @@ test('portrait phones: width-hungry surfaces reflow instead of a rotate gate', (
   assert.doesNotMatch(style, /crsl-tab-annotation \.rotate-gate/);
   assert.doesNotMatch(style, /crsl-tab-dedup \.rotate-gate/);
 
-  // Instead, a dedicated portrait phone layer reflows the surfaces.
-  assert.match(style, /@media \(orientation: portrait\) and \(max-width: 768px\)/);
-  const portrait = style.slice(style.indexOf('PORTRAIT PHONE LAYER'));
+  // All narrow-phone reflow now lives in ONE file (css/phone.css) under ONE
+  // breakpoint, so the previously scattered/conflicting layers (carousel.css
+  // aspect-bands, ux-compact @600, style @768) no longer fight each other.
+  assert.match(phone, /@media \(max-width: 600px\)/);
   // Editor: sidebar stacks above a canvas that fills the rest.
-  assert.match(portrait, /\.annotation-layout\s*\{\s*flex-direction:\s*column/);
+  assert.match(phone, /\.annotation-layout\s*\{\s*flex-direction:\s*column/);
   // Dedup: two canvases collapse to a single column (stack top/bottom).
-  assert.match(portrait, /\.dedup-canvases\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
+  assert.match(phone, /\.dedup-canvases\s*\{[\s\S]*?grid-template-columns:\s*1fr/);
   // Results: stat cards stack into one column.
-  assert.match(portrait, /\.results-stats\s*\{\s*flex-direction:\s*column/);
+  assert.match(phone, /\.results-stats\s*\{\s*flex-direction:\s*column/);
+
+  // Editor sidebar must be a FLEX strip, scoped `.annotation-layout
+  // .annotation-sidebar` so it out-specifies both the earlier max-width:640px
+  // `display: grid` rule and ux-compact's `.annotation-sidebar { width: 132px }`.
+  assert.match(phone, /\.annotation-layout \.annotation-sidebar\s*\{[\s\S]*?display:\s*flex/);
+  assert.match(phone, /\.annotation-layout \.annotation-sidebar\s*\{[\s\S]*?width:\s*100%/);
+
+  // Dedup header WRAPS so "Compute & Mark Complete" can't be clipped off-screen.
+  assert.match(phone, /\.dedup-header\s*\{[\s\S]*?flex-wrap:\s*wrap/);
+
+  // The scattered phone blocks were REMOVED from the other sheets (centralized).
+  assert.doesNotMatch(style, /@media \(orientation: portrait\) and \(max-width: 768px\)/);
+  assert.doesNotMatch(uxCompact, /@media \(max-width: 600px\)/);
+
+  // Status-bar dead zone fix: every top bar pads by the injected --pa-safe-top
+  // (env(safe-area-inset-top) alone is 0 on no-notch Android).
+  assert.match(style, /\.header__inner\s*\{[\s\S]*?padding-top:\s*max\(10px, var\(--pa-safe-top\)\)/);
+  assert.match(phone, /padding-top:\s*calc\(6px \+ var\(--pa-safe-top\)\)/);
 });
 
 test('responsive overflow menu: inline on wide, "More" dropdown on portrait', () => {
@@ -383,8 +407,16 @@ test('responsive overflow menu: inline on wide, "More" dropdown on portrait', ()
   assert.match(html, /class="overflow-menu__sheet"/);
   assert.match(style, /\.overflow-menu,\s*\n\s*\.overflow-menu__sheet\s*\{\s*display:\s*contents/);
   assert.match(style, /\.overflow-menu > summary\s*\{\s*display:\s*none/);
-  const portrait = style.slice(style.indexOf('PORTRAIT PHONE LAYER'));
-  assert.match(portrait, /\.overflow-menu\[open\] > \.overflow-menu__sheet\s*\{[\s\S]*?position:\s*absolute/);
+  // The dropdown form is in the consolidated phone layer.
+  assert.match(phone, /\.overflow-menu\[open\] > \.overflow-menu__sheet\s*\{[\s\S]*?position:\s*absolute/);
+  // The "More" button sits at the LEFT of the wrapped dedup row, so the sheet
+  // must anchor left:0 and open INTO the screen — right:0 pushed the 210px sheet
+  // off the left edge where #panel-dedup's overflow:hidden clipped it in half.
+  assert.match(phone, /\.overflow-menu\[open\] > \.overflow-menu__sheet\s*\{[\s\S]*?left:\s*0;\s*\n\s*right:\s*auto/);
+  // No literal "···" ellipsis on the label — a CSS caret signals the menu instead.
+  assert.doesNotMatch(html, /&#8943;\s*More|⋯\s*More/);
+  assert.match(phone, /\.overflow-menu > summary::after\s*\{[\s\S]*?border-right:\s*2px solid currentColor/);
+  assert.match(phone, /\.overflow-menu\[open\] > summary::after\s*\{[\s\S]*?rotate\(-135deg\)/);
 });
 
 test('camera live controls wrap (no Cancel/Capture overlap) in narrow portrait', () => {
@@ -414,6 +446,21 @@ test('over-media capture controls use on-media tokens, not theme-flipping ones',
   assert.match(capture, /\.capture-live__top \.capture-title[\s\S]*?color:\s*var\(--c-on-media\)/);
 });
 
+test('capture full-bleed chrome uses --pa-safe-* insets, not raw env() (no-notch Android)', () => {
+  // The capture overlay is fixed over the edge-to-edge WebView. On a no-notch
+  // device env(safe-area-inset-*) is 0, so floating controls that relied on it
+  // slid under the status-bar clock / behind the system nav. They must use the
+  // injected --pa-safe-* helpers (= max(--sat, env())) like the rest of the app.
+  // Each edge control bar of a full-bleed surface self-insets:
+  assert.match(capture, /\.capture-live__top[\s\S]*?padding:[\s\S]*?var\(--pa-safe-top\)/);
+  assert.match(capture, /\.capture-cam__bar[\s\S]*?padding-bottom:\s*calc\(var\(--space-lg\) \+ var\(--pa-safe-bottom\)\)/);
+  assert.match(capture, /\.capture-reviewall__topbar[\s\S]*?padding-top:\s*max\(var\(--space-sm\), var\(--pa-safe-top\)\)/);
+  // The immersive review's pinned bottom action bar clears the nav too.
+  assert.match(capture, /\.capture-reviewall--immersive \.capture-actions--review[\s\S]*?var\(--pa-safe-bottom\)/);
+  // The Orbbec depth PiP rides below the (now taller) top bar.
+  assert.match(capture, /\.orbbec-live__pip[\s\S]*?top:\s*calc\(78px \+ var\(--pa-safe-top\)\)/);
+});
+
 test('unassigned class: no default, grey render, YOLO-skip, status + behaviour log', () => {
   const yolo = readFileSync(new URL('../js/yolo-io.js', import.meta.url), 'utf8');
   const canvas = readFileSync(new URL('../js/canvas.js', import.meta.url), 'utf8');
@@ -435,6 +482,62 @@ test('unassigned class: no default, grey render, YOLO-skip, status + behaviour l
   assert.match(app, /async function _saveAnnotLog/);
   assert.match(app, /annotlog\/\$\{split\}\/\$\{snapshot\.treeName\}/);
   assert.match(app, /suggestions: suggestions\.map\(_annotLogShape\)/);
+});
+
+test('phone: tabs become a fixed bottom nav and the carousel un-floats (no overlap)', () => {
+  // Short labels drive a thumb-reach bottom nav (fixes the clipped "nnotate").
+  for (const s of ['Annotate', 'Editor', 'Dedup', 'Results']) {
+    assert.match(html, new RegExp(`data-short="${s}"`), `tab data-short="${s}" present`);
+  }
+  // The consolidated phone layer (css/phone.css, ≤600px = phone portrait; the
+  // Pad 6 is ~800px so it keeps the tablet layout) pins the tabs to a fixed bottom
+  // navigation bar with icon+short label — four destinations fit a 360px width.
+  assert.match(phone, /@media \(max-width: 600px\)/);
+  assert.match(phone, /\.tabs[\s\S]*?position:\s*fixed[\s\S]*?bottom:\s*0/);
+  assert.match(phone, /\.tabs \.tab::after\s*\{[\s\S]*?content:\s*attr\(data-short\)/);
+  // DOUBLE-LABEL bug fix: the long inline label is force-collapsed (!important)
+  // so it can't win over carousel.css's crsl-show-tabs font-size override and
+  // render "Annotation Editor" stacked over "Editor".
+  assert.match(phone, /font-size:\s*0\s*!important/);
+
+  // The carousel chrome is taken OUT of the floating corners into a single flow
+  // stack, so the filmstrip can no longer sit behind the action buttons.
+  assert.match(phone, /body\.crsl-shell \.crsl-actionrow[\s\S]*?position:\s*static/);
+  assert.match(phone, /body\.crsl-shell \.crsl-thumbs[\s\S]*?display:\s*flex/);
+  // Linking is untouched: the carousel keeps Review/Edit + _armOrCancelLink.
+  const carouselJs = readFileSync(new URL('../js/carousel/carousel-ui.js', import.meta.url), 'utf8');
+  assert.match(carouselJs, /function _armOrCancelLink\(\)/);
+  assert.match(carouselJs, /_completeLink\(/);
+
+  // BOTTOM-CLIP guard: the fixed bottom nav is ~60px tall (4 + 52 tab + 4), so
+  // editor-area must reserve MORE than that (64px + safe inset) or the last row
+  // — Detect again / Save & exit / Next tree — gets cut off under the nav. AND
+  // the phone carousel-stage must keep min-height:0 so the column can shrink to
+  // fit instead of overflowing the (overflow:hidden) editor-area and hiding the
+  // bottom actions. (Regression: phone.css had re-imposed a 120px stage floor.)
+  assert.match(phone, /\.editor-area[\s\S]*?padding:\s*0 0 calc\(64px \+ var\(--pa-safe-bottom\)\)/);
+  assert.match(phone, /body\.crsl-shell \.carousel-stage \{ flex: 1 1 0; min-height: 0; \}/);
+});
+
+test('smoothness: no live backdrop-filter blur anywhere (WebView jank / More-menu freeze)', () => {
+  // A full-screen live blur stalled the WebView ~1s when opening the More menu;
+  // stacked floating blurs caused general lag. The frosted look is kept via the
+  // already-opaque glass tokens, the expensive blur is gone everywhere.
+  for (const [name, css] of [['style', style], ['capture', capture], ['ux-compact', uxCompact],
+                             ['sessions', sessionsCss], ['carousel', carousel], ['phone', phone]]) {
+    assert.doesNotMatch(css, /backdrop-filter:\s*blur/, `${name}.css must not use backdrop-filter: blur(...)`);
+    assert.doesNotMatch(css, /-webkit-backdrop-filter:\s*blur/, `${name}.css must not use -webkit-backdrop-filter: blur(...)`);
+  }
+});
+
+test('dedup offers landscape on phone without locking orientation', () => {
+  assert.match(html, /class="dedup-rotate-hint"/);
+  // Default-hidden base rule lives in style.css (OUTSIDE any media query, so it
+  // also stays hidden on the tablet)...
+  assert.match(style, /\.dedup-rotate-hint \{ display: none; \}/);
+  // ...and is revealed only in the ≤600px phone layer (auto-hides in landscape,
+  // which is wider than 600px). No android:screenOrientation lock.
+  assert.match(phone, /\.dedup-rotate-hint\s*\{[\s\S]*?display:\s*block/);
 });
 
 test('creating sessions/trees requires an Export folder first (native)', () => {

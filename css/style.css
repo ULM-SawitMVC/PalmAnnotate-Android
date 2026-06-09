@@ -72,6 +72,24 @@
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
   --shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.22);
+
+  /* ── System safe-area insets (SINGLE SOURCE OF TRUTH) ─────────────────────
+     CRITICAL Android gotcha: env(safe-area-inset-top) only resolves to the
+     DISPLAY CUTOUT (notch) — NOT the status bar. On a no-notch device (e.g.
+     the Xiaomi Pad 6) it is 0 even when the WebView draws edge-to-edge, so top
+     bars slid UNDER the clock. MainActivity therefore measures the real system
+     bars and injects them as --sat/--sab/--sal/--sar (CSS px) on documentElement
+     at runtime; they default to 0 here so the browser build is unaffected.
+     Use the --pa-safe-* helpers (which also fold in env() for notched web/iOS)
+     to pad anything that touches a screen edge. */
+  --sat: 0px;
+  --sab: 0px;
+  --sal: 0px;
+  --sar: 0px;
+  --pa-safe-top: max(var(--sat), env(safe-area-inset-top));
+  --pa-safe-bottom: max(var(--sab), env(safe-area-inset-bottom));
+  --pa-safe-left: max(var(--sal), env(safe-area-inset-left));
+  --pa-safe-right: max(var(--sar), env(safe-area-inset-right));
 }
 
 /* ---- Reset ---- */
@@ -146,8 +164,6 @@ input { font-family: inherit; }
   position: sticky;
   top: 0;
   z-index: 100;
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   background: var(--c-glass);
   border-bottom: 1px solid var(--c-border);
 }
@@ -1059,7 +1075,6 @@ kbd {
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
 }
 .modal-overlay.hidden { display: none; }
 
@@ -1603,7 +1618,7 @@ kbd {
 
 /* Landscape tablets around the user's 254 x 165.2 mm device ratio (~1.54:1)
    benefit from a slimmer sidebar and wrapped tabs. */
-@media (pointer: coarse) and (min-aspect-ratio: 3 / 2) and (max-width: 1280px) {
+@media (pointer: coarse) and (min-aspect-ratio: 3 / 2) and (max-width: 1600px) {
   .tabs {
     flex-wrap: wrap;
   }
@@ -1639,9 +1654,9 @@ kbd {
    status bar, rounded corners and gesture pill on modern phones. The max() with
    the original spacing means non-notched devices are unaffected. */
 .header__inner {
-  padding-left: max(var(--space-lg), env(safe-area-inset-left));
-  padding-right: max(var(--space-lg), env(safe-area-inset-right));
-  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(var(--space-lg), var(--pa-safe-left));
+  padding-right: max(var(--space-lg), var(--pa-safe-right));
+  padding-top: max(10px, var(--pa-safe-top));
 }
 .header__inner--wide {
   padding-left: max(var(--space-md), env(safe-area-inset-left));
@@ -1677,7 +1692,7 @@ kbd {
 /* Tablet 3:2 landscape: give the empty-state real presence (it otherwise looks
    lost in the middle of a wide screen) and let the editor breathe with a wider
    canvas column. Scoped to the same 3:2 touch envelope used above. */
-@media (pointer: coarse) and (min-aspect-ratio: 3 / 2) and (max-width: 1280px) {
+@media (pointer: coarse) and (min-aspect-ratio: 3 / 2) and (max-width: 1600px) {
   .empty-state {
     max-width: 560px;
     margin-inline: auto;
@@ -1773,126 +1788,12 @@ kbd {
 .overflow-menu > summary::-webkit-details-marker { display: none; }
 .overflow-menu > summary::marker { content: ''; }
 
-/* ============================================================================
-   PORTRAIT PHONE LAYER — 6–7" phones, ~9:16
-   Researched reflow (Material app-bars/bottom, NN/g bottom sheets, Android
-   two-pane / SlidingPaneLayout, "adapt desktop→mobile"): single-column stack,
-   image-dominant canvases, dense toolbars collapse into a "More" overflow,
-   secondary content stays one tap away via progressive disclosure. The wide
-   landscape/tablet layouts above are NOT touched — this only applies in
-   portrait at phone widths.
-   ============================================================================ */
-@media (orientation: portrait) and (max-width: 768px) {
+/* Default-hidden dedup landscape hint. It is revealed only on a narrow phone
+   by css/phone.css; this base rule keeps it hidden everywhere else (incl. the
+   tablet), so it must live OUTSIDE any media query. */
+.dedup-rotate-hint { display: none; }
 
-  /* ---- Tabs: one comfortable, horizontally-scrolling row ---- */
-  .tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .tab  { flex: 0 0 auto; min-height: 48px; }
-
-  /* ============ Annotation Editor: canvas dominates ============
-     The sidebar (class buttons, actions, QA, hints) becomes a slim control
-     strip across the top instead of a tall panel that steals image height. */
-  .annotation-layout { flex-direction: column; }
-
-  .annotation-sidebar {
-    width: 100%;
-    max-height: none;
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm);
-    overflow-x: auto;
-    overflow-y: visible;
-    border-right: 0;
-    border-bottom: 1px solid var(--c-border);
-  }
-  .annotation-sidebar .side-pills {
-    grid-auto-flow: column;
-    grid-template-columns: none;
-    grid-auto-columns: minmax(48px, auto);
-    flex: 0 0 auto;
-  }
-  .annotation-sidebar .editor-toolbar {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-sm);
-    flex: 0 0 auto;
-  }
-  .annotation-sidebar .toolbar-group { flex-direction: row; align-items: center; gap: 4px; }
-  .annotation-sidebar .toolbar-label { display: none; } /* colour/icon carry meaning; labels eat width */
-  .annotation-sidebar .class-buttons { grid-auto-flow: column; grid-template-columns: none; }
-  .annotation-sidebar .editor-hints,
-  .annotation-sidebar .file-info,
-  .annotation-sidebar .quality-card { display: none; } /* secondary — recoverable via touch Annotate / landscape */
-  .annotation-sidebar .bbox-stats { margin: 0 0 0 auto; flex: 0 0 auto; white-space: nowrap; }
-  .btn-class { min-width: 48px; min-height: 48px; }
-
-  .canvas-wrapper { flex: 1 1 auto; min-height: 0; }
-
-  /* ============ Dedup: stack the two views TOP / BOTTOM ============
-     (Android two-pane guidance: collapse side-by-side to one-at-a-time / stacked
-     on phones; keep the prev/next pair arrows.) */
-  .dedup-canvases {
-    grid-template-columns: 1fr;
-    grid-auto-rows: 1fr;
-  }
-  .dedup-canvases::before {            /* seam runs horizontally between the two */
-    top: 50%; bottom: auto;
-    left: 0; right: 0;
-    width: auto; height: 1px;
-  }
-  .dedup-canvas { min-height: 0; }
-  .dedup-canvas-block:first-child {
-    border-right: 0;
-    border-bottom: 1px solid rgba(255, 215, 0, 0.55);
-  }
-  .dedup-canvas-block:first-child .dedup-canvas-info { left: 4px; right: auto; }
-
-  .dedup-header { flex-wrap: nowrap; gap: var(--space-xs); }
-  .dedup-panels { grid-template-columns: 1fr; max-height: 32dvh; }
-
-  /* ============ Results: single roomy column ============ */
-  .results-stats { flex-direction: column; }
-  .stat-card { width: 100%; }
-  .results-tables { grid-template-columns: 1fr; }
-
-  /* ---- Overflow "More" dropdown (activates only here) ---- */
-  .overflow-menu { display: inline-flex; position: relative; flex: 0 0 auto; }
-  .overflow-menu__sheet { display: none; }
-  .overflow-menu > summary {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    min-height: 48px;
-    min-width: 48px;
-    padding: 0 0.8rem;
-    border: 1px solid var(--c-border);
-    border-radius: var(--r-md);
-    background: var(--c-surface-raised);
-    color: var(--c-text);
-    font-size: 0.82rem;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .overflow-menu[open] > .overflow-menu__sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    z-index: 60;
-    min-width: 210px;
-    padding: 8px;
-    border: 1px solid var(--c-border);
-    border-radius: var(--r-md);
-    background: var(--c-surface);
-    box-shadow: 0 18px 40px var(--c-scrim);
-  }
-  .overflow-menu__sheet > * {
-    width: 100%;
-    justify-content: flex-start;
-    min-height: 48px;
-  }
-}
+/* PORTRAIT/NARROW-PHONE LAYER moved to the single consolidated css/phone.css
+   (loaded after ux-compact.css). Editor/Dedup/Results phone reflow, the
+   overflow-menu dropdown, and the bottom-nav live there now. The base
+   .overflow-menu { display: contents } rules above stay here. */
