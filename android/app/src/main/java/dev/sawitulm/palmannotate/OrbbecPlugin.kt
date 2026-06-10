@@ -245,6 +245,112 @@ class OrbbecPlugin : Plugin() {
         }
     }
 
+    // ── USB hotplug receiver (cold-plug detection + SDK pre-warm) ────────────
+    //
+    // The Orbbec SDK's DeviceChangedCallback only exists once an OBContext has
+    // been created — i.e. after the first successful open()/startPreview(). Before
+    // that the app was BLIND to USB attach: a freshly plugged camera was only
+    // found by manually spamming "Find camera" (operator report: ~2 minutes of
+    // open/close/rescan before the source appeared). This plain Android receiver
+    // is registered at plugin load, needs no SDK context, and on attach both
+    // notifies JS (the capture surface rebuilds its source list immediately) and
+    // pre-warms the SDK context in the background so the subsequent
+    // open()/startPreview() skips the slow OBContext init + enumeration wait.
+
+    private var usbHotplugReceiver: BroadcastReceiver? = null
+
+    override fun load() {
+        super.load()
+        registerUsbHotplugReceiver()
+    }
+
+    private fun registerUsbHotplugReceiver() {
+        val ctx: Context = context ?: return
+        if (usbHotplugReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                val device: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                }
+                if (device == null || device.vendorId != ORBBEC_VENDOR_ID) return
+                when (intent.action) {
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        Log.i(TAG, "USB attach: ${device.deviceName} — pre-warming SDK")
+                        warmUpSdk()
+                        notifyDeviceChange(true, orbbecDevices().size)
+                    }
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                        Log.i(TAG, "USB detach: ${device.deviceName}")
+                        val remaining = orbbecDevices().size
+                        if (remaining == 0) {
+                            // Covers the case where the SDK callback never fires
+                            // (no OBContext yet) — idempotent with that teardown.
+                            stopPump()
+                            cameraExecutor.execute {
+                                joinPump()
+                                synchronized(stateLock) { closeSdkLocked() }
+                            }
+                        }
+                        notifyDeviceChange(false, remaining)
+                    }
+                }
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        // System (protected) broadcasts reach NOT_EXPORTED receivers on API 33+.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ctx.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            ctx.registerReceiver(receiver, filter)
+        }
+        usbHotplugReceiver = receiver
+    }
+
+    private fun unregisterUsbHotplugReceiver() {
+        val receiver = usbHotplugReceiver ?: return
+        usbHotplugReceiver = null
+        try {
+            context?.unregisterReceiver(receiver)
+        } catch (e: Exception) {
+            Log.d(TAG, "hotplug unregister ignored", e)
+        }
+    }
+
+    /**
+     * Create the OBContext in the background (camera executor) if permission is
+     * already granted, so a later open()/startPreview() finds the SDK initialised
+     * and the device already enumerated instead of paying ~seconds of cold init
+     * while the operator stares at "Connecting to Orbbec…". Best-effort: any
+     * failure just falls back to the lazy init inside openSdkLocked().
+     */
+    private fun warmUpSdk() {
+        cameraExecutor.execute {
+            try {
+                val mgr = usbManager() ?: return@execute
+                val devices = orbbecDevices()
+                if (devices.isEmpty() || devices.none { mgr.hasPermission(it) }) return@execute
+                val appContext = context?.applicationContext ?: return@execute
+                synchronized(stateLock) {
+                    if (obContext == null) {
+                        OBContext.setLoggerSeverity(LogSeverity.INFO)
+                        OBContext.setLoggerToConsole(LogSeverity.INFO)
+                        obContext = OBContext(appContext, deviceChangedCallback)
+                        Log.i(TAG, "Orbbec SDK pre-warmed (core ${OBContext.getCoreVersionName()})")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "SDK pre-warm failed (will init lazily)", e)
+            }
+        }
+    }
+
     // ── USB helpers ──────────────────────────────────────────────────────────
 
     private fun usbManager(): UsbManager? {
@@ -475,19 +581,26 @@ class OrbbecPlugin : Plugin() {
     }
 
     /**
-     * Re-enumerate the USB bus and drop any stale SDK context so a re-plugged
-     * Orbbec is detected on the next open/startPreview. Fixes the "works on first
-     * connect, but unplug → replug is never found" case: after a detach the SDK
-     * context is torn down, and a fresh device instance needs a clean re-init plus
-     * a new USB-permission grant. Resolves { available, count } for the live bus.
+     * Re-enumerate the USB bus. When the bus is EMPTY, drop any stale SDK context
+     * so a later re-plug starts clean (the original "unplug → replug never found"
+     * fix). When a device IS present, the context is healthy (detach teardown
+     * already ran via the hotplug receiver / SDK callback), so keep it and just
+     * pre-warm — tearing a live context down here made every "Find camera" press
+     * pay the full multi-second SDK re-init, which is why the operator had to
+     * spam the button. Resolves { available, count } for the live bus.
      */
     @PluginMethod
     fun refresh(call: PluginCall) {
-        stopPump()
         cameraExecutor.execute {
-            joinPump()
-            synchronized(stateLock) { closeSdkLocked() }
             val devices = orbbecDevices()
+            if (devices.isEmpty()) {
+                synchronized(stateLock) { pumpRunning = false }
+                pendingCapture.getAndSet(null)?.reject(IllegalStateException("Orbbec preview stopped"))
+                joinPump()
+                synchronized(stateLock) { closeSdkLocked() }
+            } else {
+                warmUpSdk()
+            }
             call.resolve(
                 JSObject()
                     .put("available", devices.isNotEmpty())
@@ -497,6 +610,7 @@ class OrbbecPlugin : Plugin() {
     }
 
     override fun handleOnDestroy() {
+        unregisterUsbHotplugReceiver()
         stopPump()
         try {
             cameraExecutor.execute {

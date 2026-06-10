@@ -55,7 +55,9 @@
     --c-scrim: rgba(0, 0, 0, 0.55);
     --c-on-media: rgba(255, 255, 255, 0.9);
 
+    --shadow-sm: 0 4px 12px rgba(20, 32, 13, 0.10);
     --shadow-soft: 0 12px 30px rgba(20, 32, 13, 0.12);
+    --shadow-lg: 0 24px 56px rgba(20, 32, 13, 0.18);
   }
 
   /* Tone down the ambient brand glows so they don't smudge the light bg. */

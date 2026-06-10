@@ -52,7 +52,7 @@ android {
             abiFilters 'arm64-v8a'
         }
         versionCode = (System.getenv('PA_VERSION_CODE') ?: '1').toInteger()
-        versionName = System.getenv('PA_VERSION_NAME') ?: '1.0'
+        versionName = System.getenv('PA_VERSION_NAME') ?: '2.0'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -71,15 +71,25 @@ android {
         }
     }
     buildTypes {
+        // R8 code minification is intentionally OFF. It was enabled in commit
+        // bdcd500 ("Optimize Android APK size") and that is exactly when the live
+        // Orbbec preview regressed (worked perfectly before → "one frame then
+        // freezes" after). The preview code itself is byte-for-byte unchanged
+        // across that commit and the native libs are all present at full size in
+        // the APK, so R8 (the only runtime-behaviour change in bdcd500) is the
+        // cause — it strips/optimises something the Orbbec SDK reaches via its
+        // JNI/reflection frame-callback path that the keep rules don't cover.
+        // The big size wins are independent of R8 and are KEPT: the ONNX model
+        // shrink (~28 MB) and the slim arm64-only Orbbec AAR (firmware-updater +
+        // v7a removed, ~29 MB). Do NOT re-enable minify without device-verifying
+        // the Orbbec live preview first (see CLAUDE.md / HANDOFF.md).
         debug {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled false
+            shrinkResources false
         }
         release {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled false
+            shrinkResources false
             if (releaseSigningConfigured) {
                 signingConfig signingConfigs.release
             }

@@ -117,7 +117,7 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   assert.match(carousel, /\.carousel-canvas[\s\S]*touch-action:\s*none/);
   assert.match(carousel, /\.carousel-stage[\s\S]*touch-action:\s*pan-y/);
   assert.match(capture, /env\(safe-area-inset-top\)/);
-  assert.match(capture, /\.capture-btn[\s\S]*min-height:\s*56px/);
+  assert.match(capture, /\.capture-btn[\s\S]*min-height:\s*var\(--ctl-h-lg\)/);
   assert.match(capture, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.capture-preview__img[\s\S]*max-height:\s*54dvh/);
   assert.match(capture, /@media \(pointer: coarse\) and \(min-width: 900px\) and \(max-width: 1180px\) and \(max-aspect-ratio: 4 \/ 3\)[\s\S]*\.capture-panel[\s\S]*max-width:\s*620px/);
 
@@ -126,7 +126,7 @@ test('viewport and touch CSS cover Android phone and tablet targets', () => {
   }
   assert.match(capture, /@media \(max-width: 380px\)/);
 
-  assert.match(style, /@media \(pointer: coarse\)[\s\S]*min-height:\s*44px/);
+  assert.match(style, /@media \(pointer: coarse\)[\s\S]*min-height:\s*var\(--ctl-h-min\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(max-width: 640px\)[\s\S]*\.annotation-layout[\s\S]*flex-direction:\s*column/);
   assert.match(style, /@media \(pointer: coarse\) and \(min-width: 641px\) and \(max-width: 1180px\)/);
   assert.match(style, /@media \(pointer: coarse\) and \(max-width: 480px\) and \(min-aspect-ratio: 9 \/ 20\) and \(max-aspect-ratio: 9 \/ 16\)[\s\S]*\.tabs[\s\S]*flex-wrap:\s*nowrap/);
@@ -462,6 +462,20 @@ test('capture full-bleed chrome uses --pa-safe-* insets, not raw env() (no-notch
   assert.match(capture, /\.orbbec-live__pip[\s\S]*?top:\s*calc\(78px \+ var\(--pa-safe-top\)\)/);
 });
 
+test('Orbbec live preview letterboxes its landscape frame in portrait (no crop, matches capture)', () => {
+  // The Orbbec is a fixed landscape (16:9) USB camera. With object-fit:cover the
+  // portrait phone showed only a centre slice and the operator could not frame the
+  // shot — yet capture() saves the FULL landscape frame, so preview ≠ result.
+  // Portrait must letterbox (object-fit:contain) so the whole frame is visible and
+  // reliable; landscape/tablet keeps cover (approved, untouched).
+  const base = capture.match(/\.orbbec-live__main\s*\{[^}]*\}/);
+  assert.ok(base, '.orbbec-live__main rule exists');
+  assert.match(base[0], /object-fit:\s*cover/, 'base (landscape/tablet) stays cover');
+
+  const portrait = capture.match(/@media \(orientation: portrait\)\s*\{\s*\.orbbec-live__main\s*\{[^}]*object-fit:\s*contain[^}]*\}/);
+  assert.ok(portrait, 'portrait letterboxes .orbbec-live__main with object-fit:contain');
+});
+
 test('edge-to-edge surfaces clear the status bar / nav via injected insets, not raw env()', () => {
   // The whole app draws edge-to-edge, so any fixed/topmost surface that uses raw
   // env(safe-area-inset-*) is 0 on the no-notch device and slides under the
@@ -607,4 +621,103 @@ test('creating sessions/trees requires an Export folder first (native)', () => {
   assert.match(sessionsJs, /SafStore\.isSupported[\s\S]*SafStore\.current\(\)/);
   assert.match(sessionsJs, /if \(!\(await _ensureExportFolder\(\)\)\) return;\s*\n\s*_renderStart\(\)/);
   assert.match(sessionsJs, /if \(!\(await _ensureExportFolder\(\)\)\) return;\s*\n\s*_addPohon\(id, addBtn\)/);
+});
+
+// ── PalmAnnotate v2.0 design system ──────────────────────────────────────────
+// One shape scale, one elevation scale, one micro-label style. Every
+// border-radius in every stylesheet must read the :root radius tokens — a raw
+// px radius (the old 3/4/6/8/10/12/14/16/18/22/999px ad-hoc zoo) is exactly
+// the "inconsistent shapes" regression v2.0 removed.
+test('v2.0 shape/elevation/label tokens are the single source of truth', () => {
+  // The scales exist in :root.
+  for (const tok of ['--r-xs:', '--r-sm:', '--r-md:', '--r-lg:', '--r-xl:', '--r-full:',
+                     '--shadow-sm:', '--shadow-soft:', '--shadow-lg:',
+                     '--fs-label:', '--ls-label:']) {
+    assert.ok(style.includes(tok), `style.css :root must define ${tok}`);
+  }
+
+  const sheets = [['style', style], ['ux-compact', uxCompact], ['capture', capture],
+                  ['sessions', sessionsCss], ['carousel', carousel], ['phone', phone],
+                  ['viewer', viewerCss], ['theme-light', themeLight]];
+  for (const [name, css] of sheets) {
+    // Raw px / 999px radii are banned; 0, 50% (circles), var(...) and
+    // calc(var(...) ...) remain legal.
+    assert.doesNotMatch(css, /border-radius:\s*(?!0[;\s}])(?!50%)\d/,
+      `${name}.css: border-radius must use the --r-* tokens, not raw values`);
+  }
+
+  // The duplicate off-palette .btn--accent gradient stays dead, and dialog
+  // titles no longer reference the never-defined --f-heading token.
+  assert.doesNotMatch(style, /btn--accent\s*\{[\s\S]*?linear-gradient\(135deg,\s*#22c55e/);
+  assert.doesNotMatch(style, /var\(--f-heading\)/);
+
+  // One focus ring for keyboard users, app-wide.
+  assert.match(style, /:where\(button, \[href\], input, select, textarea, summary\):focus-visible/);
+
+  // Page-level titles share the display serif identity.
+  assert.match(sessionsCss, /\.home__hero h1 \{[\s\S]*?font-family: var\(--f-display\)/);
+  assert.match(sessionsCss, /\.sheet__top h1 \{[\s\S]*?font-family: var\(--f-display\)/);
+});
+
+// ── v2.0 control-height scale ────────────────────────────────────────────────
+// One size scale for every interactive control (40/44/48/56/64, sm→xl in the
+// golden ratio). The operator-flagged regression class: adjacent controls at
+// different heights (Cancel 56 vs Find camera 48 vs Capture 64 on the live
+// capture screen, session form 52 vs capture form 56, off-scale 50px modal
+// buttons). A raw px control min-height in a phone-facing sheet is that bug
+// coming back.
+test('v2.0 control heights read the --ctl-h scale (no off-scale raw px)', () => {
+  for (const tok of ['--phi:', '--ctl-h-min:', '--ctl-h-sm:', '--ctl-h:',
+                     '--ctl-h-lg:', '--ctl-h-xl:']) {
+    assert.ok(style.includes(tok), `style.css :root must define ${tok}`);
+  }
+
+  // Phone-facing sheets: any min-height under 100px is a control and must be
+  // a token (panels are >=120px; min-height: 0 stays legal). ux-compact.css is
+  // tablet-only and deliberately out of scope; style.css keeps a few
+  // non-control min-heights (header, panels, the deliberate 32px --xs chips).
+  for (const [name, css] of [['capture', capture], ['sessions', sessionsCss],
+                             ['carousel', carousel], ['viewer', viewerCss]]) {
+    assert.doesNotMatch(css, /min-height:\s*\d{1,2}px/,
+      `${name}.css: control min-heights must use the --ctl-h-* tokens`);
+  }
+  // phone.css's single allowed raw value is the 52px bottom-nav tab — its
+  // height feeds the 64px editor-area reservation (4 + 52 + 4 = 60).
+  const phoneRaw = phone.match(/min-height:\s*\d{1,2}px/g) || [];
+  assert.deepEqual(phoneRaw, ['min-height: 52px'],
+    'phone.css: only the bottom-nav 52px tab may stay raw');
+
+  // The live capture cluster reads as ONE row of equal 56px controls…
+  assert.match(capture, /\.capture-live__cancel \{[\s\S]*?min-height: var\(--ctl-h-lg\)/);
+  assert.match(capture, /\.capture-live__refresh \{[\s\S]*?min-height: var\(--ctl-h-lg\)/);
+  assert.match(capture, /\.capture-live__source \.capture-source__select \{[\s\S]*?min-height: var\(--ctl-h-lg\)/);
+  // …with the shutter as the golden-rectangle primary (width = height × φ).
+  assert.match(capture, /\.capture-live__shoot \{[\s\S]*?min-width: calc\(var\(--ctl-h-xl\) \* var\(--phi\)\)/);
+  assert.match(capture, /\.capture-live__shoot \{[\s\S]*?min-height: var\(--ctl-h-xl\)/);
+
+  // Sibling forms are the same size: session form fields match capture inputs.
+  assert.match(sessionsCss, /\.field input,\s*\n\.field select \{[\s\S]*?min-height: var\(--ctl-h-lg\)/);
+  assert.match(capture, /\.capture-input \{\s*\n\s*min-height: var\(--ctl-h-lg\)/);
+});
+
+test('depth viewer: opaque page, safe-area panel, and a fully scrollable JSON column on phones', () => {
+  // The viewer is a full content page — the annotate UI must not bleed
+  // through the translucent overlay scrim behind it.
+  assert.match(viewerCss, /\.depth-viewer \{[\s\S]*?background: var\(--c-bg\)/,
+    'depth-viewer overlay paints an opaque page background');
+
+  // Panel clears the status bar / gesture nav via the injected insets
+  // (raw env() is 0 on this no-notch device) and clips internal overflow.
+  const panel = viewerCss.match(/\.depth-viewer__panel \{[\s\S]*?\}/)[0];
+  assert.match(panel, /--pa-safe-top/, 'panel pads by the injected top inset');
+  assert.match(panel, /--pa-safe-bottom/, 'panel pads by the injected bottom inset');
+  assert.match(panel, /overflow: hidden/, 'panel clips so children scroll internally');
+
+  // Portrait/narrow: the stacked body is the scroll container so the FULL
+  // JSON is reachable (it previously overflowed the panel and was cut off).
+  const portrait = viewerCss.match(/@media \(max-width: 760px\), \(orientation: portrait\) \{[\s\S]*$/)[0];
+  assert.match(portrait, /\.depth-viewer__body \{[\s\S]*?overflow-y: auto/,
+    'portrait body scrolls as one column');
+  assert.match(portrait, /\.depth-viewer__json \{[\s\S]*?overflow: visible/,
+    'portrait JSON grows to content instead of double-scrolling');
 });

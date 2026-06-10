@@ -470,9 +470,10 @@ const CaptureFlow = (() => {
       }
 
       // Auto re-scan sources when a USB camera is (un)plugged mid-capture, so a
-      // re-attached Orbbec reappears without leaving the surface. Only fires once
-      // the native SDK context is live (after an Orbbec open/preview); the manual
-      // "Find camera" button covers the cold first-plug case.
+      // (re)attached Orbbec reappears without leaving the surface. The native
+      // plugin emits orbbecDeviceChange from a USB hotplug BroadcastReceiver
+      // registered at plugin load (no SDK context needed), so this covers the
+      // cold first-plug case too; "Find camera" remains as a manual fallback.
       async function _subscribeDeviceChange() {
         const Orbbec = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Orbbec;
         if (!Orbbec || typeof Orbbec.addListener !== 'function') return;

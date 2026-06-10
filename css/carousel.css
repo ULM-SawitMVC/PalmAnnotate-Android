@@ -40,7 +40,7 @@
   font-family: var(--f-body);
   font-weight: 600;
   font-size: 0.9rem;
-  min-height: 40px;
+  min-height: var(--ctl-h-sm);
   padding: 0 1.1rem;
   border-radius: calc(var(--r-md) - 3px);
   cursor: pointer;
@@ -172,7 +172,7 @@
   position: relative;
   width: 26px;
   height: 10px;
-  border-radius: 6px;
+  border-radius: var(--r-full);
   border: 1px solid var(--c-border);
   background: var(--c-surface-raised);
   cursor: pointer;
@@ -227,7 +227,7 @@
   --chip-color: var(--c-accent);
   appearance: none;
   min-width: 52px;
-  min-height: 48px;
+  min-height: var(--ctl-h);
   padding: 0 0.9rem;
   border-radius: var(--r-md);
   border: 2px solid var(--chip-color);
@@ -247,7 +247,7 @@
 
 .crsl-action {
   appearance: none;
-  min-height: 48px;
+  min-height: var(--ctl-h);
   padding: 0 1.1rem;
   border-radius: var(--r-md);
   border: 1px solid var(--c-border-hover);
@@ -281,7 +281,7 @@
   gap: 0.4rem;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-full);
   padding: 0.25rem 0.4rem 0.25rem 0.3rem;
 }
 .crsl-link-badge {
@@ -310,7 +310,7 @@
 
 /* On fine-pointer (desktop) shrink the touch targets a touch. */
 @media (pointer: fine) {
-  .crsl-chip, .crsl-action { min-height: 38px; }
+  .crsl-chip, .crsl-action { min-height: var(--ctl-h-sm); }
   .crsl-edge { width: 44px; }
 }
 
@@ -332,7 +332,7 @@
 
   .crsl-chip,
   .crsl-action {
-    min-height: 44px;
+    min-height: var(--ctl-h-min);
   }
 }
 
@@ -354,8 +354,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--ctl-h-sm);
+  min-height: var(--ctl-h-sm);
   padding: 0 0.6rem;
   border-radius: var(--r-md);
   border: 1px solid var(--c-border);

@@ -1,6 +1,6 @@
 {
   "name": "palmannotate",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "PalmAnnotate — oil palm image annotation tool. Dual-target: web (File System Access API) and Android (Capacitor).",
   "license": "MIT",

@@ -1,14 +1,272 @@
-# HANDOFF — Mobile UI: status-bar dead zone, phone CSS, overlay/popup clipping
+# HANDOFF — Mobile UI: status-bar dead zone, phone CSS, overlay/popup clipping, v2.0 design system
 
-_Last updated: 2026-06-10 (session 4). Branch `main`. Sessions 2+3 are now COMMITTED
-(`5f26c34` "Add Better Mobile" + `61e5ded` "Update Safe-Area"); session-4 changes below are
-UNCOMMITTED in the working tree._
+_Last updated: 2026-06-10 (session 9). Branch `main`. Sessions 2+3 are COMMITTED
+(`5f26c34` "Add Better Mobile" + `61e5ded` "Update Safe-Area"); session-4 through
+session-9 changes below are UNCOMMITTED in the working tree (the session-8 work
+may have been committed as `d94aa28` "Update UI fix bug" — verify with git log)._
+
+## Session 9 (2026-06-10) — v2.0 control-height scale + Orbbec cold-plug detection/pre-warm. DEVICE-BLIND.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 45,321,011 bytes
+(≈43.2 MiB), fresh 2026-06-10 12:57. **205/205 tests pass** (2 guard tests added/updated).
+`adb devices` empty — BOTH changes below need device confirmation.
+
+### A. v2.0 control-height scale (operator: "buttons not same size, golden ratio, pixel perfect")
+
+Operator screenshot (Orbbec capture screen) showed the live control cluster at FOUR different
+heights: Cancel 56 / camera select 48 / Find camera 48 / Capture 64, plus app-wide drift
+(session form 52 vs capture form 56, pa-modal buttons 50, tabs 42, GPS chip 38).
+
+- **`css/style.css :root`** — new tokens (the law for every interactive control's min-height):
+  `--phi: 1.618`, `--ctl-h-min: 44px` (HIG floor), `--ctl-h-sm: 40px`, `--ctl-h: 48px`
+  (Material target), `--ctl-h-lg: 56px`, `--ctl-h-xl: 64px`. 8px rhythm; sm→xl endpoints in
+  the golden ratio (40 × 1.618 ≈ 64).
+- **Same-size fixes (visual changes):** capture-live Cancel/select/Find-camera all → 56px;
+  shutter min-width 128px → `calc(64px × φ)` ≈ 104px (golden rectangle at minimum; text/padding
+  may widen); sessions form fields + seg buttons 52 → 56 (now match the capture form);
+  pa-modal buttons 50 → 48; phone tab strip 42 → 44; capture QA GPS chip 38 → 40; reviewall
+  retake 44 → 48; inline top-bar select 44 → 48; narrow-phone capture inputs 52 → 48.
+- **Token-only swaps (zero visual change):** every other control min-height in `capture.css`,
+  `sessions.css`, `carousel.css`, `viewer.css`, `phone.css`, and style.css's
+  `@media (pointer: coarse)` touch pass now reads a `--ctl-h-*` token.
+- **Deliberately untouched:** `ux-compact.css` (tablet-only, operator-approved), phone.css's
+  52px bottom-nav tab (its height feeds the 64px editor-area reservation: 4+52+4=60),
+  style.css panel/header min-heights, the 32px `.btn-class--xs`.
+- **Guards:** new ui-shell test "v2.0 control heights read the --ctl-h scale" (tokens exist; raw
+  px control min-heights banned in the 4 sheets; phone.css allowed exactly one 52px; capture
+  cluster equality + golden-rectangle shutter asserted). Two older 56px/44px literal assertions
+  updated to the tokens. Also re-verified: all 58 used `var(--*)` tokens across css/ resolve.
+
+### B. Orbbec cold-plug detection (operator: "camera not found until ~2 min of Find-camera spam")
+
+Root cause: **the app was blind to USB attach until the first successful Orbbec open.** The
+SDK's `DeviceChangedCallback` only registers when an `OBContext` exists, and the context was
+created lazily inside `open()`/`startPreview()`. So a cold plug emitted no event; the only
+discovery path was manually pressing "Find camera" — and `refresh()` ALSO tore down a healthy
+SDK context on every press (full multi-second re-init each time), which is why spamming
+open/close/Find-camera eventually worked.
+
+- **`OrbbecPlugin.kt`** — new USB hotplug `BroadcastReceiver` (vendor 0x2BC5 filtered) registered
+  in the plugin's `load()`, no SDK context needed: ATTACH → `warmUpSdk()` (background OBContext
+  init on the camera executor, permission-gated, never opens a Pipeline) + `orbbecDeviceChange`
+  to JS (capture surface auto-rebuilds its source list — no clicking); DETACH with empty bus →
+  the same stop/join/close teardown as the SDK callback (idempotent), covering the no-context
+  case. Receiver unregistered in `handleOnDestroy`. `refresh()` is now non-destructive: teardown
+  only when the bus is EMPTY; if a device is present it keeps the healthy context and pre-warms.
+- **`js/capture/capture-flow.js`** — comment-only update (the orbbecDeviceChange subscription now
+  covers cold first-plug; JS logic unchanged — it already rebuilt on the event).
+- **Manifest was already correct** (USB_DEVICE_ATTACHED intent-filter + orbbec_usb_filter.xml),
+  so plug-while-app-closed prompts to open the app and grants USB permission via the system flow.
+- **Guard:** new android-config test "Orbbec cold-plug: hotplug receiver at load, SDK pre-warm,
+  non-destructive refresh".
+- **Honest limit:** the Gemini 335L's own firmware boot after power-up still takes however long
+  it takes — the fix removes the *app-side* blindness and the self-inflicted context teardowns,
+  so the source appears as soon as Android enumerates the device.
+
+### Device checklist for session 9 (nothing seen on a screen yet)
+
+1. Capture screen, builtin camera selected → plug the Orbbec in (powered hub) → the Camera
+   selector should appear by itself within a few seconds of Android's USB sound, no
+   "Find camera" needed. Select Orbbec → preview should start noticeably faster (pre-warmed).
+2. Unplug → selector disappears/falls back; replug → reappears. Then "Find camera" once —
+   should return fast (no multi-second SDK re-init) and not kill a working preview.
+3. v2.0 sizing spot-check: live capture cluster (Cancel / CAMERA select / Find camera all equal
+   height, Capture larger), session form vs capture form inputs same height, delete-confirm
+   modal buttons, bottom tabs. Light + dark.
+4. Regression-watch: Orbbec preview still smooth (R8 stays OFF — unrelated but always verify),
+   capture/stop/reopen/detach per the CLAUDE.md Orbbec checklist.
+
+## Session 8 (2026-06-10) — Orbbec preview lag ROOT-CAUSED to R8 (bdcd500), not the bridge. Sessions 6–7 reverted.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 45,315,863 bytes
+(≈43.2 MiB — ~3 MB larger than the R8 builds, still far under the original 85.8 MiB).
+**202/202 tests pass.** `adb devices` empty. NEEDS DEVICE CONFIRMATION.
+
+Operator report: the live Orbbec preview is STILL laggy after the session-6/7 ack-gating "fix",
+**but it worked perfectly before the APK-size commit `bdcd500`** ("Optimize Android APK size").
+
+**Bisection (decisive):** `git diff bdcd500 HEAD` for `OrbbecPlugin.kt` and `orbbec-source.js` is
+**empty** — the preview code is byte-for-byte identical to when it worked. So the regression is in
+`bdcd500`'s BUILD CONFIG, not the code. `bdcd500` changed four things; I verified the native side
+is fully intact in the built APK (`libOrbbecSDK.so`, `libobsensor_jni.so`, `libob_frame_processor.so`,
+`libFilterProcessor.so`, depth engine, `libomp.so` all present at full size), so the ABI filter and
+slim-AAR are innocent. That leaves **R8 code minification** (`minifyEnabled true` +
+`proguard-android-optimize.txt`, enabled for debug AND release in `bdcd500`) as the only change that
+alters runtime behaviour — and "worked → one frame then freeze" exactly when minify switched on is
+the classic signature of R8 stripping/optimising the Orbbec SDK's JNI/reflection frame-callback path
+beyond what the keep rules cover.
+
+**This means sessions 6–7 were a MISDIAGNOSIS.** The ack-gating assumed "the WebView can't drain
+frames fast enough" — disproven by the preview running smoothly at full frame-rate before `bdcd500`.
+The ack-gating sat on top of the real bug and its own failure mode (acks stalling → ~1 fps) mimics
+the snapshot symptom.
+
+What changed this session:
+
+- **Reverted sessions 6–7** entirely on the preview path: `git checkout HEAD --`
+  `OrbbecPlugin.kt`, `orbbec-source.js`, `orbbec-source.test.mjs`, `android-config.test.mjs`
+  (removed ack-gating + the 720→640 downscale + the ack guard/tests), restoring the exact
+  last-known-good pump.
+- **`android/app/build.gradle`** — `minifyEnabled false` + `shrinkResources false` for debug AND
+  release (with a long comment explaining why). KEPT the real size wins (independent of R8): ONNX
+  model shrink + slim arm64 Orbbec AAR + arm64-only ABI.
+- **`CLAUDE.md`** — rewrote the "Current APK build direction" header: R8 is now deliberately OFF,
+  with the bisection rationale and a do-not-re-enable-without-device-verifying warning.
+- **`android-config.test.mjs`** — flipped the guard: new test "R8 minification stays OFF until the
+  Orbbec preview is device-verified" asserts `minifyEnabled false`/`shrinkResources false`.
+- **Gotcha hit & fixed:** `git checkout` on Windows re-expanded `OrbbecPlugin.kt` to **CRLF**
+  (autocrlf; repo has no `.gitattributes`), which broke the one disconnect-teardown test marker that
+  spans a line break (`/**\n * Start…`). Normalized the file back to **LF** — it now byte-matches
+  the committed blob (zero git diff). If a future `git checkout` of a `.kt`/multi-line-marker file
+  trips a test, suspect CRLF first.
+
+**DEVICE-CONFIRMED 2026-06-10 — hypothesis was correct.** Operator installed this APK and the live
+preview works again: a smooth RGB stream plus the colorized depth PiP, Orbbec USB camera selected
+(screenshot on the Xiaomi Pad 6, "View 1/4" capture screen). R8 minification was the cause; the
+ack-gating (sessions 6–7) was an unnecessary misdiagnosis and stays reverted.
+
+**Remaining (optional) follow-up:** R8 is now OFF, so the debug/release APK is ~3 MB larger than the
+R8 builds (still far under the original 85.8 MiB). If the smaller APK is wanted back, the path is to
+reintroduce R8 **on release only**, add Orbbec-specific keep rules, and RE-VERIFY the live preview on
+the device before trusting it — re-enabling R8 blind will reintroduce the freeze. Recommendation:
+leave R8 off unless the size is actually a problem; the working camera is worth 3 MB.
+
+### Session 8b — Orbbec preview cropped/cut-off in portrait → letterboxed. Rebuilt.
+
+**BUILD SUCCESSFUL** — `app-debug.apk` 45,316,147 bytes (≈43.2 MiB), 2026-06-10 12:36. **203/203
+tests pass.** Operator report (phone screenshot, Orbbec selected): the live preview was cut off —
+only a centre slice of the scene was visible. Cause: the Orbbec is a fixed **landscape 16:9** USB
+camera but `.orbbec-live__main` used `object-fit: cover`, which crops the wide frame to fill the
+portrait (9:16) screen — and `capture()` saves the FULL landscape frame, so what you framed ≠ what
+you got. Fix (`css/capture.css`): `@media (orientation: portrait) { .orbbec-live__main { object-fit:
+contain } }` — the whole frame is now letterboxed (black bars top/bottom) and matches the captured
+image exactly. Landscape/tablet keeps `cover` (approved, untouched). Guard:
+`ui-shell.test.mjs` "Orbbec live preview letterboxes its landscape frame in portrait". **Device check
+still pending for this one** — confirm the full FOV is visible in portrait and the captured photo
+matches the letterboxed preview.
+
+## Session 7 (2026-06-10) — handoff issue sweep: all classes clean; one ack-rejection fix. DEVICE STILL ABSENT.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 42,272,538 bytes
+(≈40.3 MiB), fresh 2026-06-10 07:42. **204/204 tests pass** (1 new guard). `adb devices` empty
+AGAIN — device verification (Next Steps step 1) remains the blocking task before commit.
+
+Audited everything actionable from this handoff with no device attached:
+
+- **Class-1 sweep (raw `env()`)** — every remaining usage matches the deliberate-skip list exactly:
+  `ux-compact.css` tablet floating palette, `.header__inner--wide`/`.workspace` (tablet), capture
+  overlay root (`capture.css:24`), reviewall retake (`capture.css:801`), dead `.rotate-gate`. Clean.
+- **Class-2 sweep (clipped popups), banned-paint sweep (`backdrop-filter`/`filter:blur`/
+  `transition:all`), undefined-token cross-check (every `var(--x)` in css/ resolves to a
+  definition)** — all clean.
+- **Build provenance** — `www/` matches root sources file-for-file; APK timestamp was newer than
+  every source file (session 6's build really did contain the ack fix).
+- **Session-6 ack pump re-review** — Kotlin side sound (increment-before-notify, 1 s timeout
+  fallback, reset in startPump, clamp-at-0 ack). Found ONE real defect on the JS side:
+  `orbbec-source.js` `_ackFrame` called `Orbbec.ackPreview()` fire-and-forget inside a sync
+  `try/catch` — Capacitor bridge methods return promises, so a rejection (USB detach racing the
+  rAF-deferred ack) would escape as an **unhandled promise rejection**, violating the non-throwing
+  capture contract. Fixed: the returned promise now gets `.catch(() => {})`. New guard:
+  `orbbec-source.test.mjs` "ack is fire-and-forget — a rejecting ackPreview never escapes"
+  (asserts zero `unhandledRejection` events when the mock ack throws).
+
+No other code changes — sessions 4–6 work was verified internally consistent. Everything below
+session 6's device checklist is unchanged and still pending a physical device.
+
+## Session 6 (2026-06-10) — Orbbec live preview freeze/lag root-caused + fixed. DEVICE-BLIND.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 42,272,422 bytes
+(≈40.3 MiB), fresh 2026-06-10 07:33. **203/203 tests pass** (2 new guards). `adb devices` empty.
+
+Operator bug report (phone screenshot, reproduced on tablet AND phone): Orbbec USB camera
+preview shows ONE frame then freezes — "like a snapshot, not live"; whole screen laggy; native
+capture itself still produces good photos. Root cause (source-verified, two compounding defects
+in the preview pump, `OrbbecPlugin.kt`):
+
+1. **No backpressure on the Capacitor bridge.** `runPump()` emitted a preview frame every 80 ms
+   via `notifyListeners("orbbecFrame", …)`; each becomes an `evaluateJavascript` of a huge base64
+   JSON string queued on the Android MAIN thread. The WebView (JS parse → event dispatch →
+   data-URI base64 decode → JPEG decode → raster) can't drain at that rate, the queue grows
+   unboundedly → first frame paints, then the UI is permanently behind = frozen preview + global
+   jank. Capture worked because the camera pipeline/pump live on native threads.
+2. **The "downscaled" preview was NOT downscaled.** `COLOR_PREVIEW_MAX_DIM = 720` is unreachable
+   by the power-of-two `inSampleSize` from the preferred ~1280-wide profile (1280/2 = 640 < 720 →
+   inSampleSize stays 1), so FULL 1280×720 JPEGs (~100–200 KB base64) crossed the bridge 12.5×/s.
+
+Fix (both sides of the bridge):
+
+- **`OrbbecPlugin.kt`** — ack-gated pump: new `previewPending` (AtomicInteger) +
+  `lastPreviewEmitMs`; `runPump` emits only when `previewReady(now)` (pending == 0, or
+  `PREVIEW_ACK_TIMEOUT_MS = 1_000L` elapsed so a lost ack degrades to ~1 fps instead of freezing);
+  `emitPreview` increments pending before `notifyListeners`; new `@PluginMethod ackPreview()`
+  decrements; `startPump` resets both. `COLOR_PREVIEW_MAX_DIM` 720→**640** (reachable: 1280→640×360),
+  `COLOR_PREVIEW_JPEG_QUALITY` 60→**55**.
+- **`js/capture/orbbec-source.js`** — `_onFrame` paints, then acks via
+  `requestAnimationFrame(() => Orbbec.ackPreview())` (coalesced, best-effort, guarded for old
+  plugins without the method) — stream rate self-adapts to the device's real paint rate.
+- **Guards:** `android-config.test.mjs` "preview pump is ack-gated and genuinely downscaled";
+  `orbbec-source.test.mjs` "mountPreview acks every preview frame".
+
+**Verified-by-source + compiled only — NOT seen on a device.** The fix mechanism (frame pacing)
+can only be confirmed with the Orbbec attached: open capture → Orbbec source → preview must
+track camera movement continuously for ≥60 s with the UI staying responsive; also retest
+capture, stop/reopen, and cable detach/reconnect (CLAUDE.md Orbbec checklist).
+
+## Session 5 (2026-06-10) — "PalmAnnotate v2.0" UI consistency pass. STILL DEVICE-BLIND.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 42,268,026 bytes
+(≈40.3 MiB), fresh 2026-06-10 07:12. **201/201 tests pass** (1 new guard added).
+`adb devices` empty AGAIN — sessions 2–5 have never been seen on a real screen.
+
+Operator ask: "all tabs/pages still clunky, shapes not good, not consistent — define a new era,
+PalmAnnotate v2.0, same features, really improved UI." Diagnosis: the colour system was already
+tokenized, but **shape/elevation/label type were not** — `sessions.css` and `ux-compact.css`
+ignored the `--r-*` scale entirely (ad-hoc 3/4/6/8/10/12/14/16/18/22/999px radii), labels ranged
+0.65–0.8rem with 5 letter-spacings, shadows were copy-pasted rgba blocks, and two literal bugs
+existed (`.modal__title` referenced a `--f-heading` token that was never defined; a duplicate
+`.btn--accent` block repainted accent buttons in off-palette literal greens
+`#22c55e/#16a34a`, overriding the token variant).
+
+What changed (ALL features/markup/JS untouched — pure CSS system + version stamp):
+
+- **Shape scale (style.css `:root`)** — radius tokens are now the law:
+  `--r-xs:4 / --r-sm:8 / --r-md:12 / --r-lg:16 / --r-xl:24 / --r-full:999` (old scale was
+  6/12/20/28). EVERY `border-radius` in EVERY css file now reads a token; **zero raw px radii
+  remain** (verified by grep + new guard test). Cards = lg, buttons/inputs/toasts = md, modals
+  (`.modal`, `.pa-modal__card`, `.quality-modal__panel`) = xl, chips/badges = xs, pills = full.
+- **Elevation scale** — `--shadow-sm/--shadow-soft/--shadow-lg` tokens; ad-hoc box-shadows in
+  modal/quality-modal/classbar/overflow-sheet/pa-modal now read them. `theme-light.css` redefines
+  all three.
+- **Micro-label type** — `--fs-label: 0.72rem` + `--ls-label: 0.08em`; all uppercase labels
+  (toolbar, form fields, section titles, stat labels, capture/source labels, QA titles, results
+  h3, dedup panel titles, depth-viewer) unified.
+- **Heading identity** — `.home__hero h1` (1.9rem) and `.sheet__top h1` (1.45rem) now use
+  `--f-display` serif weight 400, matching capture titles / empty states — one title voice app-wide.
+- **Component fixes** — deleted the duplicate gradient `.btn--accent` (token variant + proper
+  `:disabled` kept); `.modal__title` → bold sans (dead `--f-heading` ref removed); `.btn` weight
+  500→600 (matches every other button); `.dedup-help:hover` text `#fff`→`--c-on-accent`; toggle
+  switch knob `#0c120c`→`--c-on-accent` (both were light-theme contrast bugs); global
+  `:focus-visible` accent ring via `:where(...)` (specificity 0).
+- **Version stamp** — `package.json` 2.0.0; `build.gradle` default `versionName` '2.0'
+  (env `PA_VERSION_NAME` still overrides).
+- **`test/ui-shell.test.mjs`** — new guard "v2.0 shape/elevation/label tokens are the single
+  source of truth": tokens exist; raw-px `border-radius` banned in all 8 sheets (0 / 50% / var /
+  calc still legal); gradient btn--accent and `--f-heading` stay dead; focus ring + serif titles
+  asserted. **201 tests pass.**
+
+Verified-by-source only. **Visual risk notes for device check:** radius steps moved (lg 20→16,
+xl 28→24, sm 6→8) so EVERYTHING is slightly different curvature — that is the point, but eyeball
+the carousel stage, session cards, and modals; hero/sheet titles render in Instrument Serif now;
+accent buttons (`#btn-save-output`, capture-tree) are lime/token instead of green gradient. The
+tablet IS affected by these token changes (deliberate — operator asked for app-wide v2.0), unlike
+sessions 2–4 which were phone-scoped.
 
 ## Session 4 (2026-06-10) — modal clipping + WebView paint cost. STILL DEVICE-BLIND.
 
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, 42,267,122 bytes
+(≈40.3 MiB), fresh 2026-06-10 06:46. 200/200 tests pass.
 `adb devices` was empty AGAIN — nothing from sessions 2–4 has ever been seen on a real screen.
 **Device verification (Next Steps step 1 below) remains the blocking task before commit.**
-200/200 tests pass.
 
 Changes this session (same two bug classes, swept further):
 
@@ -138,9 +396,12 @@ row, so the 210px sheet ran off the left edge and `#panel-dedup { overflow:hidde
 3. Proactively keep sweeping classes, not single screens — if a new clip/overlap shows up, grep for
    the pattern (`env(safe-area-inset`, `position:\s*absolute` inside `overflow:hidden`) across `css/`.
 4. Once verified good, **commit** (sessions 2+3 are committed; the session-4 modal/perf changes
-   are still UNCOMMITTED). Add to the device checklist: (g) open **Output Settings** and **Bunch
-   Class Resolution** modals on the phone in landscape — footer buttons must stay reachable, body
-   scrolls; (h) tablet ambient glow still looks right without the blur filter.
+   AND the session-5 v2.0 design pass are still UNCOMMITTED). Add to the device checklist: (g) open
+   **Output Settings** and **Bunch Class Resolution** modals on the phone in landscape — footer
+   buttons must stay reachable, body scrolls; (h) tablet ambient glow still looks right without the
+   blur filter; (i) **v2.0 spot-check**: sessions home (serif hero, 16px-radius cards, accent CTA),
+   carousel floating palettes on the tablet, any modal (24px radius), accent export buttons (lime
+   token, no green gradient), dark AND light theme.
 
 ## Build / toolchain quick ref (this machine)
 ```

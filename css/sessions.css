@@ -42,8 +42,11 @@
 
 .home__hero { text-align: left; }
 .home__hero h1 {
-  font-size: 1.6rem;
-  font-weight: 700;
+  /* v2.0: page-level titles share the app's display serif (same identity as
+     the capture flow / empty states) instead of a one-off bold sans. */
+  font-family: var(--f-display);
+  font-size: 1.9rem;
+  font-weight: 400;
   letter-spacing: -0.01em;
   color: var(--c-text);
   margin: 0;
@@ -69,7 +72,7 @@
   min-width: 0;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   padding: var(--space-lg) var(--space-md);
   display: flex;
   flex-direction: column;
@@ -88,9 +91,9 @@
 .stat-card--gold .stat-card__num { color: var(--c-gold); }
 .stat-card--emerald .stat-card__num { color: var(--c-emerald); }
 .stat-card__label {
-  font-size: 0.7rem;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-muted);
 }
 .stat-card--sm { padding: var(--space-md) var(--space-sm); }
@@ -105,9 +108,9 @@
   justify-content: center;
   gap: 0.5rem;
   width: 100%;
-  min-height: 56px;
+  min-height: var(--ctl-h-lg);
   border: none;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--c-accent);
   color: var(--c-on-accent);
   font-size: 1.05rem;
@@ -133,10 +136,10 @@
 
 .home__section-title,
 .sheet__list-title {
-  font-size: 0.8rem;
+  font-size: var(--fs-label);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-dim);
   margin: 0 0 var(--space-sm);
 }
@@ -167,7 +170,7 @@
   text-align: left;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: var(--space-md);
   cursor: pointer;
   transition: border-color 0.12s ease, background 0.12s ease;
@@ -193,14 +196,14 @@
   font-variant-numeric: tabular-nums;
   color: var(--c-accent);
   background: var(--c-accent-dim);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 0.15rem 0.45rem;
 }
 .list-row__del {
   flex: 0 0 auto;
   width: 48px;
   border: 1px solid var(--c-border);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: transparent;
   color: var(--c-text-dim);
   cursor: pointer;
@@ -216,7 +219,7 @@
 .home__empty,
 .sheet__empty {
   border: 1px dashed var(--c-border);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: var(--space-lg);
   text-align: center;
   color: var(--c-text-muted);
@@ -243,9 +246,9 @@
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 48px;
+  min-height: var(--ctl-h);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--c-text-muted);
   font-size: 0.9rem;
@@ -264,8 +267,9 @@
 }
 .sheet__top h1 {
   flex: 1;
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-family: var(--f-display);
+  font-size: 1.45rem;
+  font-weight: 400;
   margin: 0;
   color: var(--c-text);
 }
@@ -274,7 +278,7 @@
   width: 44px;
   height: 44px;
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--c-text);
   cursor: pointer;
@@ -288,7 +292,7 @@
 .sheet__banner {
   background: var(--c-accent-dim);
   border: 1px solid rgba(184, 224, 74, 0.25);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: var(--space-md);
   color: var(--c-text);
   font-size: 0.9rem;
@@ -303,7 +307,7 @@
   gap: var(--space-md);
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   padding: var(--space-md) var(--space-lg);
 }
 .lock-badge__icon {
@@ -326,7 +330,7 @@
 .form-card {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 18px;
+  border-radius: var(--r-lg);
   padding: var(--space-lg);
   display: flex;
   flex-direction: column;
@@ -334,18 +338,20 @@
 }
 .field { display: flex; flex-direction: column; gap: 0.35rem; }
 .field > label {
-  font-size: 0.78rem;
+  font-size: var(--fs-label);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-muted);
 }
+/* Same height as the capture form's inputs (--ctl-h-lg) — the two forms are
+   sibling surfaces and were visibly different sizes at 52 vs 56px. */
 .field input,
 .field select {
   width: 100%;
-  min-height: 52px;
+  min-height: var(--ctl-h-lg);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--c-bg);
   color: var(--c-text);
   font-size: 1rem;
@@ -363,9 +369,9 @@
   gap: var(--space-sm);
 }
 .seg__btn {
-  min-height: 52px;
+  min-height: var(--ctl-h-lg);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: var(--c-bg);
   color: var(--c-text-muted);
   font-size: 1.15rem;
@@ -388,7 +394,7 @@
   gap: var(--space-md);
   background: var(--c-accent-dim);
   border: 1px solid rgba(184, 224, 74, 0.25);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   padding: var(--space-md);
 }
 .toggle-card__text { flex: 1; display: flex; flex-direction: column; gap: 0.1rem; }
@@ -402,7 +408,7 @@
   inset: 0;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   transition: background 0.15s ease;
 }
 .switch__slider::before {
@@ -417,7 +423,7 @@
   transition: transform 0.15s ease, background 0.15s ease;
 }
 .switch input:checked + .switch__slider { background: var(--c-accent); border-color: var(--c-accent); }
-.switch input:checked + .switch__slider::before { transform: translateX(22px); background: #0c120c; }
+.switch input:checked + .switch__slider::before { transform: translateX(22px); background: var(--c-on-accent); }
 
 /* ── Touch feedback ───────────────────────────────────────────────────── */
 
@@ -496,7 +502,7 @@
 
   .home__stats--three .stat-card {
     padding: var(--space-md) var(--space-xs);
-    border-radius: 16px;
+    border-radius: var(--r-lg);
   }
 
   .home__stats--three .stat-card__num {
@@ -544,9 +550,9 @@
   overflow-y: auto;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border);
-  border-radius: 18px;
+  border-radius: var(--r-xl);
   padding: var(--space-lg);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-lg);
 }
 .pa-modal__title {
   margin: 0 0 var(--space-sm);
@@ -563,8 +569,8 @@
 .pa-modal__actions { display: flex; gap: var(--space-sm); }
 .pa-modal__btn {
   flex: 1;
-  min-height: 50px;
-  border-radius: 12px;
+  min-height: var(--ctl-h);
+  border-radius: var(--r-md);
   border: 1px solid var(--c-border);
   font-size: 1rem;
   font-weight: 700;

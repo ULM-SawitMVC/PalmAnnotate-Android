@@ -201,7 +201,10 @@ const DepthViewer = (() => {
     const panel = _el('div', 'depth-viewer__panel');
 
     const header = _el('div', 'depth-viewer__header');
-    header.appendChild(_el('h2', 'depth-viewer__title', `Depth & raw — ${tree.name}`));
+    const titles = _el('div', 'depth-viewer__titles');
+    titles.appendChild(_el('h2', 'depth-viewer__title', 'Depth & RAW'));
+    titles.appendChild(_el('div', 'depth-viewer__subtitle', tree.name));
+    header.appendChild(titles);
     const closeBtn = _el('button', 'capture-btn capture-btn--ghost depth-viewer__close', 'Close');
     closeBtn.type = 'button';
     header.appendChild(closeBtn);

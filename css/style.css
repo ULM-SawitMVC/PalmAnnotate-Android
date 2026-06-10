@@ -62,16 +62,53 @@
   --space-xl: 2.5rem;
   --space-2xl: 4rem;
 
-  /* Radius */
-  --r-sm: 6px;
+  /* ── Radius (v2.0 SHAPE SCALE — single source of truth) ───────────────────
+     Every border-radius in every stylesheet reads one of these six steps, so
+     adjacent components always share the same curvature. Guard-tested: a raw
+     px radius anywhere in css/ is a regression.
+       --r-xs   tiny chips, kbd, badges, status pills' square cousins
+       --r-sm   small buttons, compact controls, list chips
+       --r-md   buttons, inputs, toolbar controls, toasts
+       --r-lg   cards, panels, dropdown sheets, floating palettes
+       --r-xl   modals, full-screen sheets, hero surfaces
+       --r-full true pills / circles-by-height */
+  --r-xs: 4px;
+  --r-sm: 8px;
   --r-md: 12px;
-  --r-lg: 20px;
-  --r-xl: 28px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-full: 999px;
+
+  /* ── Control-height scale (v2.0 SIZE SCALE — single source of truth) ──────
+     Every interactive control's min-height reads one of these steps, so
+     controls that sit next to each other are always the same size. 8px rhythm;
+     the sm→xl endpoints sit in the golden ratio (40 × 1.618 ≈ 64).
+       --ctl-h-min  44px — bare-minimum tap target (HIG); touch-pass enlargers
+       --ctl-h-sm   40px — compact chips, segmented buttons, dense rows
+       --ctl-h      48px — standard buttons/selects (Material touch target)
+       --ctl-h-lg   56px — prominent form inputs, capture chrome, CTAs
+       --ctl-h-xl   64px — the capture shutter / primary action row
+     Guard-tested: a raw px control min-height in the phone-facing sheets is a
+     regression. */
+  --phi: 1.618;
+  --ctl-h-min: 44px;
+  --ctl-h-sm: 40px;
+  --ctl-h: 48px;
+  --ctl-h-lg: 56px;
+  --ctl-h-xl: 64px;
+
+  /* ── Uppercase micro-label type (one style everywhere) ──────────────────── */
+  --fs-label: 0.72rem;
+  --ls-label: 0.08em;
 
   /* Transitions */
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* ── Elevation (v2.0 — three steps, no ad-hoc box-shadows) ──────────────── */
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.28);
   --shadow-soft: 0 14px 36px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.45);
 
   /* ── System safe-area insets (SINGLE SOURCE OF TRUTH) ─────────────────────
      CRITICAL Android gotcha: env(safe-area-inset-top) only resolves to the
@@ -123,6 +160,14 @@ button { cursor: pointer; font-family: inherit; }
 input { font-family: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
 .hidden { display: none !important; }
+
+/* One focus ring for every interactive control (keyboard / switch-access).
+   :focus-visible only — taps don't flash it. :where() keeps specificity at 0
+   so any component can still opt into its own focus style. */
+:where(button, [href], input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
 
 /* ---- Ambient BG ---- */
 .bg-grain {
@@ -230,7 +275,7 @@ body.is-home .header { display: none; }
   border: none;
   border-radius: var(--r-md);
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   padding: 0.625rem 1.25rem;
   transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), color 0.2s var(--ease), background-color 0.2s var(--ease), border-color 0.2s var(--ease);
   white-space: nowrap;
@@ -249,7 +294,8 @@ body.is-home .header { display: none; }
   background: var(--c-accent);
   color: var(--c-on-accent);
 }
-.btn--accent:hover { filter: brightness(1.06); }
+.btn--accent:hover:not(:disabled) { filter: brightness(1.06); }
+.btn--accent:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn--outline {
   background: transparent;
@@ -349,7 +395,7 @@ body.is-home .header { display: none; }
 .tree-meta {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   border: 1px solid var(--c-border);
   font-family: var(--f-mono);
   font-size: 0.7rem;
@@ -524,9 +570,9 @@ body.is-home .header { display: none; }
 .toolbar-group { display: flex; flex-direction: column; gap: 4px; }
 
 .toolbar-label {
-  font-size: 0.65rem;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-dim);
 }
 
@@ -658,7 +704,7 @@ body.is-home .header { display: none; }
 }
 .dedup-help:hover {
   background: var(--c-accent);
-  color: #fff;
+  color: var(--c-on-accent);
   border-color: var(--c-accent);
 }
 
@@ -691,7 +737,7 @@ body.is-home .header { display: none; }
   padding: 0.15rem 0.4rem;
   font-size: 0.7rem;
   line-height: 1.1;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
 }
 
 .dedup-canvases {
@@ -744,7 +790,7 @@ body.is-home .header { display: none; }
   text-align: center;
   background: var(--c-scrim);
   padding: 1px 8px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   pointer-events: none;
 }
 
@@ -763,7 +809,7 @@ body.is-home .header { display: none; }
   color: var(--c-on-media);
   background: var(--c-scrim);
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   pointer-events: none;
 }
 
@@ -812,9 +858,9 @@ body.is-home .header { display: none; }
 .dedup-panel { display: flex; flex-direction: column; gap: var(--space-xs); }
 
 .dedup-panel-title {
-  font-size: 0.75rem;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-muted);
   border-bottom: 1px solid var(--c-border);
   padding-bottom: var(--space-xs);
@@ -879,7 +925,7 @@ body.is-home .header { display: none; }
   font-family: var(--f-mono);
   font-size: 0.62rem;
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   color: var(--c-text);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
@@ -897,7 +943,7 @@ body.is-home .header { display: none; }
 .btn-danger:hover { opacity: 0.85; }
 
 .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.75rem; cursor: pointer; font-family: var(--f-body); }
-.btn-xs { padding: 0.2rem 0.5rem; font-size: 0.7rem; cursor: pointer; font-family: var(--f-body); border-radius: 4px; }
+.btn-xs { padding: 0.2rem 0.5rem; font-size: 0.7rem; cursor: pointer; font-family: var(--f-body); border-radius: var(--r-xs); }
 
 /* ---- Results tab ---- */
 .results-header {
@@ -941,9 +987,9 @@ body.is-home .header { display: none; }
 .stat-linked .stat-value { color: var(--c-warn); }
 
 .stat-label {
-  font-size: 0.75rem;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-muted);
   margin-top: 0.3rem;
 }
@@ -956,9 +1002,9 @@ body.is-home .header { display: none; }
 }
 
 .results-table-block h3 {
-  font-size: 0.75rem;
+  font-size: var(--fs-label);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--ls-label);
   color: var(--c-text-muted);
   margin-bottom: var(--space-xs);
 }
@@ -1008,7 +1054,7 @@ kbd {
   font-size: 0.65rem;
   background: var(--c-surface-raised);
   border: 1px solid var(--c-border-hover);
-  border-radius: 3px;
+  border-radius: var(--r-xs);
   padding: 0 4px;
   line-height: 1.6;
   color: var(--c-text);
@@ -1086,10 +1132,10 @@ kbd {
 .modal {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--r-xl);
   width: 90%;
   max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   /* Tall content (e.g. the mismatch list on a short landscape phone) must
      scroll inside .modal__body instead of pushing the footer off-screen. */
@@ -1114,7 +1160,7 @@ kbd {
 }
 .mismatch-item {
   border: 1px solid var(--c-border);
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   padding: 10px 12px;
   background: var(--c-bg);
 }
@@ -1143,7 +1189,7 @@ kbd {
 }
 .mismatch-item__choice {
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   border: 1px solid var(--c-border);
   background: var(--c-surface-raised);
   color: var(--c-text-dim);
@@ -1168,7 +1214,9 @@ kbd {
   flex-shrink: 0;
 }
 .modal__title {
-  font-family: var(--f-heading);
+  /* Dialog titles are bold body sans (matches .pa-modal__title); the previous
+     font-family here referenced an --f-heading token that never existed. */
+  font-weight: 700;
   font-size: 1.25rem;
   color: var(--c-text);
   margin: 0 0 4px;
@@ -1203,16 +1251,16 @@ kbd {
   gap: 4px;
 }
 .form-label {
-  font-size: 0.78rem;
-  font-weight: 500;
+  font-size: var(--fs-label);
+  font-weight: 600;
   color: var(--c-text);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--ls-label);
 }
 .form-input {
   padding: 7px 10px;
   border: 1px solid var(--c-border);
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: var(--c-bg);
   color: var(--c-text);
   font-family: var(--f-body);
@@ -1258,7 +1306,7 @@ kbd {
 
 .toast {
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 0.82rem;
   font-family: var(--f-body);
   /* Theme-aware via tokens (single source of truth): readable text on the
@@ -1290,7 +1338,7 @@ kbd {
   font-size: 0.7rem;
   font-weight: 500;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--r-xs);
   white-space: nowrap;
 }
 .save-status--saved {
@@ -1311,25 +1359,13 @@ kbd {
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.25);
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   white-space: nowrap;
 }
 
-/* ==== Button accent variant ==== */
-
-.btn--accent {
-  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-  color: #fff;
-  border: none;
-  font-weight: 500;
-}
-.btn--accent:hover {
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-}
-.btn--accent:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+/* (The old duplicate .btn--accent gradient block was removed in v2.0 — it
+   repainted the accent buttons in off-palette literal greens, overriding the
+   token-based variant defined with the other .btn modifiers above.) */
 .btn--accent svg {
   width: 16px;
   height: 16px;
@@ -1405,7 +1441,7 @@ kbd {
    comfortable tap target without changing their look on mouse devices. */
 @media (pointer: coarse) {
   .tab {
-    min-height: 44px;
+    min-height: var(--ctl-h-min);
     padding-top: 0.55rem;
     padding-bottom: 0.55rem;
   }
@@ -1413,23 +1449,23 @@ kbd {
   .btn--sm,
   .btn-sm,
   .btn-xs {
-    min-height: 44px;
+    min-height: var(--ctl-h-min);
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
 
   .btn-icon {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--ctl-h-min);
+    min-height: var(--ctl-h-min);
   }
   .btn-icon--sm {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--ctl-h-sm);
+    min-height: var(--ctl-h-sm);
   }
 
   .btn-class {
-    min-height: 44px;
+    min-height: var(--ctl-h-min);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1438,7 +1474,7 @@ kbd {
   .btn-class--xs { min-height: 32px; }
 
   .side-pill {
-    min-height: 44px;
+    min-height: var(--ctl-h-min);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1592,7 +1628,7 @@ kbd {
 
   .tab {
     flex: 0 0 auto;
-    min-height: 42px;
+    min-height: var(--ctl-h-min); /* was an off-scale 42px — 44px tap minimum */
   }
 
   .tree-select {

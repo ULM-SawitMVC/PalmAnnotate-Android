@@ -81,6 +81,10 @@ test('DepthViewer.open renders per-side tabs, reads depth bytes + JSON, and repo
 
   const overlay = dom.document.querySelector('.depth-viewer');
   assert.ok(overlay, 'viewer overlay mounted');
+  // Title is "Depth & RAW" (RAW is a file format, not a word) with the tree
+  // name as a separate subtitle — no dangling em dash when the name wraps.
+  assert.equal(dom.document.querySelector('.depth-viewer__title').textContent, 'Depth & RAW');
+  assert.equal(dom.document.querySelector('.depth-viewer__subtitle').textContent, 'DAMIMAS_A_0001');
   assert.equal(dom.document.querySelectorAll('.depth-viewer__tab').length, 2, 'one tab per side');
 
   // Deterministically render side 0 (depth present).

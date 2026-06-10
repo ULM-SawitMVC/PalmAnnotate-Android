@@ -59,8 +59,21 @@ test('Android SDK and plugin dependencies cover the optimized debug APK', () => 
   assert.match(appGradle, /exclude 'assets\/armeabi-v7a\/\*\*'/);
   assert.match(appGradle, /exclude 'assets\/arm64-v8a\/extensions\/firmwareupdater\/\*\*'/);
   assert.match(appGradle, /implementation slimOrbbecFiles/);
-  assert.match(appGradle, /debug \{[\s\S]*minifyEnabled true[\s\S]*shrinkResources true/);
-  assert.match(appGradle, /release \{[\s\S]*minifyEnabled true[\s\S]*shrinkResources true/);
+});
+
+test('Android R8 minification stays OFF until the Orbbec preview is device-verified', () => {
+  // Regression guard. Enabling minify in bdcd500 ("Optimize Android APK size")
+  // is when the live Orbbec preview broke (worked perfectly before → froze after
+  // one frame). The preview code is unchanged across that commit and all native
+  // libs are present at full size in the APK, so R8 — the only runtime-behaviour
+  // change in that commit — is the cause (it strips/optimises the SDK's
+  // JNI/reflection frame-callback path beyond what the keep rules cover). The
+  // size wins that actually mattered (ONNX model shrink + slim arm64 Orbbec AAR)
+  // are independent of R8 and remain in place. Do NOT flip these back to `true`
+  // without first confirming the live preview streams smoothly on the device.
+  const appGradle = read('android/app/build.gradle');
+  assert.match(appGradle, /debug \{[\s\S]*minifyEnabled false[\s\S]*shrinkResources false/);
+  assert.match(appGradle, /release \{[\s\S]*minifyEnabled false[\s\S]*shrinkResources false/);
 });
 
 test('Android release builds require external signing credentials', () => {
@@ -168,6 +181,42 @@ test('Android Orbbec disconnect teardown serializes the native preview pump befo
 
   const closeSdk = sliceBetween(plugin, 'private fun closeSdkLocked()', '// ── Frame capture');
   assertInOrder(closeSdk, ['pumpRunning = false', 'pendingCapture.getAndSet(null)?.reject', 'safeStopAndClose(oldPipeline)']);
+});
+
+test('Android Orbbec cold-plug: hotplug receiver at load, SDK pre-warm, non-destructive refresh', () => {
+  // Regression guard for the "camera not found until ~2 minutes of Find-camera
+  // spam" report: the SDK's DeviceChangedCallback only exists after the first
+  // successful open, so before that the app was blind to USB attach. A plain
+  // Android BroadcastReceiver registered at plugin load (no SDK context needed)
+  // must notify JS AND pre-warm the OBContext, and refresh() must not tear down
+  // a healthy context (that forced a full multi-second SDK re-init per press).
+  const plugin = read('android/app/src/main/java/dev/sawitulm/palmannotate/OrbbecPlugin.kt');
+
+  assert.match(plugin, /override fun load\(\)[\s\S]*?registerUsbHotplugReceiver\(\)/);
+  assert.match(plugin, /UsbManager\.ACTION_USB_DEVICE_ATTACHED/);
+  assert.match(plugin, /UsbManager\.ACTION_USB_DEVICE_DETACHED/);
+
+  // Attach: pre-warm first, then tell JS to re-scan its source list.
+  const attach = sliceBetween(plugin, 'UsbManager.ACTION_USB_DEVICE_ATTACHED ->', 'UsbManager.ACTION_USB_DEVICE_DETACHED ->');
+  assertInOrder(attach, ['warmUpSdk()', 'notifyDeviceChange(true']);
+
+  // Detach with an empty bus tears down off the main thread (join before close).
+  const detach = sliceBetween(plugin, 'UsbManager.ACTION_USB_DEVICE_DETACHED ->', 'val filter = IntentFilter()');
+  assertInOrder(detach, ['stopPump()', 'cameraExecutor.execute', 'joinPump()', 'closeSdkLocked()', 'notifyDeviceChange(false']);
+
+  // Pre-warm: permission-gated, background, OBContext only — never a Pipeline.
+  const warm = sliceBetween(plugin, 'private fun warmUpSdk()', '// ── USB helpers');
+  assert.match(warm, /cameraExecutor\.execute/);
+  assert.match(warm, /hasPermission/);
+  assert.match(warm, /obContext = OBContext\(appContext, deviceChangedCallback\)/);
+  assert.doesNotMatch(warm, /Pipeline\(/);
+
+  // refresh(): teardown only when the bus is empty; otherwise keep + pre-warm.
+  const refresh = sliceBetween(plugin, 'fun refresh(call: PluginCall)', 'override fun handleOnDestroy');
+  assert.match(refresh, /if \(devices\.isEmpty\(\)\)[\s\S]*?closeSdkLocked\(\)[\s\S]*?\} else \{[\s\S]*?warmUpSdk\(\)/);
+
+  // The receiver is released with the plugin.
+  assert.match(plugin, /override fun handleOnDestroy\(\)[\s\S]*?unregisterUsbHotplugReceiver\(\)/);
 });
 
 test('Native activity uses a full-screen WebView and delegates Android Back to the SPA', () => {

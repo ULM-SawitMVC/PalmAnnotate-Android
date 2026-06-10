@@ -110,6 +110,7 @@ const CarouselUI = (() => {
   let _ptr = null; // { id, x0, y0, lastX, dx, dy, decided, isSwipe }
   let _hintTimer = null;
   let _destroyed = false;
+  let _resizeObs = null; // re-renders REVIEW when the canvas CSS box changes
 
   // ── Small helpers ───────────────────────────────────────────────────────────
 
@@ -1021,6 +1022,20 @@ const CarouselUI = (() => {
     _mode = MODE_REVIEW;
     _sideIndex = 0;
     _buildDom(containerEl);
+    // The stage is flex:1, so chrome rendered AFTER the canvas draw (links
+    // list, labels, hints) can still change the canvas's CSS box — the WebView
+    // then stretches the stale bitmap and the stored review transform no
+    // longer matches the screen, so the first tap on a box misses (and cancels
+    // an armed link). Redraw whenever the canvas's layout size changes; the
+    // EDIT-mode editor has its own ResizeObserver.
+    if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
+    if (typeof ResizeObserver !== 'undefined') {
+      _resizeObs = new ResizeObserver(() => {
+        if (_destroyed || _mode === MODE_EDIT) return;
+        _renderSide();
+      });
+      _resizeObs.observe(_canvas);
+    }
     _renderAll();
   }
 
@@ -1105,6 +1120,7 @@ const CarouselUI = (() => {
   function destroy() {
     _destroyed = true;
     _destroyEditor();
+    if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
     if (_hintTimer) { clearTimeout(_hintTimer); _hintTimer = null; }
     if (_stage) {
       _stage.removeEventListener('pointerdown', _onStageDown);

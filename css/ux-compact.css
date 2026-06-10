@@ -21,7 +21,7 @@ body.crsl-shell .carousel-topbar {
   min-height: 42px;
   padding: 4px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: linear-gradient(180deg, var(--c-glass-strong), var(--c-glass));
   /* No backdrop-filter blur: stacked live blurs (top bar + palette + action row
      + thumbs) are the main cause of WebView jank. The glass tokens are dark and
@@ -33,14 +33,14 @@ body.crsl-shell .crsl-topbtn,
 body.crsl-shell .crsl-seg__btn {
   min-height: 34px;
   min-width: 34px;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   font-size: 0.82rem;
   padding: 0 0.7rem;
 }
 
 body.crsl-shell .crsl-seg {
   padding: 2px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
 body.crsl-shell .crsl-treelabel,
@@ -81,9 +81,9 @@ body.crsl-shell .crsl-classbar {
   gap: 6px;
   padding: 6px;
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--c-glass);
-  box-shadow: 0 18px 38px rgba(0,0,0,0.28);
+  box-shadow: var(--shadow-soft);
 }
 
 body.crsl-shell .crsl-classbar__spacer {
@@ -95,7 +95,7 @@ body.crsl-shell .crsl-action {
   min-width: 54px;
   min-height: 42px;
   padding: 0 0.55rem;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   font-size: 0.82rem;
   white-space: nowrap;
 }
@@ -124,7 +124,7 @@ body.crsl-shell .crsl-actionrow {
   gap: 8px;
   padding: 6px;
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--c-glass);
 }
 
@@ -136,7 +136,7 @@ body.crsl-shell .crsl-thumbs {
   pointer-events: auto;
   max-width: min(42vw, 460px);
   padding: 4px;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background: var(--c-glass-soft);
 }
 
@@ -181,7 +181,7 @@ body.crsl-shell.crsl-show-tabs .tab {
   flex: 0 0 auto;
   padding: 0.5rem 0.9rem;
   font-size: 0.82rem;
-  border-radius: 10px;
+  border-radius: var(--r-sm);
 }
 
 /* "×" to dismiss the revealed editor-tools bar. Only meaningful on the tablet
@@ -200,7 +200,7 @@ body.crsl-shell.crsl-show-tabs .tab-close {
   font-size: 1.4rem;
   line-height: 1;
   border: 1px solid var(--c-border);
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--c-text-muted);
   cursor: pointer;
@@ -255,7 +255,7 @@ body.crsl-shell #results-container:empty::after {
 
 .annotation-sidebar .toolbar-group,
 .annotation-sidebar .quality-card {
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
 @media (pointer: coarse) and (min-width: 700px) {
@@ -277,7 +277,7 @@ body.crsl-shell #results-container:empty::after {
     bottom: 8px;
     max-height: calc(100% - 16px);
     border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 16px;
+    border-radius: var(--r-lg);
     background: var(--c-glass);
   }
   .canvas-wrapper {
@@ -289,7 +289,7 @@ body.crsl-shell #results-container:empty::after {
 .quality-card,
 .capture-qa {
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: rgba(255,255,255,0.035);
   overflow: hidden;
 }
@@ -307,9 +307,9 @@ body.crsl-shell #results-container:empty::after {
 .capture-qa__summary::-webkit-details-marker { display: none; }
 .quality-card__title,
 .capture-qa__title {
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: var(--ls-label);
   text-transform: uppercase;
   color: var(--c-text-muted);
 }
@@ -318,7 +318,7 @@ body.crsl-shell #results-container:empty::after {
   font-family: var(--f-mono);
   font-size: 0.66rem;
   padding: 0.15rem 0.35rem;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(255,255,255,0.08);
 }
 .quality-card--ok .quality-card__badge,
@@ -341,7 +341,7 @@ body.crsl-shell #results-container:empty::after {
   font-size: 0.66rem;
   color: var(--c-text-muted);
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 999px;
+  border-radius: var(--r-full);
   padding: 0.12rem 0.34rem;
   background: rgba(0,0,0,0.16);
 }
@@ -379,9 +379,9 @@ body.crsl-shell #results-container:empty::after {
   max-height: min(680px, 88vh);
   overflow: auto;
   border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 22px;
+  border-radius: var(--r-xl);
   background: var(--c-surface);
-  box-shadow: 0 28px 80px rgba(0,0,0,0.42);
+  box-shadow: var(--shadow-lg);
   padding: 1rem;
 }
 .quality-modal__panel h2 {

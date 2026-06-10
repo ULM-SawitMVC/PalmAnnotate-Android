@@ -3,15 +3,33 @@
 The Android build is intentionally optimized for the current 64-bit ARM device fleet:
 
 - APK ABI is restricted to `arm64-v8a`; `armeabi-v7a` is not packaged.
-- R8 code minification and Android resource shrinking are enabled for debug and release.
 - Gradle generates a slim Orbbec AAR from the untouched vendor AAR. The generated AAR removes
   the 32-bit libraries and the unused Orbbec firmware-updater extension.
 - The original vendor AAR remains in `android/app/libs/`, so these exclusions are reversible.
+- **R8 code minification + resource shrinking are DISABLED (deliberately, as of 2026-06-10).**
+  They were enabled in commit `bdcd500` and that is exactly when the live Orbbec preview
+  regressed: it worked perfectly before that commit and showed "one frame then freeze / laggy"
+  after. The preview code is byte-for-byte unchanged across `bdcd500`, and every Orbbec native
+  lib is present at full size in the built APK — so R8 (the only runtime-behaviour change in that
+  commit) is the cause; it strips/optimises something the Orbbec SDK reaches via its
+  JNI/reflection frame-callback path that the `proguard-rules.pro` keep rules don't cover.
+  **DEVICE-CONFIRMED on 2026-06-10:** with R8 off, the live RGB preview + colorized depth PiP
+  stream smoothly again on the Xiaomi Pad 6 (operator screenshot, Orbbec USB camera selected).
+  **Do NOT re-enable `minifyEnabled`/`shrinkResources` without re-verifying the live Orbbec
+  preview on a device** — re-enabling R8 reintroduces the freeze unless correct Orbbec keep rules
+  are first proven on-device. Guard test: `android-config.test.mjs` "R8 minification stays OFF…".
+  The keep rules in `proguard-rules.pro` are kept for when R8 is reintroduced with proper
+  Orbbec coverage. `proguard-rules.pro` is inert while minify is off.
 
-Verified on June 6, 2026: `app-debug.apk` decreased from `89,953,872` bytes (85.8 MiB) to
-`42,259,713` bytes (40.3 MiB), a reduction of about **52.0%**. The optimized APK installed and
-launched successfully on the Xiaomi Pad 6 with `primaryCpuAbi=arm64-v8a`, with no startup crash.
-Any future Orbbec SDK upgrade must preserve these exclusions and retest USB detection, RGB/depth
+The size wins that actually mattered are independent of R8 and remain in place: the ONNX model
+shrink (`models/ffb-detector.onnx`, ~38 MB → ~9.8 MB) and the slim arm64-only Orbbec AAR
+(firmware-updater + v7a libs removed). Disabling R8 only adds back the few MB of un-shrunk
+Java/Kotlin/Capacitor bytecode, so the APK stays well under the original ~85.8 MiB.
+
+Earlier note (June 6, 2026, WHEN R8 was still on): `app-debug.apk` had decreased from
+`89,953,872` bytes (85.8 MiB) to `42,259,713` bytes (40.3 MiB). With R8 now off the debug APK is
+modestly larger but the Orbbec preview path is restored to its last-known-good behaviour. Any
+future Orbbec SDK upgrade must preserve the AAR/ABI exclusions and retest USB detection, RGB/depth
 preview, capture, stop/reopen, and cable detach/reconnect on a physical Orbbec camera.
 
 # PalmAnnotate — Agent Guide
@@ -119,6 +137,11 @@ if it's missing. Install a JDK (17) and the Android SDK (cmdline-tools + `platfo
 >   fixed, surface the error and the last-good APK's status explicitly.
 > - Do not rely on Gradle incremental output for the final agent build. The expected final command is
 >   `clean assembleDebug` so the APK file is regenerated and its timestamp updates.
+> - **After every APK build, update `HANDOFF.md`** (same turn, right after reporting the build result):
+>   refresh the "Last updated" line, record the build outcome (BUILD SUCCESSFUL/failed + APK size +
+>   timestamp), what changed this session and why, what is verified vs. device-blind, and the current
+>   Next Steps / device checklist. HANDOFF.md is the cross-session continuity file — a stale handoff
+>   costs the next session a full re-discovery, so treat it as part of "the build is done".
 
 `npm run sync` / `cap sync` only copies web assets into the Android project; it does **not** produce
 an APK. To compile, set the env vars and run the Gradle wrapper. From **PowerShell** at the repo root:

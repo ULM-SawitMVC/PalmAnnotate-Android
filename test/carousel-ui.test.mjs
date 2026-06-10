@@ -42,7 +42,7 @@ function makeState() {
   };
 }
 
-function loadCarousel(state = makeState()) {
+function loadCarousel(state = makeState(), extraGlobals = {}) {
   const dom = makeDom();
   const calls = [];
   let linkSeq = 0;
@@ -106,6 +106,7 @@ function loadCarousel(state = makeState()) {
           };
         },
       },
+      ...extraGlobals,
     },
   });
 
@@ -175,6 +176,36 @@ test('CarouselUI links adjacent sides and removes the link from the touch list',
   dom.document.querySelector('.crsl-link-del').click();
   assert.equal(state.confirmedLinks.length, 0);
   assert.equal(calls.some(c => c.fn === 'removeConfirmedLink'), true);
+});
+
+test('CarouselUI re-renders REVIEW when the canvas CSS box changes (stale-bitmap 2-tap bug)', async () => {
+  // Regression: chrome rendered AFTER the canvas draw (links list, labels)
+  // reflowed the flex:1 stage, CSS-stretched the stale bitmap, and left the
+  // review hit-test transform wrong — the first tap on a box missed (and
+  // cancelled an armed link) until a redraw. The canvas must be observed by a
+  // ResizeObserver whose callback redraws at the NEW size.
+  let roCb = null;
+  const observed = [];
+  class CapturingResizeObserver {
+    constructor(cb) { roCb = cb; }
+    observe(el) { observed.push(el); }
+    disconnect() {}
+  }
+  const { dom } = loadCarousel(makeState(), { ResizeObserver: CapturingResizeObserver });
+  await waitForImageRender();
+
+  const canvas = dom.document.querySelector('.carousel-canvas');
+  assert.ok(observed.includes(canvas), 'review canvas is observed for layout resizes');
+
+  // Layout shifts the canvas box after the initial draw…
+  canvas.clientWidth = 500;
+  canvas.clientHeight = 400;
+  roCb();
+  await waitForImageRender();
+
+  // …and the bitmap (and therefore the hit-test transform) is rebuilt to match.
+  assert.equal(canvas.width, 500, 'bitmap width follows the new CSS box');
+  assert.equal(canvas.height, 400, 'bitmap height follows the new CSS box');
 });
 
 test('CarouselUI renders host-hook chrome (Home/More + action row) and fires the hooks', async () => {

@@ -26,6 +26,7 @@ const DedupUI = (() => {
   let _destroyed = false;
   let _colorSeq = 0;
   let _listenersAttached = false;
+  let _resizeObs = null; // re-renders the pair when a canvas's CSS box changes
 
   // Edit state: which bbox is currently selected for class change / delete
   // { sideIdx: number, bboxId: string } | null
@@ -854,6 +855,21 @@ const DedupUI = (() => {
       _winUpAttached = true;
     }
     _listenersAttached = true;
+
+    // The canvases live in a flex/grid box whose size can change AFTER a
+    // render (the suggestion/links panels are filled in after the canvases
+    // draw, and they share the column). A stale bitmap gets CSS-stretched and
+    // _leftTr/_rightTr stop matching the screen, so the first tap misses its
+    // box. Re-render the pair whenever a canvas's layout size changes.
+    if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
+    if (typeof ResizeObserver !== 'undefined') {
+      _resizeObs = new ResizeObserver(() => {
+        if (_destroyed) return;
+        _renderPair();
+      });
+      _resizeObs.observe(_leftCanvas);
+      _resizeObs.observe(_rightCanvas);
+    }
   }
 
   // ── Edit actions (called from app.js keyboard + toolbar) ───────────────────
@@ -934,6 +950,7 @@ const DedupUI = (() => {
 
   function destroy() {
     _destroyed = true;
+    if (_resizeObs) { _resizeObs.disconnect(); _resizeObs = null; }
     _leftImage = null; _rightImage = null;
     _leftTr = null; _rightTr = null;
     _hideMagnifier();

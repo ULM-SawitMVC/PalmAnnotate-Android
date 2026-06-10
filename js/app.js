@@ -316,7 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return b;
     };
 
-    sheet.appendChild(mkBtn('Depth & raw viewer', 'Inspect captured .raw depth + JSON', () => {
+    sheet.appendChild(mkBtn('Depth & RAW viewer', 'Inspect captured .raw depth + JSON', () => {
       const tree = window.DatasetManager && DatasetManager.getTree && DatasetManager.getTree();
       if (!tree) { _showToast('Open a tree first to inspect its depth.', 'info'); return; }
       if (window.DepthViewer && DepthViewer.open) DepthViewer.open(tree);

@@ -28,7 +28,7 @@ function bbox(id, classId = 0, coords = [10, 10, 110, 110]) {
   return { id, classId, className, x1, y1, x2, y2 };
 }
 
-function loadDedup(state = null) {
+function loadDedup(state = null, extraGlobals = {}) {
   const dom = makeDom();
   const windowEvents = new Map();
   const calls = [];
@@ -124,6 +124,7 @@ function loadDedup(state = null) {
         const set = windowEvents.get(type);
         if (set) set.delete(handler);
       },
+      ...extraGlobals,
     },
   });
 
@@ -168,6 +169,35 @@ function mouseDown(el, x = 20, y = 20) {
     preventDefault() {},
   });
 }
+
+test('DedupUI re-renders the pair when a canvas CSS box changes (stale-bitmap 2-tap bug)', async () => {
+  // Regression: the suggestion/links panels are filled in AFTER the canvases
+  // draw and share the column, so the canvas box could change post-draw —
+  // the stale bitmap got CSS-stretched and _leftTr/_rightTr stopped matching
+  // the screen, making the first tap on a box miss (cancelling a pending
+  // link). Both canvases must be observed and redrawn at the new size.
+  let roCb = null;
+  const observed = [];
+  class CapturingResizeObserver {
+    constructor(cb) { roCb = cb; }
+    observe(el) { observed.push(el); }
+    disconnect() {}
+  }
+  const { ctx, left, right } = loadDedup(null, { ResizeObserver: CapturingResizeObserver });
+  ctx.DedupUI.showPair(0);
+  await waitForRender();
+
+  assert.ok(observed.includes(left) && observed.includes(right),
+    'both dedup canvases observed for layout resizes');
+
+  left.clientWidth = right.clientWidth = 500;
+  left.clientHeight = right.clientHeight = 400;
+  roCb();
+  await waitForRender();
+
+  assert.equal(left.width, 500, 'left bitmap follows the new CSS box');
+  assert.equal(right.height, 400, 'right bitmap follows the new CSS box');
+});
 
 test('DedupUI manual click-link creates a confirmed adjacent-side link', async () => {
   const { ctx, session, calls, left, right, links, dispatchWindow } = loadDedup();
