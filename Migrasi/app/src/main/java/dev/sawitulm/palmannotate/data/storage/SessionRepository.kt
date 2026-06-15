@@ -119,9 +119,11 @@ class SessionRepository(
 
         persistSides(treeKey, treeName, split, sides, safTreeUri)
 
-        // Advance the tree-id counter past the highest used id.
+        // Advance the tree-id counter past the highest used id. MUST be an UPDATE,
+        // not upsert(REPLACE): replacing the existing run row cascade-deletes the
+        // tree we just inserted above (trees FK onDelete=CASCADE).
         val nextId = maxOf(run.nextId, treeId + 1)
-        sessionDao.upsert(run.copy(nextId = nextId, updatedAt = now))
+        sessionDao.update(run.copy(nextId = nextId, updatedAt = now))
         treeKey
     }
 
@@ -134,7 +136,7 @@ class SessionRepository(
         if (run != null) {
             val survivors = treeDao.getBySession(tree.sessionId)
             val maxId = survivors.maxOfOrNull { it.treeId } ?: 0
-            sessionDao.upsert(run.copy(nextId = maxId + 1, updatedAt = System.currentTimeMillis()))
+            sessionDao.update(run.copy(nextId = maxId + 1, updatedAt = System.currentTimeMillis()))
         }
     }
 
@@ -190,7 +192,9 @@ class SessionRepository(
         val treeKey = session.sessionId
         val tree = treeDao.getByKey(treeKey) ?: return@withContext
         val now = System.currentTimeMillis()
-        treeDao.upsert(tree.copy(updatedAt = now, sideCount = session.sides.size))
+        // UPDATE, not upsert(REPLACE): replacing the tree row would cascade-delete
+        // its sides/links before persistSides re-adds them.
+        treeDao.update(tree.copy(updatedAt = now, sideCount = session.sides.size))
         persistSides(treeKey, session.treeName, session.split, session.sides, safTreeUri)
         linkDao.deleteByTree(treeKey)
         linkDao.insertAll(session.confirmedLinks.map {
@@ -247,7 +251,9 @@ class SessionRepository(
             storage.writeText(storage.outputJsonFile(session.treeName), jsonText)
             if (safTreeUri != null) saf.writeText(safTreeUri, "Output JSON/${session.treeName}.json", jsonText)
             // Mark the tree complete (the JS "Compute & Mark Complete" green check).
-            treeDao.getByKey(session.sessionId)?.let { treeDao.upsert(it.copy(isComplete = true, updatedAt = System.currentTimeMillis())) }
+            // UPDATE, not upsert(REPLACE): REPLACE would cascade-delete the tree's
+            // sides/links (annotations) when flipping the complete flag.
+            treeDao.getByKey(session.sessionId)?.let { treeDao.update(it.copy(isComplete = true, updatedAt = System.currentTimeMillis())) }
         }
 
     // sessions.json index dropped on native (resume is folder-scan based)

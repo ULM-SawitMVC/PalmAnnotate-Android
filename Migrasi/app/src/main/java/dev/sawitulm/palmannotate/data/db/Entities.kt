@@ -125,6 +125,14 @@ interface SessionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(session: SessionEntity)
 
+    /**
+     * Update an EXISTING run in place. Must NOT go through INSERT-OR-REPLACE:
+     * REPLACE on an existing PK is a DELETE+INSERT, which cascade-deletes this
+     * run's trees (FK onDelete=CASCADE). Use this to advance nextId etc.
+     */
+    @Update
+    suspend fun update(session: SessionEntity)
+
     @Query("DELETE FROM sessions WHERE sessionId = :id")
     suspend fun deleteById(id: String)
 
@@ -154,6 +162,13 @@ interface TreeDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(tree: TreeEntity)
+
+    /**
+     * Update an EXISTING tree in place. Must NOT use INSERT-OR-REPLACE: REPLACE on
+     * an existing treeKey cascade-deletes this tree's sides/links (FK onDelete=CASCADE).
+     */
+    @Update
+    suspend fun update(tree: TreeEntity)
 
     @Query("DELETE FROM trees WHERE treeKey = :treeKey")
     suspend fun deleteByKey(treeKey: String)

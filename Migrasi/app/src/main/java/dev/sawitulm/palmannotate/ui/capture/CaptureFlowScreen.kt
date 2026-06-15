@@ -366,7 +366,7 @@ fun CaptureFlowScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp),
+                .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (run == null) {
@@ -397,7 +397,7 @@ fun CaptureFlowScreen(
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
 
             if (hasCameraPermission) {
                 // After all sides are captured the flow switches to ONE swipe
@@ -432,7 +432,7 @@ fun CaptureFlowScreen(
                     capturedImages = viewModel.capturedImages,
                     onSelect = { viewModel.goToSide(it) },
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
 
                 viewModel.saveError?.let { err ->
                     Text(
@@ -508,7 +508,7 @@ fun CaptureFlowScreen(
                 }
 
                 // Bottom progress dots.
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     repeat(viewModel.sideCount) { i ->
                         val captured = viewModel.capturedImages.getOrNull(i) != null
                         val current = i == viewModel.currentSide
