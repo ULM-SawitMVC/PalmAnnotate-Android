@@ -5,6 +5,7 @@ import dev.sawitulm.palmannotate.domain.dedup.SuggestionEngine
 import dev.sawitulm.palmannotate.domain.dedup.UnionFind
 import dev.sawitulm.palmannotate.domain.model.*
 import dev.sawitulm.palmannotate.domain.results.ResultsComputer
+import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -164,4 +165,75 @@ class TreeSideTest {
 class CrossSideLinkTest {
     @Test fun `link auto-orients`() { val link = CrossSideLink.create("L0", 2, "b1", 0, "b0"); assertEquals(0, link.sideA); assertEquals("b0", link.bboxIdA); assertEquals(2, link.sideB); assertEquals("b1", link.bboxIdB) }
     @Test(expected = IllegalArgumentException::class) fun `link rejects sideA greater than sideB`() { CrossSideLink("L0", 2, "b0", 0, "b1") }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Bbox.nextId — never-reused ids
+// ════════════════════════════════════════════════════════════════════════════════
+
+class BboxNextIdTest {
+    private fun b(id: String) = Bbox.unassigned(id, 0f, 0f, 10f, 10f)
+
+    @Test fun `nextId on empty list starts at zero`() {
+        assertEquals("b0", Bbox.nextId(emptyList(), "b"))
+        assertEquals("det0", Bbox.nextId(emptyList(), "det"))
+    }
+
+    @Test fun `nextId is one past the max numeric suffix`() {
+        assertEquals("b3", Bbox.nextId(listOf(b("b0"), b("b1"), b("b2")), "b"))
+    }
+
+    @Test fun `nextId never collides after a delete shrinks the list`() {
+        // Start with b0, b1, b2 → delete b1 → surviving {b0, b2}. size==2 would
+        // have produced "b2" (collision); nextId must produce a fresh id instead.
+        val surviving = listOf(b("b0"), b("b2"))
+        val newId = Bbox.nextId(surviving, "b")
+        assertTrue("new id must not collide", surviving.none { it.id == newId })
+        assertEquals("b3", newId)
+    }
+
+    @Test fun `nextId shares one sequence across prefixes`() {
+        // A detect id must not collide with a manually-added box and vice versa.
+        val existing = listOf(b("b0"), b("det1"))
+        assertEquals("det2", Bbox.nextId(existing, "det"))
+        assertEquals("b2", Bbox.nextId(existing, "b"))
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SessionUseCases — add/delete bbox correctness
+// ════════════════════════════════════════════════════════════════════════════════
+
+class SessionUseCasesBboxTest {
+    private fun side(i: Int, bboxes: List<Bbox>) =
+        TreeSide(i, "Side ${i + 1}", null, null, 1000, 1000, bboxes, emptyList())
+    private fun box(id: String) = Bbox.unassigned(id, 0f, 0f, 100f, 100f)
+    private fun session(sides: List<TreeSide>, links: List<CrossSideLink> = emptyList()) =
+        ActiveSession("s1", "t1", "field", sides, emptyList(), links, null)
+
+    @Test fun `delete then add yields a non-colliding id`() {
+        var s = session(listOf(side(0, listOf(box("b0"), box("b1"), box("b2")))))
+        s = SessionUseCases.deleteBbox(s, 0, "b1")          // surviving: b0, b2
+        s = SessionUseCases.addBbox(s, 0, 5f, 5f, 50f, 50f) // must not reuse "b2"
+        val ids = s.sides[0].bboxes.map { it.id }
+        assertEquals("no duplicate ids", ids.size, ids.toSet().size)
+        assertEquals(listOf("b0", "b2", "b3"), ids)
+    }
+
+    @Test fun `delete prunes confirmed links touching the box`() {
+        val s = session(
+            sides = listOf(
+                side(0, listOf(box("b0"), box("b1"))),
+                side(1, listOf(box("b0"), box("b1"))),
+            ),
+            links = listOf(
+                CrossSideLink.create("L0", 0, "b0", 1, "b0"),
+                CrossSideLink.create("L1", 0, "b1", 1, "b1"),
+            ),
+        )
+        val after = SessionUseCases.deleteBbox(s, 0, "b0") // removes (0,b0) → drops L0
+        assertEquals(1, after.confirmedLinks.size)
+        assertEquals("L1", after.confirmedLinks[0].linkId)
+        assertTrue(after.sides[0].bboxes.none { it.id == "b0" })
+    }
 }

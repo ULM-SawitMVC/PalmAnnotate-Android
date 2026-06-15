@@ -154,7 +154,9 @@ class CarouselViewModel @Inject constructor(
             try {
                 val detections = detector.detect(uri)
                 val s = session ?: return@launch
-                var nextId = side.bboxes.size
+                // Never-reused ids: each new box derives its id from the running
+                // box list so a prior delete can't make a detect id collide.
+                val running = side.bboxes.toMutableList()
                 val newBoxes = detections.filter { d ->
                     val overlaps = side.bboxes.any { existing ->
                         val existingArea = (existing.x2 - existing.x1) * (existing.y2 - existing.y1)
@@ -170,12 +172,18 @@ class CarouselViewModel @Inject constructor(
                         union > 0f && inter / union > 0.5f
                     }
                     !overlaps
-                }.mapIndexed { i, d ->
-                    val id = "det${nextId + i}"
-                    Bbox.unassigned(id, d.x1, d.y1, d.x2, d.y2)
+                }.map { d ->
+                    val id = Bbox.nextId(running, "det")
+                    Bbox.unassigned(id, d.x1, d.y1, d.x2, d.y2).also { running.add(it) }
                 }
+                // For freshly captured trees the annot-log baseline is empty;
+                // seed originalBboxes with the detector output (the suggestion baseline).
+                val baseline = if (side.originalBboxes.isEmpty()) newBoxes else side.originalBboxes
                 val updatedSides = s.sides.toMutableList()
-                updatedSides[currentSideIndex] = side.copy(bboxes = side.bboxes + newBoxes)
+                updatedSides[currentSideIndex] = side.copy(
+                    bboxes = side.bboxes + newBoxes,
+                    originalBboxes = baseline,
+                )
                 session = s.copy(sides = updatedSides)
             } catch (_: Exception) {
             } finally {

@@ -100,11 +100,8 @@ class AnnotationViewModel @Inject constructor(
     fun addBbox(x1: Float, y1: Float, x2: Float, y2: Float) {
         val s = session ?: return
         val side = s.sides.getOrNull(currentSideIndex) ?: return
-        val newId = "b${side.bboxes.size}"
-        val newBbox = Bbox.unassigned(newId, x1, y1, x2, y2)
-        val updatedSides = s.sides.toMutableList()
-        updatedSides[currentSideIndex] = side.copy(bboxes = side.bboxes + newBbox)
-        session = s.copy(sides = updatedSides)
+        val newId = Bbox.nextId(side.bboxes, "b")
+        session = SessionUseCases.addBbox(s, currentSideIndex, x1, y1, x2, y2)
         selectedBboxId = newId
     }
 
@@ -127,10 +124,8 @@ class AnnotationViewModel @Inject constructor(
 
     fun deleteBbox(bboxId: String) {
         val s = session ?: return
-        val side = s.sides.getOrNull(currentSideIndex) ?: return
-        val updatedSides = s.sides.toMutableList()
-        updatedSides[currentSideIndex] = side.copy(bboxes = side.bboxes.filter { it.id != bboxId })
-        session = s.copy(sides = updatedSides)
+        // Shared helper also prunes any confirmed/suggested links touching this box.
+        session = SessionUseCases.deleteBbox(s, currentSideIndex, bboxId)
         selectedBboxId = null
     }
 
@@ -150,8 +145,9 @@ class AnnotationViewModel @Inject constructor(
             try {
                 val detections = detector.detect(uri)
                 val s = session ?: return@launch
-                val existingIds = side.bboxes.map { it.id }.toSet()
-                var nextId = side.bboxes.size
+                // Never-reused ids: each new box derives its id from the running
+                // box list so a prior delete can't make a detect id collide.
+                val running = side.bboxes.toMutableList()
                 val newBoxes = detections.filter { d ->
                     val overlaps = side.bboxes.any { existing ->
                         val existingArea = (existing.x2 - existing.x1) * (existing.y2 - existing.y1)
@@ -167,12 +163,18 @@ class AnnotationViewModel @Inject constructor(
                         union > 0f && inter / union > 0.5f
                     }
                     !overlaps
-                }.mapIndexed { i, d ->
-                    val id = "det${nextId + i}"
-                    Bbox.unassigned(id, d.x1, d.y1, d.x2, d.y2)
+                }.map { d ->
+                    val id = Bbox.nextId(running, "det")
+                    Bbox.unassigned(id, d.x1, d.y1, d.x2, d.y2).also { running.add(it) }
                 }
+                // For freshly captured trees the annot-log baseline is empty;
+                // seed originalBboxes with the detector output (the suggestion baseline).
+                val baseline = if (side.originalBboxes.isEmpty()) newBoxes else side.originalBboxes
                 val updatedSides = s.sides.toMutableList()
-                updatedSides[currentSideIndex] = side.copy(bboxes = side.bboxes + newBoxes)
+                updatedSides[currentSideIndex] = side.copy(
+                    bboxes = side.bboxes + newBoxes,
+                    originalBboxes = baseline,
+                )
                 session = s.copy(sides = updatedSides)
             } catch (_: Exception) {
             } finally {
