@@ -1,9 +1,151 @@
 # HANDOFF — Mobile UI: status-bar dead zone, phone CSS, overlay/popup clipping, v2.0 design system
 
-_Last updated: 2026-06-10 (session 9). Branch `main`. Sessions 2+3 are COMMITTED
-(`5f26c34` "Add Better Mobile" + `61e5ded` "Update Safe-Area"); session-4 through
-session-9 changes below are UNCOMMITTED in the working tree (the session-8 work
-may have been committed as `d94aa28` "Update UI fix bug" — verify with git log)._
+## Session 12 (2026-06-15) — Orbbec Pad 8 glitch ROOT-CAUSED + FIXED. DEVICE-CONFIRMED via adb logcat.
+
+> **RESOLVED (final, device-confirmed): the cause is POWER, and the fix is to power the hub.**
+> A diagnostic build logged the SDK USB link type: `connection=USB3.2` — the Orbbec links at
+> SuperSpeed on the Pad 8, so **bandwidth is NOT the bottleneck** (the earlier `super_speed=false`
+> read was a red herring). A "lite RGB-D" rung then tried depth at the SMALLEST profile
+> (424x240@30 Y16, ≈6 MB/s) and it **still reset the device**, while color-only stays rock-stable.
+> Full-depth AND tiny-depth both reset; the only factor absent in color-only is the **depth/IR
+> subsystem powering on (IR laser + 2 IR sensors)** — its current draw exceeds what the Pad 8's
+> USB-C host supplies, so the camera browns out. **OPERATOR CONFIRMED the fix:** the project's hub
+> is a *powered* hub but its **own DC adapter had not been plugged into wall power**; once plugged
+> in, **full depth + color + IR all work on the Pad 8.** (The Pad 6 supplies more OTG current, so the
+> same hub+cable ran full depth there even unpowered — hence the confusion. Not the hub/cable.)
+>
+> **Final code (this session):** the proven-useless lite-depth rung was removed (it only added
+> glitch); the ladder is now 0 = full color+depth, 1 = color-only **+ emit `orbbecState` "needsPower"
+> hint**, 2 = suppress. **`capture-flow.js` now shows that hint as an on-media banner** on the capture
+> surface — "Depth needs more USB power… plug in the USB hub's power adapter, then tap Find camera" —
+> so an underpowered hub gives a clear, actionable message instead of a silent color-only glitch.
+> `css/capture.css` `.capture-live__hint` (on-media tokens). The SDK connection-type log is kept.
+> Guard tests updated; `npm test` 211/211. **Operating note for the Pad 8 fleet: the USB hub's power
+> adapter MUST be connected for the depth camera** — the app now says so on-screen.
+
+**BUILD SUCCESSFUL** — `app-debug.apk` ≈43.2 MiB, fresh 2026-06-15 17:11. **210/210 tests pass**
+(1 new guard test). Installed + verified on the Xiaomi Pad 8 (`25097RP43G` "yupei", Android 16 / SDK
+36, **page size 4096** — the 16 KB-page theory is fully dead).
+
+**Session 11's hypothesis (reopen race) was DISPROVEN by device evidence.** adb logcat on the Pad 8
+showed the real failure: a relentless **USB attach↔detach storm** (devnum walks `002/005→009→013→…`,
+~7 s period, framework logs the external camera `/dev/video9` going `NOT_PRESENT` each cycle — a real
+bus-level drop, not a software state issue). The Session-11 retry IS in the APK (stack line numbers
+match) but **never engages** here: `Pipeline.start(config)` SUCCEEDS, then the device drops
+asynchronously ~150 ms later, so no exception is thrown and the retry loop is never entered (zero
+"open attempt N/3" lines in the trace). Not a crash; the app is stable. The loop is sustained by the
+auto-reopen feedback path: native pre-warm on USB attach + JS `capture-flow.js` re-mounting the
+preview on every `orbbecDeviceChange` → `startPreview()` → `start()` → reset → detach → repeat.
+
+**ROOT CAUSE (device-confirmed):** starting the **depth stream** (IR laser projector + the second
+isochronous stream) is the USB power/bandwidth spike that makes the Gemini 335L reset off the bus on
+the Pad 8's USB host. Pad 6 (Android 14) tolerates the same start; Pad 8 turns the reset into a full
+hotplug storm. NOT a hardware/cable/hub fault (operator was right) — color+depth start simply exceeds
+what this port sustains.
+
+**Fix applied (`OrbbecPlugin.kt`, native-only — no JS/UI change needed; JS already handles no-depth):**
+a **flapping guard** that counts Orbbec detaches in a 20 s sliding window and steps down:
+- `FLAP_DEGRADE_AFTER = 2` detaches → `degradeToColorOnly` → `acquireStreamLocked` skips depth
+  (color-only = far lighter USB/power load).
+- `FLAP_SUPPRESS_AFTER = 3` further detaches → `unstableSuppressed`: `openSdkLocked()` throws,
+  `warmUpSdk()` no-ops, `isAvailable()` reports false → capture UI auto-falls back to the built-in
+  camera (loop fully broken, not just hammered).
+- Ladder resets on a clean replug (`FLAP_RESET_QUIET_MS = 30 s` quiet since last detach), on a manual
+  "Find camera" (`refresh()`) / clean `close()`, and once a stream holds `STABLE_STREAM_MS = 4 s`.
+- **Pad 6 / a healthy port never flaps → behaviour byte-for-byte unchanged (full color+depth).**
+
+**DEVICE-CONFIRMED on-device run (Pad 8, this session):** FULL attempt #1 → detach 002/005; FULL
+attempt #2 → detach 002/009 → log `Orbbec USB flapping — disabling depth; next open is color-only`;
+next open logged `Orbbec color-only mode (depth disabled…)` and then **streamed stably for ~53 s with
+zero detaches** until the operator unplugged adb. Operator confirms: live RGB preview works, depth PiP
+absent (expected). ~9 s of glitch (2 FULL retries) before it settles — `FLAP_DEGRADE_AFTER` kept at 2
+to avoid false-downgrading the healthy Pad 6 on a one-off cable wiggle.
+
+**Trade-off / known limitation:** on the Pad 8, **depth is sacrificed** (color-only) — annotation uses
+RGB anyway, so the workflow is intact; only the depth sidecar is lost on this device. Open follow-up
+if depth is wanted on Pad 8: try a lighter depth config (lower depth res/fps, or lower color res to
+free the USB power/bandwidth budget) and re-test on-device — but if the trigger is the IR-laser power
+draw, lowering resolution won't help. Not attempted this session (operator accepted color-only).
+
+**Guard test:** android-config.test.mjs "Orbbec flapping guard: device-confirmed (Pad 8 / Android 16)
+open→reset→reopen storm steps down to color-only then suppresses".
+
+## Session 11 (2026-06-15) — Orbbec reopen race on Android 16 (Xiaomi Pad 8). DEVICE-BLIND HYPOTHESIS — later SUPERSEDED.
+
+> **SUPERSEDED by Session 12 (device-confirmed):** the reopen-race hypothesis below was NOT the cause.
+> The retry hardening is harmless and stays in (defensive), but the real fix is the Session-12
+> flapping guard / color-only downgrade. Keep this entry for history only.
+
+**BUILD SUCCESSFUL** — `app-debug.apk` ≈43.2 MiB, fresh 2026-06-15 16:41. **209/209 tests pass**
+(1 new guard test).
+
+**Symptom (operator, Xiaomi Pad 8 / Android 16):** first USB plug of the Orbbec works — camera
+loads + streams; the **second attempt fails**, intermittently / hard to reproduce. **Same hub,
+cable, camera as the Xiaomi Pad 6 / Android 14 device, where it's smooth.** App does NOT crash;
+"Find camera" still detects the device. Operator: not a power issue, not the tablet itself.
+
+**Ruled out this session:** 16 KB page-size / native-lib crash (all `.so` are ELF-16KB-aligned;
+app doesn't crash). Raw USB power (powered hub, no charger, identical to Pad 6). USB permission
+code is already Android-16-correct (`FLAG_MUTABLE`, `RECEIVER_NOT_EXPORTED`).
+
+**Diagnosis (code-grounded):** the reopen-after-close path had **no retry**. After close/stop,
+`closeSdkLocked()` releases Pipeline/Device/OBContext, but the Orbbec native (libusb) handle can
+stay briefly busy. On reopen the device is still enumerated (`queryDevices` count > 0, so
+`queryDevicesWithRetry` returns immediately — its retry only covers count == 0), but
+`getDevice()`/`Pipeline.start()` throws because the old handle isn't fully released. Android 16
+reclaims USB FDs on a different schedule than 14, so Pad 8 hits this where Pad 6 never did →
+intermittent "second attempt fails".
+
+**Fix applied (`OrbbecPlugin.kt`):** `openSdkLocked()` now wraps the acquire (extracted to
+`acquireStreamLocked(ctx)`) in a release-settle-retry loop: `OPEN_RETRIES = 3`,
+`OPEN_RETRY_SETTLE_MS = 400`. On a failed attempt it `closeSdkLocked()` (drops the whole context),
+sleeps the settle interval, recreates the context, and retries. **Happy path (first attempt
+succeeds) is byte-for-byte unchanged** — so the working Pad 6 flow can't regress. Covers all three
+entry points (`open`/`startPreview`/`capture`) since they all call `openSdkLocked()`. Single-thread
+`cameraExecutor` already serializes these, and open runs while the pump is stopped, so the in-loop
+`Thread.sleep` under `stateLock` follows the existing `queryDevicesWithRetry` pattern.
+
+**Guard test:** android-config.test.mjs "open() self-heals a reopen that races a not-yet-released
+USB handle".
+
+**VERIFICATION STATUS — DEVICE-BLIND.** This is a hypothesis-driven hardening, not a confirmed fix:
+no Pad 8 was connected this session and the bug is intermittent. It should reduce/eliminate the
+second-attempt failures, but it is NOT proven on-device. **Next step to confirm:** on the Pad 8 via
+wireless adb, `logcat` for tag `PalmAnnotateOrbbec` while reproducing — look for "open attempt
+N/3 failed … retrying" lines (proves the race was hit) followed by a successful open (proves the
+retry healed it). If it still fails after 3 attempts, capture the underlying SDK/`libusb` exception
+to pinpoint the exact failing call.
+
+## Session 10 (2026-06-15) — new machine: fix test suite broken by username spaces + CRLF checkout. APK rebuilt.
+
+**BUILD SUCCESSFUL** — `android\app\build\outputs\apk\debug\app-debug.apk`, ≈43.2 MiB,
+fresh 2026-06-15. **208/208 tests pass** (was 0 of the android-config suite + 1 Orbbec
+guard failing before the fix).
+
+Project moved to a new machine whose Windows user folder contains spaces
+(`C:\Users\MyBook Z Series\…`) and whose git checks out source as **CRLF** (the old
+`Zainal` machine had neither). Two latent bugs in `test/android-config.test.mjs` surfaced:
+
+1. **`%20` in paths** — line 8 derived `root` via `new URL('..', import.meta.url).pathname`,
+   which leaves spaces URL-encoded as `%20`, so every `read()` hit `ENOENT`. Fixed to
+   `join(dirname(fileURLToPath(import.meta.url)), '..')` — same pattern `_harness.mjs`
+   already used.
+2. **CRLF vs `\n` markers** — the `sliceBetween` end marker `'/**\n     * Start the live
+   preview pump'` couldn't match `\r\n` in the CRLF-checked-out `OrbbecPlugin.kt`. `read()`
+   now normalizes `\r\n` → `\n` so guard markers match regardless of checkout EOL.
+
+CLAUDE.md toolchain table was already updated for this machine (JDK
+`C:\Users\MyBook Z Series\.jdks\jbr-17.0.14`, SDK in `AppData\Local\Android\Sdk`); build
+verified end-to-end with those paths. **No app/source/CSS changes** — only `test/*`; the
+APK is byte-equivalent in behaviour to session 9, rebuilt to confirm the toolchain works
+on this machine. R8 stays OFF. Device verification still pending (no `adb devices` checked
+this session).
+
+_Last updated: 2026-06-15 (session 12 — Orbbec Pad 8 flapping guard, DEVICE-CONFIRMED).
+Branch `main`. Sessions 2+3 are COMMITTED (`5f26c34` "Add Better Mobile" + `61e5ded`
+"Update Safe-Area"); session-4 through session-12 changes are UNCOMMITTED in the working
+tree (the session-8 work may have been committed as `d94aa28` "Update UI fix bug" — verify
+with git log)._
 
 ## Session 9 (2026-06-10) — v2.0 control-height scale + Orbbec cold-plug detection/pre-warm. DEVICE-BLIND.
 

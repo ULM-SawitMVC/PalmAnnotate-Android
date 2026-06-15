@@ -1,14 +1,17 @@
 'use strict';
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import assert from 'node:assert';
 
-const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function read(rel) {
-  return readFileSync(join(root, rel), 'utf8');
+  // Normalize CRLF → LF so multi-line markers match regardless of the checkout's
+  // line endings (git autocrlf differs per machine; some clones land CRLF).
+  return readFileSync(join(root, rel), 'utf8').replace(/\r\n/g, '\n');
 }
 
 function sliceBetween(source, start, end) {
@@ -181,6 +184,121 @@ test('Android Orbbec disconnect teardown serializes the native preview pump befo
 
   const closeSdk = sliceBetween(plugin, 'private fun closeSdkLocked()', '// ── Frame capture');
   assertInOrder(closeSdk, ['pumpRunning = false', 'pendingCapture.getAndSet(null)?.reject', 'safeStopAndClose(oldPipeline)']);
+});
+
+test('Android Orbbec open() self-heals a reopen that races a not-yet-released USB handle', () => {
+  // Regression guard for the "first plug works, second attempt fails / intermittent
+  // on Android 16, same hub+cable as the Android 14 device" report. After a close/stop
+  // the device is still enumerated (queryDevices count > 0) but the native handle from
+  // the previous session can be briefly busy, so getDevice()/Pipeline.start() throws on
+  // the immediate reopen — and that path had NO retry. openSdkLocked() must release the
+  // whole SDK context, settle, recreate it, and retry around the acquire.
+  const plugin = read('android/app/src/main/java/dev/sawitulm/palmannotate/OrbbecPlugin.kt');
+
+  assert.match(plugin, /OPEN_RETRIES\s*=\s*\d+/);
+  assert.match(plugin, /OPEN_RETRY_SETTLE_MS\s*=\s*\d+L/);
+
+  const open = sliceBetween(plugin, 'private fun openSdkLocked(): JSObject', 'private fun acquireStreamLocked(');
+  // Loop → try the acquire → on failure release the context, settle, then retry.
+  assertInOrder(open, [
+    'for (attempt in 0 until OPEN_RETRIES)',
+    'return acquireStreamLocked(',
+    'catch (e: Exception)',
+    'closeSdkLocked()',
+    'Thread.sleep(OPEN_RETRY_SETTLE_MS)',
+  ]);
+
+  // The acquire itself stays single-shot (the retry lives in openSdkLocked).
+  const acquire = sliceBetween(plugin, 'private fun acquireStreamLocked(ctx: OBContext): JSObject', 'private fun queryDevicesWithRetry');
+  assert.match(acquire, /queryDevicesWithRetry\(ctx\)/);
+  assert.match(acquire, /openedPipeline\.start\(config\)/);
+});
+
+test('Android Orbbec flapping guard: device-confirmed (Pad 8 / Android 16) POWER brownout falls back to color-only with a power hint, then suppresses', () => {
+  // DEVICE-CONFIRMED via adb logcat on the Xiaomi Pad 8 (Android 16, SDK 36):
+  // starting color+depth makes the Gemini 335L reset off the USB bus right after
+  // Pipeline.start() (devnum walks 002/005→009→013→…), and the auto-reopen (hotplug
+  // pre-warm + JS remount on orbbecDeviceChange) turns it into an endless
+  // open→reset→reopen loop — "detected but won't start". Root cause is POWER, not
+  // bandwidth: the SDK logs connection=USB3.2 (SuperSpeed — ample bandwidth) yet
+  // depth at ANY profile (even 424x240) resets while color-only is rock-stable; the
+  // depth/IR subsystem (laser + 2 IR sensors) draws more current than the Pad 8's
+  // USB-C host supplies → brownout. Confirmed fix: power the hub externally. The app
+  // can't make power, so it counts Orbbec detaches in a sliding window and steps DOWN
+  // each FLAP_STEP_AFTER: 1 = color-only + emit a power hint to JS, 2 = suppress +
+  // report unavailable so the UI uses the built-in camera. Pad 6 / a powered hub
+  // never flaps → full color+depth, untouched.
+  const plugin = read('android/app/src/main/java/dev/sawitulm/palmannotate/OrbbecPlugin.kt');
+
+  assert.match(plugin, /FLAP_WINDOW_MS\s*=\s*\d[\d_]*L/);
+  assert.match(plugin, /FLAP_STEP_AFTER\s*=\s*\d+/);
+  // Level views over the single degradeLevel source of truth (0 full → 2 suppress).
+  assert.match(plugin, /degradeLevel\s*=\s*0/);
+  assert.match(plugin, /degradeToColorOnly get\(\) = degradeLevel >= 1/);
+  assert.match(plugin, /unstableSuppressed get\(\) = degradeLevel >= 2/);
+
+  // The USB link type is logged (reflection-safe) — the signal that proved this is
+  // power, not bandwidth (connection=USB3.2 yet depth still browns out).
+  assert.match(plugin, /getConnectionType/);
+  assert.match(plugin, /connection=/);
+
+  // Detach is counted; attach can reset the ladder after a quiet (clean-replug) gap.
+  const detach = sliceBetween(plugin, 'UsbManager.ACTION_USB_DEVICE_DETACHED ->', 'val filter = IntentFilter()');
+  assert.match(detach, /noteDetachAndAssess\(\)/);
+  const attach = sliceBetween(plugin, 'UsbManager.ACTION_USB_DEVICE_ATTACHED ->', 'UsbManager.ACTION_USB_DEVICE_DETACHED ->');
+  assertInOrder(attach, ['maybeResetFlapLadder()', 'warmUpSdk()']);
+
+  // Each FLAP_STEP_AFTER detaches steps down one level (capped at 2): 1 → color-only
+  // with an actionable "needsPower" hint, 2 → suppress ("unstable").
+  const assess = sliceBetween(plugin, 'private fun noteDetachAndAssess()', 'private fun maybeResetFlapLadder()');
+  assertInOrder(assess, [
+    'recentDetaches.addLast',
+    'FLAP_STEP_AFTER',
+    'degradeLevel++',
+    'needsPower',
+    'unstable',
+  ]);
+  // The power hint is actionable (mentions the hub power adapter).
+  assert.match(assess, /Plug in the USB hub's power adapter/);
+
+  // Color-only skips the depth stream (and frees the sensor); full depth is the else.
+  const acquire = sliceBetween(plugin, 'private fun acquireStreamLocked(ctx: OBContext): JSObject', 'private fun queryDevicesWithRetry');
+  assert.match(acquire, /if \(depthSensor != null && degradeToColorOnly\)/);
+  assert.match(acquire, /else if \(depthSensor != null\)/);
+
+  // Suppressed: open refuses (stops feeding the storm), pre-warm no-ops, and the
+  // source reports unavailable so the capture UI switches to the built-in camera.
+  const open = sliceBetween(plugin, 'private fun openSdkLocked(): JSObject', 'private fun acquireStreamLocked(');
+  assert.match(open, /if \(unstableSuppressed\)[\s\S]*?throw IllegalStateException/);
+  assert.match(plugin, /if \(unstableSuppressed\) return@execute/);
+  assert.match(plugin, /ret\.put\("available", orbbecDevices\(\)\.isNotEmpty\(\) && !unstableSuppressed\)/);
+
+  // Explicit retries clear the ladder: "Find camera" (refresh) and clean teardown (close).
+  assert.match(plugin, /fun refresh\(call: PluginCall\)[\s\S]*?resetFlapLadder\(\)/);
+  assert.match(plugin, /fun close\(call: PluginCall\)[\s\S]*?resetFlapLadder\(\)/);
+
+  // A stream that holds stable forgets earlier detaches (no slow false downgrade).
+  assert.match(plugin, /markedStable[\s\S]*?recentDetaches\.clear\(\)/);
+});
+
+test('Capture surface surfaces the Orbbec degrade hint (power) as an on-media banner, not a silent glitch', () => {
+  // The native guard emits orbbecState when depth is disabled for lack of USB power;
+  // the capture surface must turn that into an actionable banner instead of leaving
+  // the operator with an unexplained color-only fallback.
+  const flow = read('js/capture/capture-flow.js');
+  assert.match(flow, /addListener\('orbbecState'/);
+  assert.match(flow, /capture-live__hint/);
+  // The hint clears when the stream recovers (state 'full') and is rendered on rebuild.
+  assert.match(flow, /ev\.state !== 'full'/);
+  assert.match(flow, /_renderHint\(\)/);
+
+  // The banner is styled over media with the on-media token family (light-on-dark in
+  // both themes) on a dark scrim — not theme-flipping --c-text.
+  const css = read('css/capture.css');
+  const hint = sliceBetween(css, '.capture-live__hint {', '.capture-live__hint[hidden]');
+  assert.match(hint, /color:\s*var\(--c-on-media\)/);
+  assert.match(hint, /background:\s*var\(--c-scrim\)/);
+  assert.doesNotMatch(hint, /var\(--c-text\)/);
 });
 
 test('Android Orbbec cold-plug: hotplug receiver at load, SDK pre-warm, non-destructive refresh', () => {

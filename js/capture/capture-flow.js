@@ -448,6 +448,9 @@ const CaptureFlow = (() => {
       let video = null;
       let progressHost = null;
       let deviceChangeHandle = null;  // native USB attach/detach subscription
+      let stateChangeHandle = null;   // native orbbecState (e.g. "depth disabled, needs hub power")
+      let orbbecHint = null;          // actionable banner text while the Orbbec stream is degraded
+      let hintEl = null;              // the banner element in the current surface build
       let buildSeq = 0;
 
       async function _stopCurrentPreview() {
@@ -465,8 +468,19 @@ const CaptureFlow = (() => {
           try { await deviceChangeHandle.remove(); } catch (_) {}
           deviceChangeHandle = null;
         }
+        if (stateChangeHandle && typeof stateChangeHandle.remove === 'function') {
+          try { await stateChangeHandle.remove(); } catch (_) {}
+          stateChangeHandle = null;
+        }
         await _stopCurrentPreview();
         resolve(val);
+      }
+
+      /** Show/hide the actionable degrade banner (set by the native orbbecState event). */
+      function _renderHint() {
+        if (!hintEl) return;
+        if (orbbecHint) { hintEl.textContent = orbbecHint; hintEl.hidden = false; }
+        else { hintEl.hidden = true; }
       }
 
       // Auto re-scan sources when a USB camera is (un)plugged mid-capture, so a
@@ -482,6 +496,17 @@ const CaptureFlow = (() => {
             if (settled || busy) return;
             await _stopCurrentPreview();
             if (!settled) _buildSurface();
+          });
+        } catch (_) { /* listener optional */ }
+        // The native flapping guard emits orbbecState when it degrades the stream —
+        // e.g. depth keeps browning the camera out for lack of USB power, so it falls
+        // back to color-only. Surface that as an actionable banner ("plug in the hub's
+        // power adapter, then tap Find camera") instead of leaving the operator with a
+        // silent, confusing glitch. A "full"/recovered state clears it.
+        try {
+          stateChangeHandle = await Orbbec.addListener('orbbecState', (ev) => {
+            orbbecHint = (ev && ev.message && ev.state !== 'full') ? ev.message : null;
+            if (!settled) _renderHint();
           });
         } catch (_) { /* listener optional */ }
       }
@@ -558,6 +583,13 @@ const CaptureFlow = (() => {
         live = previewMode !== 'oneshot';
 
         const panel = _el('div', 'capture-panel capture-live');
+
+        // Actionable degrade banner (populated by the native orbbecState event, e.g.
+        // "depth disabled — plug in the hub's power adapter"). Lives at the top of the
+        // panel so it's visible above the live preview; hidden until a state arrives.
+        hintEl = _el('div', 'capture-live__hint');
+        hintEl.hidden = true;
+        panel.appendChild(hintEl);
 
         // Top: side indicator + dots, plus the optional manual-ID field. The
         // camera/source switch now lives down in the control row (beside the
@@ -640,6 +672,7 @@ const CaptureFlow = (() => {
         shootBtn.addEventListener('click', () => _capture());
 
         _renderProgress();
+        _renderHint();  // re-show any active degrade hint on this fresh build
 
         // Open the live preview (reused across all targets). On failure, fall
         // back to a one-shot Capture button by rebuilding the surface.

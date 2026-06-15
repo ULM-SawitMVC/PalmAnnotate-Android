@@ -516,6 +516,31 @@ select.capture-input {
 .capture-live__top .capture-title,
 .capture-live__top .capture-subtitle { color: var(--c-on-media); }
 
+/* Actionable degrade banner over the live preview (e.g. "depth disabled — plug in
+   the USB hub's power adapter, then tap Find camera"). It sits over the camera, so
+   it uses the on-media token family (light-on-dark in BOTH themes) on a dark scrim,
+   with a --c-warn accent. Shown only while the native flapping guard has degraded
+   the stream; hidden otherwise. */
+.capture-live__hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  margin: 0;
+  padding: calc(var(--space-sm) + var(--pa-safe-top))
+           calc(var(--space-md) + var(--pa-safe-right))
+           var(--space-sm)
+           calc(var(--space-md) + var(--pa-safe-left));
+  background: var(--c-scrim);
+  color: var(--c-on-media);
+  border-bottom: 2px solid var(--c-warn);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  text-align: center;
+}
+.capture-live__hint[hidden] { display: none; }
+
 /* Inline source / tree-id controls in the top bar. */
 .capture-source--inline {
   flex-direction: row;

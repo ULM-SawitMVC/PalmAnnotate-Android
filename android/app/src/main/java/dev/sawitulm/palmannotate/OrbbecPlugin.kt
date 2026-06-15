@@ -74,6 +74,46 @@ class OrbbecPlugin : Plugin() {
         private const val FRAME_TIMEOUT_MS = 1_500L
         private const val DEVICE_QUERY_RETRIES = 8
         private const val DEVICE_QUERY_DELAY_MS = 250L
+        // Self-heal a reopen that races the previous session's not-yet-released USB
+        // handle: the device is still enumerated (count > 0) but the native layer is
+        // briefly busy, so getDevice()/Pipeline.start() throws. Android 16 reclaims
+        // USB file descriptors on a different schedule than 14, so the first reopen
+        // after a close/stop can hit this where Android 14 never did. On failure we
+        // drop the whole SDK context, settle, recreate it, and retry.
+        private const val OPEN_RETRIES = 3
+        private const val OPEN_RETRY_SETTLE_MS = 400L
+
+        // ── Flapping guard (Android-16 USB re-enumeration loop) ──────────────────
+        // DEVICE-CONFIRMED on the Xiaomi Pad 8 (Android 16): starting the full
+        // color+depth stream makes the Gemini 335L reset itself off the USB bus
+        // right after Pipeline.start() — a DETACH→ATTACH storm (devnum walks
+        // 002/005→009→013→…) that the auto-reopen (hotplug pre-warm + JS remount on
+        // orbbecDeviceChange → startPreview) turns into an endless
+        // open→reset→reopen loop, so the preview never stabilises ("detected but
+        // won't power on / open-close glitch"). Pad 6 (Android 14) never escalates
+        // the same reset into a hotplug storm. We count Orbbec detaches in a sliding
+        // window and step down: first disable depth (color-only drops the IR laser
+        // projector + halves the isochronous load — a far lighter USB/power draw),
+        // then, if it still flaps, suppress auto-open and report unavailable so the
+        // capture UI falls back to the built-in camera instead of hammering the bus.
+        // The ladder resets on a clean replug (quiet gap), a manual "Find camera",
+        // or once a stream has held stable — so Pad 6 / a healthy port is unaffected.
+        //
+        // DEVICE-CONFIRMED cause: POWER, not bandwidth. The SDK reports the link as
+        // USB3.2 (SuperSpeed — bandwidth is ample), yet enabling depth at ANY profile
+        // (even 424x240@30) resets the camera while color-only is rock-stable. The
+        // common factor is the depth/IR subsystem (laser projector + 2 IR sensors)
+        // powering on: its current draw exceeds what the Pad 8's USB-C host supplies
+        // to the camera, so it browns out. (The Pad 6 supplies more OTG current, so
+        // the same hub+cable run full depth there.) Confirmed fix: power the USB hub
+        // externally (its own DC adapter). The app cannot make power, so when depth
+        // keeps resetting it drops to color-only and tells the operator to plug the
+        // hub's power adapter in. degradeLevel: 0 = full color + depth, 1 = color-only
+        // (+ power hint to JS), 2 = suppress open (even color-only keeps resetting).
+        private const val FLAP_WINDOW_MS = 20_000L
+        private const val FLAP_STEP_AFTER = 2            // detaches in-window → step down one level
+        private const val FLAP_RESET_QUIET_MS = 30_000L  // quiet since last detach → fresh replug
+        private const val STABLE_STREAM_MS = 4_000L      // stream held this long → config proven good
 
         // ── Live preview (notifyListeners("orbbecFrame", …)) tuning ──────────────
         /** Minimum gap between emitted RGB preview frames (~12.5 fps) to spare the bridge. */
@@ -168,6 +208,19 @@ class OrbbecPlugin : Plugin() {
     private var streaming = false
     private var depthStreaming = false
 
+    // Flapping-guard state (see FLAP_* constants). Guarded by flapLock so the USB
+    // hotplug receiver, the camera executor and the pump can all touch it safely.
+    // degradeLevel is the source of truth (0 full → 3 suppress); the named flags
+    // below are read-only views so the open/acquire paths stay readable.
+    private val flapLock = Any()
+    private val recentDetaches = ArrayDeque<Long>()
+    private var lastDetachMs = 0L
+    @Volatile private var degradeLevel = 0
+    /** Level ≥ 1: drop the depth stream entirely (color-only) — depth browns the camera out. */
+    private val degradeToColorOnly get() = degradeLevel >= 1
+    /** Level ≥ 2: refuse to (re)open — even color-only keeps resetting. */
+    private val unstableSuppressed get() = degradeLevel >= 2
+
     // Live-preview pump: a dedicated thread is the SOLE reader of the pipeline
     // while streaming. capture() coordinates through pendingCapture so two threads
     // never call waitForFrameSet() on the same pipeline at once.
@@ -245,6 +298,82 @@ class OrbbecPlugin : Plugin() {
         }
     }
 
+    /**
+     * Surface a flapping-guard state change to JS (best-effort; ignored if no
+     * listener). state ∈ { "colorOnly", "unstable" }; the WebView may toast the
+     * message, but correctness does not depend on it — the native side already
+     * gates open()/warmUpSdk()/isAvailable() so the loop is broken regardless.
+     */
+    private fun notifyDeviceState(state: String, message: String) {
+        try {
+            notifyListeners("orbbecState", JSObject().put("state", state).put("message", message))
+        } catch (e: Exception) {
+            Log.d(TAG, "notifyDeviceState ignored", e)
+        }
+    }
+
+    // ── Flapping guard ───────────────────────────────────────────────────────
+
+    /**
+     * Record one physical Orbbec USB detach and step the flapping guard. Called
+     * from the kernel ACTION_USB_DEVICE_DETACHED branch only (one signal per real
+     * detach — the SDK callback is NOT counted to avoid double-counting). Detects
+     * the open→reset→reopen storm and steps down: first color-only, then suppress.
+     */
+    private fun noteDetachAndAssess() {
+        val now = System.currentTimeMillis()
+        var reachedLevel = 0
+        synchronized(flapLock) {
+            lastDetachMs = now
+            recentDetaches.addLast(now)
+            while (recentDetaches.isNotEmpty() && now - recentDetaches.first() > FLAP_WINDOW_MS) {
+                recentDetaches.removeFirst()
+            }
+            if (recentDetaches.size >= FLAP_STEP_AFTER && degradeLevel < 2) {
+                degradeLevel++
+                reachedLevel = degradeLevel
+                recentDetaches.clear()  // give the new (lighter) level its own fresh window
+            }
+        }
+        when (reachedLevel) {
+            1 -> {
+                Log.w(TAG, "Orbbec depth keeps resetting the camera (USB power budget) — switching to color-only")
+                notifyDeviceState("needsPower", "Depth needs more USB power than the tablet alone provides. Plug in the USB hub's power adapter, then tap \"Find camera\". Capturing RGB only for now.")
+            }
+            2 -> {
+                Log.w(TAG, "Orbbec keeps resetting even color-only — suppressing auto-open until a clean replug")
+                notifyDeviceState("unstable", "USB camera keeps resetting (check the hub's power adapter / cable). Replug it or use the built-in camera.")
+            }
+        }
+    }
+
+    /**
+     * Reset the flapping guard back to full color+depth when the bus has been
+     * quiet long enough since the last detach to be a genuine replug rather than
+     * the reset storm. Called on USB attach. No-op while a storm is in progress.
+     */
+    private fun maybeResetFlapLadder() {
+        val now = System.currentTimeMillis()
+        var didReset = false
+        synchronized(flapLock) {
+            if (lastDetachMs != 0L && now - lastDetachMs > FLAP_RESET_QUIET_MS &&
+                (degradeLevel > 0 || recentDetaches.isNotEmpty())) {
+                recentDetaches.clear()
+                degradeLevel = 0
+                didReset = true
+            }
+        }
+        if (didReset) Log.i(TAG, "Orbbec quiet since last detach — flapping guard reset (full color+depth re-enabled)")
+    }
+
+    /** Unconditionally clear the flapping guard (explicit user retry / clean teardown). */
+    private fun resetFlapLadder() {
+        synchronized(flapLock) {
+            recentDetaches.clear()
+            degradeLevel = 0
+        }
+    }
+
     // ── USB hotplug receiver (cold-plug detection + SDK pre-warm) ────────────
     //
     // The Orbbec SDK's DeviceChangedCallback only exists once an OBContext has
@@ -278,12 +407,17 @@ class OrbbecPlugin : Plugin() {
                 if (device == null || device.vendorId != ORBBEC_VENDOR_ID) return
                 when (intent.action) {
                     UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                        // A quiet gap since the last detach means a genuine replug, not
+                        // the reset storm — give full color+depth another chance.
+                        maybeResetFlapLadder()
                         Log.i(TAG, "USB attach: ${device.deviceName} — pre-warming SDK")
                         warmUpSdk()
                         notifyDeviceChange(true, orbbecDevices().size)
                     }
                     UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                         Log.i(TAG, "USB detach: ${device.deviceName}")
+                        // Count it for the flapping guard (open→reset→reopen storm).
+                        noteDetachAndAssess()
                         val remaining = orbbecDevices().size
                         if (remaining == 0) {
                             // Covers the case where the SDK callback never fires
@@ -333,6 +467,8 @@ class OrbbecPlugin : Plugin() {
     private fun warmUpSdk() {
         cameraExecutor.execute {
             try {
+                // Suppressed: the camera is in a reset storm — do not touch it.
+                if (unstableSuppressed) return@execute
                 val mgr = usbManager() ?: return@execute
                 val devices = orbbecDevices()
                 if (devices.isEmpty() || devices.none { mgr.hasPermission(it) }) return@execute
@@ -384,7 +520,11 @@ class OrbbecPlugin : Plugin() {
     @PluginMethod
     fun isAvailable(call: PluginCall) {
         val ret = JSObject()
-        ret.put("available", orbbecDevices().isNotEmpty())
+        // When the flapping guard has suppressed the camera (it keeps resetting off
+        // the bus), report it unavailable so the capture UI auto-selects the
+        // built-in camera instead of re-mounting a preview that just restarts the
+        // reset storm. A clean replug or "Find camera" clears the suppression.
+        ret.put("available", orbbecDevices().isNotEmpty() && !unstableSuppressed)
         call.resolve(ret)
     }
 
@@ -572,6 +712,9 @@ class OrbbecPlugin : Plugin() {
     /** Stop/release the Pipeline, Device and OBContext. */
     @PluginMethod
     fun close(call: PluginCall) {
+        // Explicit teardown (leaving the capture surface) — clear the flapping
+        // guard so the next session starts fresh at full color+depth.
+        resetFlapLadder()
         stopPump()
         cameraExecutor.execute {
             joinPump()
@@ -591,6 +734,10 @@ class OrbbecPlugin : Plugin() {
      */
     @PluginMethod
     fun refresh(call: PluginCall) {
+        // "Find camera" is an explicit operator retry — clear any flapping
+        // suppression/color-only downgrade so the rescan gives the camera a clean
+        // full color+depth attempt again.
+        resetFlapLadder()
         cameraExecutor.execute {
             val devices = orbbecDevices()
             if (devices.isEmpty()) {
@@ -678,6 +825,8 @@ class OrbbecPlugin : Plugin() {
     private fun runPump() {
         var lastPreview = 0L
         var lastDepthPreview = 0L
+        val pumpStartMs = System.currentTimeMillis()
+        var markedStable = false
         while (pumpRunning) {
             val activePipeline = synchronized(stateLock) { pipeline }
             if (activePipeline == null) break
@@ -688,6 +837,14 @@ class OrbbecPlugin : Plugin() {
             try {
                 frameSet = activePipeline.waitForFrameSet(FRAME_TIMEOUT_MS)
                 if (frameSet == null) continue
+
+                // A stream that keeps delivering framesets for STABLE_STREAM_MS has
+                // proven this config holds on this host — forget earlier detaches so
+                // a long good session can't slowly accumulate toward a false downgrade.
+                if (!markedStable && System.currentTimeMillis() - pumpStartMs >= STABLE_STREAM_MS) {
+                    markedStable = true
+                    synchronized(flapLock) { recentDetaches.clear() }
+                }
                 colorFrame = frameSet.getColorFrame()
                 depthFrame = frameSet.getDepthFrame()
 
@@ -772,19 +929,60 @@ class OrbbecPlugin : Plugin() {
                 .put("uid", selectedUid ?: "")
         }
 
+        // Flapping guard tripped to "unstable": refuse to (re)open so we stop
+        // feeding the open→reset→reopen storm. A clean replug or "Find camera"
+        // clears this. The thrown message reaches JS, which then shows the
+        // built-in camera (Orbbec also reports isAvailable=false while suppressed).
+        if (unstableSuppressed) {
+            throw IllegalStateException(
+                "Orbbec camera keeps resetting (possible power/cable/USB-host issue). Replug it or use the built-in camera."
+            )
+        }
+
         requireUsbPermission()
 
         val appContext = context?.applicationContext
             ?: throw IllegalStateException("Plugin context unavailable")
 
-        if (obContext == null) {
-            OBContext.setLoggerSeverity(LogSeverity.INFO)
-            OBContext.setLoggerToConsole(LogSeverity.INFO)
-            obContext = OBContext(appContext, deviceChangedCallback)
-            Log.i(TAG, "Orbbec SDK core ${OBContext.getCoreVersionName()} initialised")
+        var lastError: Exception? = null
+        for (attempt in 0 until OPEN_RETRIES) {
+            if (obContext == null) {
+                OBContext.setLoggerSeverity(LogSeverity.INFO)
+                OBContext.setLoggerToConsole(LogSeverity.INFO)
+                obContext = OBContext(appContext, deviceChangedCallback)
+                Log.i(TAG, "Orbbec SDK core ${OBContext.getCoreVersionName()} initialised")
+            }
+            try {
+                return acquireStreamLocked(obContext!!)
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "Orbbec open attempt ${attempt + 1}/$OPEN_RETRIES failed; releasing SDK and retrying", e)
+                // Drop the whole context so the next attempt re-enumerates and
+                // re-opens the (now released) USB device from scratch — handles the
+                // reopen-after-close race where the device is still enumerated but
+                // the native handle from the previous session is briefly busy.
+                closeSdkLocked()
+                if (attempt < OPEN_RETRIES - 1) {
+                    try {
+                        Thread.sleep(OPEN_RETRY_SETTLE_MS)
+                    } catch (ie: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        break
+                    }
+                }
+            }
         }
+        throw lastError ?: IllegalStateException("Failed to open Orbbec camera")
+    }
 
-        val deviceList = queryDevicesWithRetry(obContext!!)
+    /**
+     * Acquire the first Orbbec device on [ctx], configure color (+ optional depth),
+     * start the Pipeline, and promote it to plugin state. Throws on any failure so
+     * openSdkLocked() can release-settle-retry around it; on success the Pipeline,
+     * Device and uid are live in the plugin's fields.
+     */
+    private fun acquireStreamLocked(ctx: OBContext): JSObject {
+        val deviceList = queryDevicesWithRetry(ctx)
         var openedDevice: Device? = null
         var openedPipeline: Pipeline? = null
         var config: Config? = null
@@ -820,6 +1018,17 @@ class OrbbecPlugin : Plugin() {
             val info = openedDevice.getInfo()
             name = info?.getName() ?: name
 
+            // Log the negotiated USB link type (USB2.0 / USB3.0 …) — the key signal
+            // for the Pad 8 depth-flapping diagnosis. Reflection so we don't hard-depend
+            // on a specific SDK DeviceInfo method name across vendor versions.
+            val usbType = info?.let { di ->
+                try { di.javaClass.getMethod("getConnectionType").invoke(di)?.toString() }
+                catch (_: Throwable) {
+                    try { di.javaClass.getMethod("getUsbType").invoke(di)?.toString() } catch (_: Throwable) { null }
+                }
+            }
+            Log.i(TAG, "Orbbec device '$name' connection=${usbType ?: "unknown"} degradeLevel=$degradeLevel")
+
             val colorSensor = openedDevice.getSensor(SensorType.COLOR)
             if (colorSensor == null) throw IllegalStateException("Orbbec device has no color sensor")
             val depthSensor = openedDevice.getSensor(SensorType.DEPTH)
@@ -837,7 +1046,14 @@ class OrbbecPlugin : Plugin() {
                 config.enableStream(SensorType.COLOR)
             }
 
-            if (depthSensor != null) {
+            if (depthSensor != null && degradeToColorOnly) {
+                // Flapping guard downgraded this open to color-only: the depth
+                // stream powers the IR laser projector + doubles the isochronous
+                // load, the biggest USB power/bandwidth spike at Pipeline.start().
+                // Skip it so the lighter color-only stream can hold on this host.
+                Log.i(TAG, "Orbbec color-only mode (depth disabled to keep the USB host stable)")
+                safeClose(depthSensor, "depth sensor (color-only)")
+            } else if (depthSensor != null) {
                 try {
                     selectedDepthProfile = chooseDepthProfile(openedPipeline)
                     if (selectedDepthProfile != null) {
