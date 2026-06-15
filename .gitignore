@@ -28,7 +28,7 @@ debug.log
 
 # Local dataset / analysis outputs (tidak perlu di-repo)
 Damimas_Only/
-results/
+/results/
 
 # wrangler files
 .wrangler

@@ -26,6 +26,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.domain.model.*
+import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases
 import dev.sawitulm.palmannotate.ui.common.AnnotationCanvas
 import dev.sawitulm.palmannotate.ui.common.CanvasTool
 import kotlinx.coroutines.flow.first
@@ -112,13 +113,8 @@ class AnnotationViewModel @Inject constructor(
 
     fun changeBboxClass(bboxId: String, newClass: AnnotationClass) {
         val s = session ?: return
-        val side = s.sides.getOrNull(currentSideIndex) ?: return
-        val updatedBboxes = side.bboxes.map { b ->
-            if (b.id == bboxId) b.copy(classId = newClass.id, className = newClass.displayName) else b
-        }
-        val updatedSides = s.sides.toMutableList()
-        updatedSides[currentSideIndex] = side.copy(bboxes = updatedBboxes)
-        session = s.copy(sides = updatedSides)
+        // Use SessionUseCases to change class AND propagate to cluster siblings
+        session = SessionUseCases.setBboxClass(s, currentSideIndex, bboxId, newClass, propagate = true)
     }
 
     fun deleteBbox(bboxId: String) {

@@ -396,4 +396,78 @@ breakpoints or the Android manifest, the guard tests are `ui-shell.test.mjs` and
 - **Export folder is required** before creating sessions/trees on native: `_ensureExportFolder()`
   (sessions.js) gates **New Session** and **Add Tree**, opening the SAF picker if none is set.
 - The global app header (`.header`) is **hidden on `body.is-home`** (home/start/session-detail) — those
-  views carry their own header, so it would otherwise be a redundant lone logo (orphaned in portrait).
+   views carry their own header, so it would otherwise be a redundant lone logo (orphaned in portrait).
+
+## Migrasi — Native Kotlin Rewrite (Migrasi/)
+
+The `Migrasi/` directory contains the 100% native Kotlin rewrite (no Capacitor/WebView).
+This is a separate Gradle project from the Capacitor `android/` project.
+
+### Key paths
+
+| Item | Path |
+|---|---|
+| Android project root | `Migrasi/` |
+| Kotlin sources | `Migrasi/app/src/main/java/dev/sawitulm/palmannotate/` |
+| Unit tests | `Migrasi/app/src/test/java/dev/sawitulm/palmannotate/DomainTests.kt` |
+| Output APK | `Migrasi/app/build/outputs/apk/debug/app-debug.apk` |
+| Orbbec AAR | `Migrasi/app/libs/obsensor_v2.0.6_2026031801_release.aar` |
+| Gradle wrapper | `Migrasi/gradlew.bat` (8.11.1) |
+| local.properties | `Migrasi/local.properties` (git-ignored; contains `sdk.dir=C\:\\tools\\android-sdk`) |
+| MIGRATION_STATUS | `Migrasi/MIGRATION_STATUS.md` |
+| System Requirements | `System_Requirements.md` (repo root, §27 is the checklist) |
+
+### Build (Migrasi)
+
+Same JDK + SDK as the Capacitor app, but different Gradle wrapper. From PowerShell:
+
+```powershell
+$env:JAVA_HOME      = 'C:\tools\jdk17\jdk-17.0.19+10'
+$env:ANDROID_HOME   = 'C:\tools\android-sdk'
+$env:PATH           = "$env:JAVA_HOME\bin;$env:PATH"
+cd Migrasi
+
+# Build APK (incremental)
+.\gradlew.bat :app:assembleDebug --no-daemon --max-workers=4 --console=plain
+
+# Run unit tests
+.\gradlew.bat :app:testDebugUnitTest --no-daemon --console=plain
+```
+
+### Migrasi architecture
+
+```
+Migrasi/app/src/main/java/dev/sawitulm/palmannotate/
+├── di/AppModule.kt              ← Hilt DI module
+├── domain/
+│   ├── model/                   ← AnnotationClass, Bbox, TreeSide, ActiveSession, Results, etc.
+│   ├── dedup/                   ← UnionFind, SuggestionEngine
+│   ├── results/ResultsComputer.kt ← compute() → TreeResults
+│   ├── usercase/SessionUseCases.kt ← class propagation, mismatch, link mgmt
+│   ├── quality/QualityCheck.kt  ← analyzeTree, analyzeCaptureShots
+│   └── util/                    ← OperationQueue, DepthUtil, ColorUtil
+├── data/
+│   ├── db/                      ← Room (Entities, PalmAnnotateDatabase)
+│   ├── storage/                 ← SessionRepository, AndroidStorageManager, SafMirrorStore, ExportFolderRepository
+│   ├── yolo/YoloParser.kt
+│   ├── detection/OnnxDetector.kt
+│   ├── export/ExportManager.kt
+│   ├── camera/OrbbecManager.kt
+│   └── location/GpsProvider.kt
+└── ui/
+    ├── theme/Theme.kt
+    ├── navigation/Navigation.kt
+    ├── home/HomeScreen.kt
+    ├── session/SessionDetailScreen.kt
+    ├── capture/CaptureFlowScreen.kt
+    ├── annotation/AnnotationScreen.kt
+    ├── results/ResultsScreen.kt
+    ├── dedup/DeduplicationScreen.kt
+    └── common/                  ← AnnotationCanvas, Dialogs, KeyboardShortcuts
+```
+
+### Migrasi work tracking
+- After each major phase: build + commit (no push until asked).
+- Use `todowrite` to track individual tasks across phases.
+- The master checklist is `System_Requirements.md` §27; cross-reference `Migrasi/MIGRATION_STATUS.md`.
+
