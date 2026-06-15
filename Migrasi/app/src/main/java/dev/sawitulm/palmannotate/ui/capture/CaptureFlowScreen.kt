@@ -20,6 +20,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -69,6 +71,10 @@ import javax.inject.Inject
 enum class SideStep { PREVIEW, REVIEW }
 enum class CaptureSource { PHONE_CAMERA, ORBBEC }
 
+// Capture has two macro-phases: SIDES (sequential per-side capture/review) and
+// REVIEW_ALL (one swipe carousel over every captured shot before save).
+enum class CapturePhase { SIDES, REVIEW_ALL }
+
 @HiltViewModel
 class CaptureFlowViewModel @Inject constructor(
     private val repo: SessionRepository,
@@ -86,6 +92,13 @@ class CaptureFlowViewModel @Inject constructor(
     var manualId by mutableStateOf("")
     var gpsStatus by mutableStateOf<String?>(null)
     var currentStep by mutableStateOf(SideStep.PREVIEW)
+        private set
+    var phase by mutableStateOf(CapturePhase.SIDES)
+        private set
+    // True while re-shooting a single side that was launched from the REVIEW_ALL
+    // carousel — so confirming that side returns to the carousel instead of
+    // walking forward through the remaining sides.
+    var retakingFromReview by mutableStateOf(false)
         private set
     private var latitude: Double? = null
     private var longitude: Double? = null
@@ -138,6 +151,7 @@ class CaptureFlowViewModel @Inject constructor(
             repeat(sideCount) { capturedImages.add(null) }
             currentSide = 0
             currentStep = SideStep.PREVIEW
+            phase = CapturePhase.SIDES
             runCatching {
                 val loc = gps.getBestLocation()
                 if (loc != null) {
@@ -170,13 +184,45 @@ class CaptureFlowViewModel @Inject constructor(
         currentStep = SideStep.PREVIEW
     }
 
+    /**
+     * Advance from a per-side REVIEW. On any side but the last, move to the next
+     * side's PREVIEW. After the last side, switch to the REVIEW_ALL phase (the
+     * swipe carousel over every shot) instead of saving immediately. Returns true
+     * when the review-all phase was entered (i.e. all sides done).
+     */
     fun continueFromReview(): Boolean {
         return if (currentSide < sideCount - 1) {
             currentSide++
             currentStep = SideStep.PREVIEW
             false
         } else {
+            if (allCaptured) phase = CapturePhase.REVIEW_ALL
             true
+        }
+    }
+
+    /**
+     * From the REVIEW_ALL carousel, re-shoot ONE side: drop back into the
+     * sequential SIDES phase at that side's PREVIEW with its shot cleared. After
+     * the operator re-captures (and confirms in the per-side REVIEW), the screen
+     * routes back to REVIEW_ALL via continueFromReview()/returnToReviewAll().
+     */
+    fun retakeSide(index: Int) {
+        if (index in 0 until capturedImages.size) {
+            capturedImages[index] = null
+            currentSide = index
+            currentStep = SideStep.PREVIEW
+            phase = CapturePhase.SIDES
+            retakingFromReview = true
+        }
+    }
+
+    /** Return to the review-all carousel (used after a single-side retake). */
+    fun returnToReviewAll() {
+        retakingFromReview = false
+        if (allCaptured) {
+            phase = CapturePhase.REVIEW_ALL
+            currentStep = SideStep.REVIEW
         }
     }
 
@@ -354,6 +400,31 @@ fun CaptureFlowScreen(
             Spacer(Modifier.height(12.dp))
 
             if (hasCameraPermission) {
+                // After all sides are captured the flow switches to ONE swipe
+                // review carousel over every shot (per-shot Retake + Save/Cancel),
+                // replacing the last-side review. Until then it's the sequential
+                // per-side capture/review surface.
+                if (viewModel.phase == CapturePhase.REVIEW_ALL) {
+                    viewModel.saveError?.let { err ->
+                        Text(
+                            text = "Save error: $err",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    ReviewAllPager(
+                        sideCount = viewModel.sideCount,
+                        capturedImages = viewModel.capturedImages,
+                        isSaving = viewModel.isSaving,
+                        onRetake = { viewModel.retakeSide(it) },
+                        onSave = { viewModel.requestSave(sessionId, context, onTreeSaved) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                } else {
                 // Thumbnail strip of all captured/reviewable sides.
                 CapturedThumbnails(
                     sideCount = viewModel.sideCount,
@@ -373,6 +444,15 @@ fun CaptureFlowScreen(
                     Spacer(Modifier.height(8.dp))
                 }
 
+                // Confirming a per-side REVIEW either walks to the next side, or —
+                // after the last side / a single-side retake — returns to the
+                // review-all carousel. No direct save happens from here anymore.
+                val onSideContinue: () -> Unit = {
+                    if (viewModel.retakingFromReview) viewModel.returnToReviewAll()
+                    else viewModel.continueFromReview()
+                }
+                val sideContinueLabel = if (viewModel.retakingFromReview) "Done" else null
+
                 // Main stage.
                 Box(
                     modifier = Modifier
@@ -389,17 +469,13 @@ fun CaptureFlowScreen(
                             isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
                             allCaptured = viewModel.allCaptured,
                             isSaving = viewModel.isSaving,
+                            continueLabel = sideContinueLabel,
                             onCaptured = {
                                 viewModel.onImageCaptured(it)
                                 Toast.makeText(context, "Side ${viewModel.currentSide + 1} captured via Orbbec", Toast.LENGTH_SHORT).show()
                             },
                             onRetake = { viewModel.retakeCurrent() },
-                            onContinue = {
-                                val finished = viewModel.continueFromReview()
-                                if (finished && viewModel.allCaptured) {
-                                    viewModel.requestSave(sessionId, context, onTreeSaved)
-                                }
-                            },
+                            onContinue = onSideContinue,
                         )
                     } else {
                     when (viewModel.currentStep) {
@@ -422,13 +498,9 @@ fun CaptureFlowScreen(
                                 isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
                                 allCaptured = viewModel.allCaptured,
                                 isSaving = viewModel.isSaving,
+                                continueLabel = sideContinueLabel,
                                 onRetake = { viewModel.retakeCurrent() },
-                                onContinue = {
-                                    val finished = viewModel.continueFromReview()
-                                    if (finished && viewModel.allCaptured) {
-                                        viewModel.requestSave(sessionId, context, onTreeSaved)
-                                    }
-                                },
+                                onContinue = onSideContinue,
                             )
                         }
                     }
@@ -459,6 +531,7 @@ fun CaptureFlowScreen(
                         )
                     }
                 }
+                } // end else (SIDES phase)
             } else {
                 Text("Camera permission is required for capture.")
             }
@@ -528,6 +601,7 @@ private fun CapturedReviewStage(
     isLastSide: Boolean,
     allCaptured: Boolean,
     isSaving: Boolean,
+    continueLabel: String? = null,
     onRetake: () -> Unit,
     onContinue: () -> Unit,
 ) {
@@ -585,8 +659,150 @@ private fun CapturedReviewStage(
                 if (isSaving) {
                     CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
                 } else {
-                    Text(if (isLastSide) "Save & Annotate" else "Continue")
+                    Text(continueLabel ?: if (isLastSide) "Review all" else "Continue")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Final review-all stage: a swipe carousel (HorizontalPager) over every captured
+ * shot before save. Each page shows the photo full-bleed on a black media
+ * background with the side label + "✓ Captured" badge and a per-shot Retake.
+ * A single Save commits all sides (routing through the existing QualityGate/QA
+ * dialog via onSave) and Cancel/Back is the top-bar nav icon. Page dots show the
+ * current index. Non-throwing: missing/unreadable Uris just render an empty page.
+ */
+@Composable
+private fun ReviewAllPager(
+    sideCount: Int,
+    capturedImages: List<Uri?>,
+    isSaving: Boolean,
+    onRetake: (Int) -> Unit,
+    onSave: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val pageCount = sideCount.coerceAtLeast(1)
+    val pagerState = rememberPagerState(pageCount = { pageCount })
+
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val uri = capturedImages.getOrNull(page)
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (uri != null) {
+                        Image(
+                            painter = rememberAsyncImagePainter(uri),
+                            contentDescription = "Side ${page + 1}",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    // Side label (top-start) + captured badge (top-end) over media.
+                    Box(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .align(Alignment.TopStart)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            "Side ${page + 1} / $sideCount",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .align(Alignment.TopEnd)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFF2dd47b))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            "✓ Captured",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+
+                    // Per-shot Retake — bottom of this page, over a dark scrim.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))
+                                )
+                            )
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        OutlinedButton(
+                            onClick = { onRetake(page) },
+                            enabled = !isSaving,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        ) {
+                            Icon(Icons.Default.CameraAlt, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Retake side ${page + 1}")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Page dots — current index highlighted.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            repeat(pageCount) { i ->
+                val current = i == pagerState.currentPage
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(if (current) 12.dp else 8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (current) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                )
+            }
+        }
+
+        // Whole-set Save action (Cancel/Back is the top-bar nav icon).
+        Button(
+            onClick = onSave,
+            enabled = !isSaving,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp)
+                .height(52.dp),
+        ) {
+            if (isSaving) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
+            } else {
+                Text("Save & Annotate")
             }
         }
     }
@@ -680,6 +896,7 @@ private fun OrbbecCaptureStage(
     isLastSide: Boolean,
     allCaptured: Boolean,
     isSaving: Boolean,
+    continueLabel: String? = null,
     onCaptured: (Uri) -> Unit,
     onRetake: () -> Unit,
     onContinue: () -> Unit,
@@ -701,7 +918,7 @@ private fun OrbbecCaptureStage(
                 }
             }
         } else {
-            CapturedReviewStage(uri = uri, isLastSide = isLastSide, allCaptured = allCaptured, isSaving = isSaving, onRetake = onRetake, onContinue = onContinue)
+            CapturedReviewStage(uri = uri, isLastSide = isLastSide, allCaptured = allCaptured, isSaving = isSaving, continueLabel = continueLabel, onRetake = onRetake, onContinue = onContinue)
         }
     }
 }
