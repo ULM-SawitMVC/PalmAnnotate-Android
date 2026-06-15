@@ -69,7 +69,6 @@ class SessionRepository(
                     createdAt = now, updatedAt = now,
                 )
             )
-            writeSessionsIndex()
             id
         }
 
@@ -77,7 +76,6 @@ class SessionRepository(
         val trees = treeDao.getBySession(sessionId)
         for (t in trees) deleteTreeArtifacts(t, safTreeUri)
         sessionDao.deleteById(sessionId) // cascades trees/sides/bboxes/links
-        writeSessionsIndex()
     }
 
     // ─── Trees within a run ──────────────────────────────────────────────────────
@@ -124,7 +122,6 @@ class SessionRepository(
         // Advance the tree-id counter past the highest used id.
         val nextId = maxOf(run.nextId, treeId + 1)
         sessionDao.upsert(run.copy(nextId = nextId, updatedAt = now))
-        writeSessionsIndex()
         treeKey
     }
 
@@ -139,7 +136,6 @@ class SessionRepository(
             val maxId = survivors.maxOfOrNull { it.treeId } ?: 0
             sessionDao.upsert(run.copy(nextId = maxId + 1, updatedAt = System.currentTimeMillis()))
         }
-        writeSessionsIndex()
     }
 
     private fun deleteTreeArtifacts(tree: TreeEntity, safTreeUri: Uri?) {
@@ -200,7 +196,6 @@ class SessionRepository(
         linkDao.insertAll(session.confirmedLinks.map {
             ConfirmedLinkEntity(treeKey = treeKey, linkId = it.linkId, sideA = it.sideA, bboxIdA = it.bboxIdA, sideB = it.sideB, bboxIdB = it.bboxIdB)
         })
-        writeSessionsIndex()
     }
 
     /** Replace a tree's sides + bboxes in the DB and write YOLO labels + annot-log. */
@@ -255,40 +250,28 @@ class SessionRepository(
             treeDao.getByKey(session.sessionId)?.let { treeDao.upsert(it.copy(isComplete = true, updatedAt = System.currentTimeMillis())) }
         }
 
-    // ─── Portable sessions index (runs + trees) ──────────────────────────────────
+    // sessions.json index dropped on native (resume is folder-scan based)
 
-    private suspend fun writeSessionsIndex() {
-        try {
-            val runs = sessionDao.getAllOnce()
-            val trees = treeDao.getAllOnce().groupBy { it.sessionId }
-            val arr = JSONArray()
-            for (r in runs) {
-                arr.put(JSONObject().apply {
-                    put("id", r.sessionId); put("variety", r.variety); put("block", r.block)
-                    put("groupKey", r.groupKey); put("sideCount", r.sideCount); put("autoId", r.autoId)
-                    put("nextId", r.nextId); put("createdAt", r.createdAt); put("updatedAt", r.updatedAt)
-                    put("trees", JSONArray().apply {
-                        for (t in trees[r.sessionId].orEmpty()) put(JSONObject().apply {
-                            put("treeName", t.treeName); put("treeId", t.treeId); put("sideCount", t.sideCount)
-                        })
-                    })
-                })
-            }
-            storage.writeText(storage.sessionsFile, JSONObject().put("version", 1).put("sessions", arr).toString(2))
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to write sessions index", e)
-        }
+    // ─── Folder-scan resume helpers (used by FolderResumeImporter) ───────────────
+
+    /** All tree names currently in Room (for resume de-dupe). */
+    suspend fun allTreeNames(): Set<String> = withContext(Dispatchers.IO) {
+        treeDao.getAllOnce().map { it.treeName }.toSet()
     }
 
-    suspend fun readSessionsIndex(): List<JSONObject> = withContext(Dispatchers.IO) {
-        try {
-            val text = storage.readText(storage.sessionsFile) ?: return@withContext emptyList()
-            val arr = JSONObject(text).optJSONArray("sessions") ?: return@withContext emptyList()
-            (0 until arr.length()).map { arr.getJSONObject(it) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to read sessions index", e); emptyList()
-        }
+    /** Map of run groupKey → its sessionId (for reusing a run on resume). */
+    suspend fun runGroupKeyToId(): Map<String, String> = withContext(Dispatchers.IO) {
+        sessionDao.getAllOnce().associate { it.groupKey to it.sessionId }
     }
+
+    /** Replace a tree's confirmed links (used when resuming a tree from Output JSON). */
+    suspend fun replaceConfirmedLinks(treeKey: String, links: List<CrossSideLink>) =
+        withContext(Dispatchers.IO) {
+            linkDao.deleteByTree(treeKey)
+            linkDao.insertAll(links.map {
+                ConfirmedLinkEntity(treeKey = treeKey, linkId = it.linkId, sideA = it.sideA, bboxIdA = it.bboxIdA, sideB = it.sideB, bboxIdB = it.bboxIdB)
+            })
+        }
 
     private fun writeAnnotLog(treeName: String, split: String, side: TreeSide, safTreeUri: Uri? = null) {
         runCatching {

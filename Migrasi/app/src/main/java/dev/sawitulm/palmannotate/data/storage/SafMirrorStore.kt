@@ -102,6 +102,56 @@ class SafMirrorStore(private val context: Context) {
     }
 
     /**
+     * List the file names directly inside <treeUri>/<dirRelPath> matching an
+     * optional suffix (case-insensitive, e.g. ".json"). Returns base names only
+     * (not full paths). Empty list if the directory is missing/unreadable.
+     */
+    fun listFiles(treeUri: Uri, dirRelPath: String, suffix: String? = null): List<String> {
+        return try {
+            val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return emptyList()
+            val segments = dirRelPath.split('/').filter { it.isNotBlank() }
+            var node = tree
+            for (seg in segments) {
+                val child = node.findFile(seg)
+                if (child == null || !child.isDirectory) return emptyList()
+                node = child
+            }
+            node.listFiles()
+                .filter { it.isFile }
+                .mapNotNull { it.name }
+                .filter { suffix == null || it.endsWith(suffix, ignoreCase = true) }
+        } catch (e: Exception) {
+            Log.w(TAG, "listFiles failed for $dirRelPath", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Read raw bytes from <treeUri>/<relPath>. Returns null if missing/unreadable.
+     */
+    fun readBytes(treeUri: Uri, relPath: String): ByteArray? {
+        return try {
+            val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return null
+            val segments = relPath.split('/').filter { it.isNotBlank() }
+            if (segments.isEmpty()) return null
+
+            var node = tree
+            for (i in 0 until segments.size - 1) {
+                val child = node.findFile(segments[i])
+                if (child == null || !child.isDirectory) return null
+                node = child
+            }
+            val target = node.findFile(segments.last())
+            if (target == null || !target.isFile) return null
+
+            context.contentResolver.openInputStream(target.uri)?.use { it.readBytes() }
+        } catch (e: Exception) {
+            Log.w(TAG, "readBytes failed for $relPath", e)
+            null
+        }
+    }
+
+    /**
      * Delete <treeUri>/<relPath> if it exists.
      */
     fun deletePath(treeUri: Uri, relPath: String): Boolean {
