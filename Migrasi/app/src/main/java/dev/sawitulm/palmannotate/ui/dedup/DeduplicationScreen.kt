@@ -1,9 +1,13 @@
 package dev.sawitulm.palmannotate.ui.dedup
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -11,9 +15,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,6 +32,8 @@ import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.domain.dedup.SuggestionEngine
 import dev.sawitulm.palmannotate.domain.model.*
 import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases
+import dev.sawitulm.palmannotate.ui.common.AnnotationCanvas
+import dev.sawitulm.palmannotate.ui.common.CanvasTool
 import dev.sawitulm.palmannotate.ui.common.MismatchResolveModal
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -44,14 +55,49 @@ class DedupViewModel @Inject constructor(
         private set
     var suggestions by mutableStateOf<List<SuggestedPair>>(emptyList())
         private set
+    var showSuggestions by mutableStateOf(true)
     var isLoading by mutableStateOf(true)
         private set
+    var selectedSideB by mutableStateOf<String?>(null) // bboxId on right canvas (sideA)
+    var selectedSideA by mutableStateOf<String?>(null) // bboxId on left canvas (sideB)
+    var pendingBboxId by mutableStateOf<String?>(null)
+    var pendingSide by mutableIntStateOf(-1)
 
     val adjacentPairs: List<Pair<Int, Int>>
         get() = session?.adjacentPairs ?: emptyList()
 
     val currentPair: Pair<Int, Int>?
         get() = adjacentPairs.getOrNull(currentPairIndex)
+
+    val leftSideIndex: Int get() = currentPair?.second ?: 0  // sideB
+    val rightSideIndex: Int get() = currentPair?.first ?: 1  // sideA
+
+    val leftSide: TreeSide? get() = session?.sides?.getOrNull(leftSideIndex)
+    val rightSide: TreeSide? get() = session?.sides?.getOrNull(rightSideIndex)
+
+    /** Links relevant to current pair */
+    val pairLinks: List<CrossSideLink>
+        get() = session?.confirmedLinks?.filter {
+            (it.sideA == rightSideIndex && it.sideB == leftSideIndex) ||
+            (it.sideA == leftSideIndex && it.sideB == rightSideIndex)
+        } ?: emptyList()
+
+    /** Boxes on sideB that are linked from sideA's perspective */
+    fun linkedBboxIdForSideB(bboxId: String): String? {
+        for (link in pairLinks) {
+            if (link.bboxIdB == bboxId) return link.bboxIdA
+            if (link.bboxIdA == bboxId) return link.bboxIdB
+        }
+        return null
+    }
+
+    fun linkedBboxIdForSideA(bboxId: String): String? {
+        for (link in pairLinks) {
+            if (link.bboxIdA == bboxId) return link.bboxIdB
+            if (link.bboxIdB == bboxId) return link.bboxIdA
+        }
+        return null
+    }
 
     fun load(sessionId: String) {
         viewModelScope.launch {
@@ -62,35 +108,109 @@ class DedupViewModel @Inject constructor(
     }
 
     fun nextPair() {
-        if (currentPairIndex < adjacentPairs.size - 1) currentPairIndex++
+        if (currentPairIndex < adjacentPairs.size - 1) {
+            currentPairIndex++
+            clearSelection()
+        }
     }
 
     fun prevPair() {
-        if (currentPairIndex > 0) currentPairIndex--
+        if (currentPairIndex > 0) {
+            currentPairIndex--
+            clearSelection()
+        }
+    }
+
+    fun selectSideB(bboxId: String?) { selectedSideB = bboxId }
+    fun selectSideA(bboxId: String?) { selectedSideA = bboxId }
+
+    fun clearSelection() {
+        selectedSideB = null
+        selectedSideA = null
+        pendingBboxId = null
+        pendingSide = -1
     }
 
     fun runSuggestions() {
         val s = session ?: return
         suggestions = SuggestionEngine.suggestAll(s)
+        showSuggestions = true
     }
 
-    fun confirmLink(sideA: Int, bboxIdA: String, sideB: Int, bboxIdB: String) {
+    fun onBboxTap(sideIndex: Int, bboxId: String) {
         val s = session ?: return
-        val linkId = "L${s.confirmedLinks.size}"
-        val newLink = CrossSideLink.create(linkId, sideA, bboxIdA, sideB, bboxIdB)
-        // Remove existing links for the same pair of sides with the same bboxes
-        val filtered = s.confirmedLinks.filterNot {
-            (it.sideA == sideA && it.bboxIdA == bboxIdA) ||
-            (it.sideB == sideB && it.bboxIdB == bboxIdB) ||
-            (it.sideA == sideA && it.bboxIdA == bboxIdB) ||
-            (it.sideB == sideB && it.bboxIdB == bboxIdA)
+        val isLeft = sideIndex == leftSideIndex
+        val isRight = sideIndex == rightSideIndex
+        if (!isLeft && !isRight) return
+
+        if (pendingBboxId != null) {
+            val a = if (pendingSide == leftSideIndex) leftSideIndex else rightSideIndex
+            val aId = pendingBboxId!!
+            val b: Int
+            val bId: String
+            if (isLeft) { b = leftSideIndex; bId = bboxId }
+            else { b = rightSideIndex; bId = bboxId }
+
+            if (a != b) {
+                s.addManualLink(a, aId, b, bId).let { session = it }
+                suggestions = suggestions.filterNot {
+                    (it.sideA == a && it.bboxIdA == aId && it.sideB == b && it.bboxIdB == bId) ||
+                    (it.sideA == b && it.bboxIdA == bId && it.sideB == a && it.bboxIdB == aId)
+                }
+            }
+            if (isLeft) { selectedSideB = bboxId; selectedSideA = aId }
+            else { selectedSideA = bboxId; selectedSideB = aId }
+            pendingBboxId = null
+            pendingSide = -1
+        } else {
+            if (isLeft) {
+                val partner = linkedBboxIdForSideB(bboxId)
+                if (partner != null) {
+                    pendingBboxId = partner
+                    pendingSide = rightSideIndex
+                    selectedSideB = bboxId
+                    selectedSideA = partner
+                } else {
+                    pendingBboxId = bboxId
+                    pendingSide = leftSideIndex
+                    selectedSideB = bboxId
+                    selectedSideA = null
+                }
+            } else {
+                val partner = linkedBboxIdForSideA(bboxId)
+                if (partner != null) {
+                    pendingBboxId = partner
+                    pendingSide = leftSideIndex
+                    selectedSideA = bboxId
+                    selectedSideB = partner
+                } else {
+                    pendingBboxId = bboxId
+                    pendingSide = rightSideIndex
+                    selectedSideA = bboxId
+                    selectedSideB = null
+                }
+            }
         }
-        session = s.copy(confirmedLinks = filtered + newLink)
     }
 
     fun removeLink(linkId: String) {
         val s = session ?: return
         session = s.copy(confirmedLinks = s.confirmedLinks.filter { it.linkId != linkId })
+    }
+
+    fun confirmSuggestion(sug: SuggestedPair) {
+        val s = session ?: return
+        SessionUseCases.addManualLink(s, sug.sideA, sug.bboxIdA, sug.sideB, sug.bboxIdB).let { session = it }
+        suggestions = suggestions - sug
+    }
+
+    fun rejectSuggestion(sug: SuggestedPair) {
+        suggestions = suggestions - sug
+    }
+
+    fun acceptAllAuto() {
+        val auto = suggestions.filter { it.category == "auto" }
+        for (sug in auto) confirmSuggestion(sug)
     }
 
     fun save() {
@@ -106,7 +226,6 @@ class DedupViewModel @Inject constructor(
         return SessionUseCases.getMismatchedClusters(s)
     }
 
-    /** Save the current links then continue (Compute & Mark Complete path). */
     fun saveAndContinue(onDone: () -> Unit) {
         val s = session ?: return
         viewModelScope.launch {
@@ -116,7 +235,6 @@ class DedupViewModel @Inject constructor(
         }
     }
 
-    /** Resolve all class mismatches by majority vote, save, then continue. */
     fun resolveAllMismatchesAndSave(onDone: () -> Unit) {
         val s = session ?: return
         val resolved = SessionUseCases.resolveAllMismatches(s)
@@ -130,7 +248,15 @@ class DedupViewModel @Inject constructor(
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// UI — matches the dedup tab from index.html
+// Extensions
+// ════════════════════════════════════════════════════════════════════════════════
+
+private fun ActiveSession.addManualLink(sA: Int, bA: String, sB: Int, bB: String): ActiveSession {
+    return SessionUseCases.addManualLink(this, sA, bA, sB, bB)
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// UI — Two-canvas dedup surface (matches JS DedupUI + index.html #panel-dedup)
 // ════════════════════════════════════════════════════════════════════════════════
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -144,254 +270,363 @@ fun DeduplicationScreen(
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
 
     val session = viewModel.session
-    val pair = viewModel.currentPair
+    val leftSide = viewModel.leftSide
+    val rightSide = viewModel.rightSide
+    val isPortrait = LocalConfiguration.current.screenWidthDp < 600
+
     var showMismatch by remember { mutableStateOf(false) }
+    val mismatches = remember(session) { viewModel.currentMismatches() }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Deduplication") },
+                title = { Text(session?.treeName ?: "Deduplication") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.save() }) { Icon(Icons.Default.Save, "Save") }
+                    IconButton(onClick = { viewModel.runSuggestions() }) {
+                        Icon(Icons.Default.AutoAwesome, "Suggest")
+                    }
+                    IconButton(onClick = {
+                        if (mismatches.isNotEmpty()) showMismatch = true
+                        else viewModel.resolveAllMismatchesAndSave { onCompute() }
+                    }) {
+                        Icon(Icons.Default.CheckCircle, "Compute")
+                    }
                 },
             )
         },
-        bottomBar = {
-            BottomAppBar(
-                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 0.dp,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                ) {
-                    FilledTonalButton(onClick = { viewModel.runSuggestions() }) {
-                        Icon(Icons.Default.AutoFixHigh, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Suggest")
-                    }
-                    FilledTonalButton(onClick = {
-                        // Force class-mismatch resolution before completing (JS behaviour).
-                        if (viewModel.currentMismatches().isNotEmpty()) showMismatch = true
-                        else viewModel.saveAndContinue(onCompute)
-                    }) {
-                        Icon(Icons.Default.Calculate, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Compute")
-                    }
-                }
-            }
-        },
     ) { padding ->
-        if (session == null || pair == null) {
+        if (viewModel.isLoading || leftSide == null || rightSide == null) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                if (viewModel.isLoading) CircularProgressIndicator() else Text("No adjacent pairs")
+                CircularProgressIndicator()
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                // Pair navigation
-                item {
-                    PairNavigationBar(
-                        currentIndex = viewModel.currentPairIndex,
-                        totalPairs = viewModel.adjacentPairs.size,
-                        pairLabel = "Side ${pair.first + 1} ↔ Side ${pair.second + 1}",
-                        onPrev = { viewModel.prevPair() },
-                        onNext = { viewModel.nextPair() },
-                    )
-                }
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                // Pair navigation bar
+                PairNav(
+                    pairIndex = viewModel.currentPairIndex,
+                    totalPairs = viewModel.adjacentPairs.size,
+                    leftLabel = "Side ${viewModel.leftSideIndex + 1}",
+                    rightLabel = "Side ${viewModel.rightSideIndex + 1}",
+                    onPrev = { viewModel.prevPair() },
+                    onNext = { viewModel.nextPair() },
+                )
 
-                // Side comparison
-                item {
-                    SideComparisonCard(
-                        session = session!!,
-                        sideAIndex = pair.first,
-                        sideBIndex = pair.second,
-                    )
-                }
-
-                // Suggestions for this pair
-                val pairSuggestions = viewModel.suggestions.filter {
-                    it.sideA == pair.first && it.sideB == pair.second
-                }
-                if (pairSuggestions.isNotEmpty()) {
-                    item {
-                        Text("Suggestions", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                // Two canvases
+                if (isPortrait) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Top) {
+                        DedupHalfCanvas(
+                            label = "Side ${viewModel.leftSideIndex + 1}",
+                            side = leftSide,
+                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
+                            selectedId = viewModel.selectedSideB,
+                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.leftSideIndex },
+                            onTap = { viewModel.onBboxTap(viewModel.leftSideIndex, it) },
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
+                        HorizontalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
+                        DedupHalfCanvas(
+                            label = "Side ${viewModel.rightSideIndex + 1}",
+                            side = rightSide,
+                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
+                            selectedId = viewModel.selectedSideA,
+                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.rightSideIndex },
+                            onTap = { viewModel.onBboxTap(viewModel.rightSideIndex, it) },
+                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
                     }
-                    items(pairSuggestions) { suggestion ->
-                        SuggestionCard(
-                            suggestion = suggestion,
-                            onConfirm = { viewModel.confirmLink(suggestion.sideA, suggestion.bboxIdA, suggestion.sideB, suggestion.bboxIdB) },
+                } else {
+                    Row(modifier = Modifier.weight(1f)) {
+                        DedupHalfCanvas(
+                            label = "Side ${viewModel.leftSideIndex + 1}",
+                            side = leftSide,
+                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
+                            selectedId = viewModel.selectedSideB,
+                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.leftSideIndex },
+                            onTap = { viewModel.onBboxTap(viewModel.leftSideIndex, it) },
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        )
+                        VerticalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
+                        DedupHalfCanvas(
+                            label = "Side ${viewModel.rightSideIndex + 1}",
+                            side = rightSide,
+                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
+                            selectedId = viewModel.selectedSideA,
+                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.rightSideIndex },
+                            onTap = { viewModel.onBboxTap(viewModel.rightSideIndex, it) },
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                         )
                     }
                 }
 
-                // Confirmed links for this pair
-                val pairLinks = session!!.confirmedLinks.filter {
-                    (it.sideA == pair.first && it.sideB == pair.second) ||
-                    (it.sideA == pair.second && it.sideB == pair.first)
-                }
-                if (pairLinks.isNotEmpty()) {
-                    item {
-                        Text("Confirmed Links", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    }
-                    items(pairLinks) { link ->
-                        LinkCard(
-                            link = link,
-                            onRemove = { viewModel.removeLink(link.linkId) },
-                        )
-                    }
-                }
+                // Bottom panels: Suggestions + Confirmed Links
+                BottomPanels(
+                    suggestions = viewModel.suggestions,
+                    showSuggestions = viewModel.showSuggestions,
+                    confirmedLinks = viewModel.pairLinks,
+                    session = session,
+                    onToggleSuggestions = { viewModel.showSuggestions = !viewModel.showSuggestions },
+                    onConfirm = { viewModel.confirmSuggestion(it) },
+                    onReject = { viewModel.rejectSuggestion(it) },
+                    onAcceptAll = { viewModel.acceptAllAuto() },
+                    onRemoveLink = { viewModel.removeLink(it) },
+                )
             }
         }
     }
 
-    if (showMismatch) {
+    // Mismatch resolve modal
+    if (showMismatch && mismatches.isNotEmpty()) {
         MismatchResolveModal(
-            mismatches = viewModel.currentMismatches(),
-            onResolveAll = { showMismatch = false; viewModel.resolveAllMismatchesAndSave(onCompute) },
+            mismatches = mismatches,
+            onResolveAll = {
+                viewModel.resolveAllMismatchesAndSave { onCompute() }
+                showMismatch = false
+            },
             onCancel = { showMismatch = false },
         )
     }
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// Sub-composables
+// ════════════════════════════════════════════════════════════════════════════════
+
 @Composable
-private fun PairNavigationBar(
-    currentIndex: Int,
+private fun PairNav(
+    pairIndex: Int,
     totalPairs: Int,
-    pairLabel: String,
+    leftLabel: String,
+    rightLabel: String,
     onPrev: () -> Unit,
     onNext: () -> Unit,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    Surface(tonalElevation = 1.dp) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onPrev, enabled = currentIndex > 0) {
-                Icon(Icons.Default.ChevronLeft, "Prev")
+            IconButton(onClick = onPrev, enabled = pairIndex > 0) {
+                Icon(Icons.Default.ChevronLeft, "Previous pair")
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(pairLabel, fontWeight = FontWeight.Bold)
-                Text("${currentIndex + 1} / $totalPairs", style = MaterialTheme.typography.bodySmall)
+                Text("$leftLabel  ↔  $rightLabel", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Pair ${pairIndex + 1} / $totalPairs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onNext, enabled = currentIndex < totalPairs - 1) {
-                Icon(Icons.Default.ChevronRight, "Next")
+            IconButton(onClick = onNext, enabled = pairIndex < totalPairs - 1) {
+                Icon(Icons.Default.ChevronRight, "Next pair")
             }
         }
     }
 }
 
 @Composable
-private fun SideComparisonCard(
-    session: ActiveSession,
-    sideAIndex: Int,
-    sideBIndex: Int,
+private fun DedupHalfCanvas(
+    label: String,
+    side: TreeSide,
+    linkedIds: Set<String>,
+    selectedId: String?,
+    pending: String?,
+    onTap: (String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val sideA = session.sides.getOrNull(sideAIndex)
-    val sideB = session.sides.getOrNull(sideBIndex)
+    Box(modifier = modifier) {
+        AnnotationCanvas(
+            imageUriString = side.imageUri?.toString(),
+            bboxes = side.bboxes,
+            selectedBboxId = selectedId,
+            imageWidth = side.imageWidth.coerceAtLeast(1),
+            imageHeight = side.imageHeight.coerceAtLeast(1),
+            tool = CanvasTool.SELECT,
+            showBoxes = true,
+            onBboxTap = { id -> if (id != null) onTap(id) },
+            modifier = Modifier.fillMaxSize(),
+        )
 
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        // Side A
-        OutlinedCard(modifier = Modifier.weight(1f)) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Side ${sideAIndex + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        // Side label overhead
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+            shape = RoundedCornerShape(4.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        ) {
+            Text(
+                label,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // Pending indicator
+        if (pending != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).padding(8.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFFB8E04A).copy(alpha = 0.9f),
+            ) {
+                Text(
+                    "← Tap matching box →",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0C120C),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BottomPanels(
+    suggestions: List<SuggestedPair>,
+    showSuggestions: Boolean,
+    confirmedLinks: List<CrossSideLink>,
+    session: ActiveSession?,
+    onToggleSuggestions: () -> Unit,
+    onConfirm: (SuggestedPair) -> Unit,
+    onReject: (SuggestedPair) -> Unit,
+    onAcceptAll: () -> Unit,
+    onRemoveLink: (String) -> Unit,
+) {
+    Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(8.dp).heightIn(max = 200.dp)) {
+            // Suggestions header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onToggleSuggestions) {
+                    Icon(
+                        if (showSuggestions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        "Toggle",
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Suggestions (${suggestions.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+                val autoCount = suggestions.count { it.category == "auto" }
+                if (autoCount > 0) {
+                    TextButton(onClick = onAcceptAll) {
+                        Text("Accept All Auto ($autoCount)", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            if (showSuggestions) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (sug in suggestions.take(20)) {
+                        SuggestionChip(sug, onConfirm, onReject)
+                    }
+                }
+            }
+
+            // Confirmed links
+            if (confirmedLinks.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
-                if (sideA != null) {
-                    for (bbox in sideA.bboxes) {
-                        Text(
-                            "${bbox.className} [${bbox.id}]",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                Text("Confirmed Links (${confirmedLinks.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (link in confirmedLinks) {
+                        InputChip(
+                            selected = true,
+                            onClick = { onRemoveLink(link.linkId) },
+                            label = { Text("${link.bboxIdA}↔${link.bboxIdB}", fontSize = 11.sp) },
+                            trailingIcon = { Icon(Icons.Default.Close, "Remove", modifier = Modifier.size(14.dp)) },
+                            modifier = Modifier.height(28.dp),
                         )
                     }
-                    if (sideA.bboxes.isEmpty()) Text("No bboxes", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
-        // Side B
-        OutlinedCard(modifier = Modifier.weight(1f)) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Side ${sideBIndex + 1}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                if (sideB != null) {
-                    for (bbox in sideB.bboxes) {
-                        Text(
-                            "${bbox.className} [${bbox.id}]",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    if (sideB.bboxes.isEmpty()) Text("No bboxes", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun SuggestionChip(
+    sug: SuggestedPair,
+    onConfirm: (SuggestedPair) -> Unit,
+    onReject: (SuggestedPair) -> Unit,
+) {
+    val scorePct = (sug.score * 100).toInt()
+    val tint = when {
+        sug.category == "auto" -> Color(0xFF2DD47B)
+        scorePct >= 50 -> Color(0xFFE4B84A)
+        else -> MaterialTheme.colorScheme.error
+    }
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        border = ButtonDefaults.outlinedButtonBorder(enabled = true),
+        modifier = Modifier.widthIn(max = 200.dp),
+    ) {
+        Column(Modifier.padding(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${sug.bboxIdA} ↔ ${sug.bboxIdB}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("$scorePct%", fontSize = 11.sp, color = tint, fontWeight = FontWeight.Bold)
+            }
+            Text(
+                sug.category.uppercase(),
+                fontSize = 9.sp,
+                color = tint,
+            )
+            // Signal badges
+            sug.signals?.let { sig ->
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    SignalBadge("S", sig.seam)
+                    SignalBadge("V", sig.vert)
+                    SignalBadge("Z", sig.size)
+                    SignalBadge("C", sig.cls)
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun SuggestionCard(
-    suggestion: SuggestedPair,
-    onConfirm: () -> Unit,
-) {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "${suggestion.bboxIdA} ↔ ${suggestion.bboxIdB}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    "${(suggestion.score * 100).toInt()}% · ${suggestion.category}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (suggestion.category == "auto")
-                        MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            FilledTonalButton(onClick = onConfirm) {
-                Icon(Icons.Default.Link, "Link", Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Link")
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = { onConfirm(sug) },
+                    modifier = Modifier.height(24.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp),
+                ) { Text("Accept", fontSize = 10.sp) }
+                TextButton(
+                    onClick = { onReject(sug) },
+                    modifier = Modifier.height(24.dp),
+                    contentPadding = PaddingValues(horizontal = 6.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("Reject", fontSize = 10.sp) }
             }
         }
     }
 }
 
 @Composable
-private fun LinkCard(
-    link: CrossSideLink,
-    onRemove: () -> Unit,
-) {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.Link, "Linked", tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "S${link.sideA + 1}:${link.bboxIdA} ↔ S${link.sideB + 1}:${link.bboxIdB}",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Default.Close, "Remove", tint = MaterialTheme.colorScheme.error)
-            }
-        }
+private fun SignalBadge(label: String, value: Float) {
+    val c = when {
+        value >= 0.75f -> Color(0xFF2DD47B)
+        value >= 0.5f -> Color(0xFFE4B84A)
+        else -> Color(0xFFF06060)
+    }
+    Surface(
+        shape = RoundedCornerShape(3.dp),
+        color = c.copy(alpha = 0.2f),
+    ) {
+        Text(
+            "$label ${(value * 100).toInt()}",
+            fontSize = 8.sp,
+            color = c,
+            modifier = Modifier.padding(horizontal = 2.dp),
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
+
