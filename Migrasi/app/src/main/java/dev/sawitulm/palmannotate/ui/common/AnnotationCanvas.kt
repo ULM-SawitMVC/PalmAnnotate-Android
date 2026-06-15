@@ -125,6 +125,22 @@ fun AnnotationCanvas(
         modifier = modifier
             .fillMaxSize()
             .transformable(state = transformState)
+            // Tap-to-select. detectDragGestures (below) only fires after the touch-slop
+            // drag threshold is crossed, so a plain tap would never select a box — which
+            // made class assignment (annotation) and box linking (dedup) impossible.
+            // A dedicated tap detector restores single-tap selection in SELECT mode.
+            .pointerInput(tool, bboxes) {
+                if (tool == CanvasTool.SELECT) {
+                    detectTapGestures { tapScreen ->
+                        val img = screenToImage(tapScreen.x, tapScreen.y)
+                        val tapped = bboxes.lastOrNull { b ->
+                            img.x in b.x1..b.x2 && img.y in b.y1..b.y2
+                        }
+                        if (tapped != null) onBboxTap?.invoke(tapped.id)
+                        else onCanvasTap?.invoke()
+                    }
+                }
+            }
             .pointerInput(tool, bboxes, selectedBboxId) {
                 when (tool) {
                     CanvasTool.SELECT -> {
