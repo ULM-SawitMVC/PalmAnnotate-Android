@@ -58,6 +58,8 @@ class DedupViewModel @Inject constructor(
     var showSuggestions by mutableStateOf(true)
     var isLoading by mutableStateOf(true)
         private set
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
     var selectedSideB by mutableStateOf<String?>(null) // bboxId on right canvas (sideA)
     var selectedSideA by mutableStateOf<String?>(null) // bboxId on left canvas (sideB)
     var pendingBboxId by mutableStateOf<String?>(null)
@@ -102,8 +104,20 @@ class DedupViewModel @Inject constructor(
     fun load(sessionId: String) {
         viewModelScope.launch {
             isLoading = true
-            session = repo.loadActiveSession(sessionId)
-            isLoading = false
+            errorMessage = null
+            try {
+                val loaded = repo.loadActiveSession(sessionId)
+                session = loaded
+                if (loaded == null) {
+                    errorMessage = "Session not found."
+                } else if (loaded.sides.size < 2) {
+                    errorMessage = "Need at least 2 sides for deduplication (found ${loaded.sides.size})."
+                }
+            } catch (e: Exception) {
+                errorMessage = "Failed to load: ${e.localizedMessage ?: "Unknown error"}"
+            } finally {
+                isLoading = false
+            }
         }
     }
 
@@ -298,9 +312,24 @@ fun DeduplicationScreen(
             )
         },
     ) { padding ->
-        if (viewModel.isLoading || leftSide == null || rightSide == null) {
+        if (viewModel.isLoading) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
+            }
+        } else if (viewModel.errorMessage != null || leftSide == null || rightSide == null) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.Warning, "Error", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        viewModel.errorMessage ?: "Insufficient data for deduplication.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedButton(onClick = onBack) { Text("Go Back") }
+                }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(padding)) {
