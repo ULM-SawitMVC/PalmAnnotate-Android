@@ -9,6 +9,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dev.sawitulm.palmannotate.ui.annotation.AnnotationScreen
 import dev.sawitulm.palmannotate.ui.capture.CaptureFlowScreen
+import dev.sawitulm.palmannotate.ui.carousel.CarouselScreen
 import dev.sawitulm.palmannotate.ui.dedup.DeduplicationScreen
 import dev.sawitulm.palmannotate.ui.home.HomeScreen
 import dev.sawitulm.palmannotate.ui.results.ResultsScreen
@@ -26,12 +27,14 @@ object Routes {
     const val ANNOTATION = "annotation/{treeKey}"
     const val RESULTS = "results/{treeKey}"
     const val DEDUP = "dedup/{treeKey}"
+    const val CAROUSEL = "carousel/{treeKey}"
 
     fun sessionDetail(runId: String) = "session/$runId"
     fun capture(runId: String) = "capture/$runId"
     fun annotation(treeKey: String) = "annotation/$treeKey"
     fun results(treeKey: String) = "results/$treeKey"
     fun dedup(treeKey: String) = "dedup/$treeKey"
+    fun carousel(treeKey: String) = "carousel/$treeKey"
 }
 
 @Composable
@@ -104,6 +107,19 @@ fun PalmAnnotateNavHost(
                 sessionId = treeKey,
                 onBack = { navController.popBackStack() },
                 onCompute = { navController.navigate(Routes.results(treeKey)) },
+            )
+        }
+
+        composable(
+            route = Routes.CAROUSEL,
+            arguments = listOf(navArgument("treeKey") { type = NavType.StringType }),
+        ) { entry ->
+            val treeKey = entry.arguments?.getString("treeKey") ?: return@composable
+            CarouselScreen(
+                sessionId = treeKey,
+                onBack = { navController.popBackStack() },
+                onDedup = { navController.navigate(Routes.dedup(treeKey)) },
+                onResults = { navController.navigate(Routes.results(treeKey)) },
             )
         }
     }

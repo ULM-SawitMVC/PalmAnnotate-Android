@@ -1,6 +1,5 @@
 @echo off
-set JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
-set ANDROID_HOME=C:\Users\MyBook Z Series\AppData\Local\Android\Sdk
+set JAVA_HOME=C:\tools\jdk17\jdk-17.0.19+10
+set ANDROID_HOME=C:\tools\android-sdk
 set PATH=%JAVA_HOME%\bin;%PATH%
-cd /d "C:\Users\MyBook Z Series\Desktop\PalmAnnotate-Android\Migrasi"
-call gradlew.bat test --no-daemon 2>&1
+call gradlew.bat :app:testDebugUnitTest --no-daemon --console=plain
