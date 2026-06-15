@@ -448,22 +448,24 @@ Migrasi/app/src/main/java/dev/sawitulm/palmannotate/
 │   └── util/                    ← OperationQueue, DepthUtil, ColorUtil
 ├── data/
 │   ├── db/                      ← Room (Entities, PalmAnnotateDatabase)
-│   ├── storage/                 ← SessionRepository, AndroidStorageManager, SafMirrorStore, ExportFolderRepository
+│   ├── storage/                 ← SessionRepository, AndroidStorageManager, SafMirrorStore, ExportFolderRepository, InputCache
 │   ├── yolo/YoloParser.kt
 │   ├── detection/OnnxDetector.kt
 │   ├── export/ExportManager.kt
 │   ├── camera/OrbbecManager.kt
 │   └── location/GpsProvider.kt
 └── ui/
-    ├── theme/Theme.kt
+    ├── theme/                    ← Theme.kt, OnMediaColors.kt
+    ├── common/                   ← AnnotationCanvas, Dialogs, KeyboardShortcuts, ToastHost, AppHeader
     ├── navigation/Navigation.kt
     ├── home/HomeScreen.kt
     ├── session/SessionDetailScreen.kt
     ├── capture/CaptureFlowScreen.kt
     ├── annotation/AnnotationScreen.kt
+    ├── carousel/CarouselScreen.kt
     ├── results/ResultsScreen.kt
     ├── dedup/DeduplicationScreen.kt
-    └── common/                  ← AnnotationCanvas, Dialogs, KeyboardShortcuts
+    └── viewer/DepthViewerScreen.kt
 ```
 
 ### Migrasi work tracking

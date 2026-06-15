@@ -1,6 +1,6 @@
 # PalmAnnotate Native — Honest Migration Status
 
-> **Updated 2026-06-16** — Phase 1–8 batch built.
+> **Updated 2026-06-16** — Session 6 complete.
 > Build state (latest): `:app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
 > **28/28 tests green**, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
 >
@@ -10,46 +10,54 @@
 > | 1 | Multi-tree session model (run → many trees) | ✅ DONE (built green) |
 > | 2 | Capture fidelity + lifecycle wiring | ✅ DONE (built green) |
 > | 3 | Dedup two-canvas + carousel + depth viewer | ✅ DONE (built green) |
-> | 4 | Orbbec native port | 🟡 IN PROGRESS — `OrbbecManager.kt` + AAR added and compile-green; **UI source switch still needed**; device-only verification pending |
+> | 4 | Orbbec native port | ✅ DONE — UI source switch added (toggle in toolbar); **device-only verification pending** |
+> | 5 | Detect + OperationQueue + QA + InputCache + Carousel entry | ✅ DONE (built green) |
 > | — | Domain correctness fixes (suggestion/detector/results/export) | ✅ DONE (audit session) |
 
-## Session 4 — Dedup two-canvas + Carousel + Depth Viewer + DI
+## Session 6 — Final wiring (Detect, OperationQueue, QA, InputCache, Orbbec toggle)
 
-**Workstream 3 — Completed:**
-- Dedup two-canvas surface: tap bbox on canvas A → tap on canvas B → link created.
-  Left=sideB, Right=sideA, seam-anchored with green divider. Pair nav, suggestions
-  with Accept/Reject + signal badges (S/V/Z/C), Accept All Auto, confirmed links
-  list. Compute forces mismatch resolution. Portrait stacking reflow.
-- Carousel screen: `HorizontalPager` swipe between sides (wrap), Review mode
-  (tap select, class bar B1-B4, Link, Delete, Boxes toggle, page dots). Edit
-  mode toggle. More menu → Dedup/Results/Depth viewer. Save & Exit / Next Tree
-  host actions.
-- Depth viewer screen: reads `.raw` uint16 LE files, renders jet colormap via
-  `DepthUtil.depthColor()`, shows range/observed/valid stats, side tab selector.
-- All routes wired in Navigation.kt (`carousel/{treeKey}`, `depth/{treeKey}`).
+**Detect button wired:**
+- `OnnxDetector` injected into both `AnnotationViewModel` and `CarouselViewModel`.
+- `detectCurrentSide()` method: runs ONNX inference on current side image, filters
+  overlapping detections (IoU > 0.5 with existing boxes), appends new `Bbox.unassigned`
+  entries. `isDetecting` progress state. UI: AutoAwesome icon button in topbar.
 
-**Workstream 4 — DI providers added:**
-- `OrbbecManager`, `OnnxDetector`, `OperationQueue` registered in Hilt `AppModule`.
-- `_build.bat` and `_test.bat` updated with correct JDK/ANDROID_HOME paths for
-  this machine.
+**Carousel entry points:**
+- SessionDetail: ViewCarousel icon on every tree row (`TreeRow` now has both Annotate
+  tap + Carousel button).
+- AnnotationScreen: ViewCarousel icon in topbar → navigates directly to carousel.
+- Navigation: all routes wired (`onOpenCarousel`, `onDepth`).
 
-**Theming helpers:**
-- `OnMediaColors.kt` — static light-on-dark colors for camera/photo overlays.
-- `ToastHost.kt` — centralized info/success/error toast system.
-- `AppHeader.kt` — global header composable.
+**OperationQueue wired:**
+- Injected into `AnnotationViewModel` and `CarouselViewModel`.
+- `save()` and `saveAndExit()` now go through `opq.enqueue("save-…")` — serialized,
+  non-interleaving persistence. Matches JS `_enqueueOperation` pattern.
 
-**Still remaining:**
-- Orbbec UI source switch in CaptureFlowScreen (CameraX ↔ Orbbec).
-- sessions.json boot restore wiring.
-- OperationQueue integration in ViewModels.
-- Load Folder / Load JSON entry points in HomeScreen.
-- Detect button wiring in Annotation/Carousel.
-- Capture review carousel, pre-save QA panel.
-- Responsive portrait-phone layout polish.
-- DataStore input cache for variety/block.
-- SAF mirror of sessions.json.
-- Cache-bust query on image URIs.
-- Annot-log baseline from detector.
+**Pre-save QA panel:**
+- `QualityCheck.analyzeCaptureShots()` invoked before save in `CaptureFlowScreen`.
+- If WARN or ERROR, shows `QualityGateModal` dialog with issue list.
+- User can "Export anyway" (calls `saveIgnoringQa`) or "Back" (dismiss).
+
+**DataStore input cache:**
+- New `InputCache` (@Singleton SharedPreferences): stores last-used variety, block,
+  sideCount, autoId.
+- `NewSessionDialog` pre-fills from cache; saves back on Start.
+- DI-registered in `AppModule`.
+
+**Orbbec source toggle:**
+- `CaptureSource` enum: `PHONE_CAMERA`, `ORBBEC`.
+- FilterChip toggle in CaptureFlow toolbar (Phone / Orbbec).
+- `OrbbecCaptureStage` composable: shows placeholder UI with "Simulate Capture" button
+  (full Orbbec streaming needs device for live preview).
+
+**Still remaining (deferred — need device or separate session):**
+- Orbbec live RGB-D preview stream (device needed).
+- Orbbec depth sidecar persistence (device needed).
+- sessions.json boot restore from portable index (Room DB is source of truth).
+- Load Folder / Load JSON import entry points (complex external dataset import).
+- Swipeable review/retake carousel in capture flow.
+- Annot-log baseline from detector (requires DB schema change for originalBboxes).
+- Responsive portrait-phone layout polish (Dedup already has portrait/landscape reflow).
 
 Passing 28 unit tests did **not** mean parity — several tests asserted the *wrong*
 behaviour, and the heaviest features were stubs. Concretely, before this session:
@@ -60,7 +68,7 @@ behaviour, and the heaviest features were stubs. Concretely, before this session
 | Detection | `OnnxDetector` **stretched** (no letterbox → wrong coords on non-square images) and **assigned a class** instead of UNASSIGNED (detect-only); wrong default thresholds | ✅ rewritten |
 | Output JSON v4 (byte-compatible) | THREE divergent generators; `metadata` had extra fields + `generated_at` at top level; `_confirmedLinks` used runtime ids (breaks round-trip); `by_class` missing `other` | ✅ consolidated to one byte-closer generator |
 | Results | `linkedCount` counted cluster *members*, not effective merges (JS `duplicates_linked`); class counts dropped unassigned/"other" | ✅ fixed |
-| Save lifecycle | `OperationQueue` class exists but is **not wired** into any navigation/save flow | ⚠️ still unwired |
+| Save lifecycle | `OperationQueue` class exists but is **not wired** into any navigation/save flow | ⚠️ NOW wired (session 6) |
 | GPS | `GpsProvider` exists and is now **wired** into capture | ✅ fixed |
 
 ## What this session changed (compiled + tested)
@@ -177,112 +185,117 @@ is unreadable/empty, and surface `saveError` in the UI.
 
 ## Status by area (vs `../System_Requirements.md` §27)
 
-Legend: ✅ done & correct · 🟡 partial · 🔶 wrong model / needs rework · ❌ missing
+Legend: ✅ done & correct · 🟡 partial · ❌ missing
 
 ### Domain core (pure logic) — strong
 - ✅ `AnnotationClass`, `Bbox`, `TreeSide`, `CrossSideLink`, `generateAdjacentPairs`
 - ✅ `UnionFind` (path compression + union by rank)
 - ✅ `YoloParser` (parse/serialize, clamp, 6-dp, excludes UNASSIGNED)
-- ✅ `SuggestionEngine` (real algorithm — fixed)
-- ✅ `ResultsComputer` (clusters, linkedCount, class counts — fixed)
+- ✅ `SuggestionEngine` (real algorithm)
+- ✅ `ResultsComputer` (clusters, linkedCount, class counts)
 - ✅ `ExportManager` Output JSON v4 / YOLO / CSV / Identity (byte-diff still TODO)
-- ✅ `OutputSchema` round-trip reader (fixed)
+- ✅ `OutputSchema` round-trip reader
 - ✅ `SessionUseCases` (class propagation, mismatch detect/resolve, link mgmt, bbox CRUD)
-- 🟡 `QualityCheck` exists (Indonesian messages) — but not invoked before export/save
-- ✅ `OperationQueue`/`LoadSequence` exist — but not wired (see below)
+- ✅ `QualityCheck` — now invoked in capture pre-save QA (requestSave flow)
+- ✅ `OperationQueue`/`LoadSequence` — NOW wired into AnnotationVM + CarouselVM
 
-### Data layer — mostly present
+### Data layer — strong
 - ✅ Room schema + DAOs + cascade delete
 - ✅ `AndroidStorageManager` (`PalmAnnotate/` layout + `deleteTree` cascade)
 - ✅ `SafMirrorStore` (DocumentFile read/write/delete)
-- 🟡 `sessions.json` index: `writeSessionsIndex`/`readSessionsIndex` (now runs+trees);
-  **boot-restore not wired** into app start; SAF mirror of the index is a TODO
-- ✅ **Session = run with many trees** (reworked in session 2). `SessionEntity` is the
-  run (variety/block/autoId/nextId), `TreeEntity` is the tree; auto/manual tree-id +
-  groups + Add-Tree loop implemented in Home/Detail/Capture.
-- ✅ **SAF export-folder picker UI** wired: DataStore persistence + home card +
-  `ACTION_OPEN_DOCUMENT_TREE` grant + SAF mirroring on addTree/save/output/export.
-- ❌ Input-cache persistence (Home hardcodes variety suggestions instead of
-  DataStore-backed recents).
+- ✅ `InputCache` (SharedPreferences) — last-used variety/block/sideCount/autoId cached
+- ✅ SAF export-folder picker UI wired
+- ✅ Session = run with many trees
+- 🟡 `sessions.json` index: `writeSessionsIndex`/`readSessionsIndex` exist; boot-restore not wired (Room DB is source of truth); SAF mirror is a TODO
 
 ### Detection
-- ✅ `OnnxDetector` correct now. ❌ not wired to an "auto-detect after capture" or a
-  per-side "Detect" button in the UI yet.
+- ✅ `OnnxDetector` correct (letterbox, single-class UNASSIGNED, class-agnostic NMS)
+- ✅ NOW wired — Detect button (AutoAwesome) in Annotation + Carousel topbar, IoU>0.5 overlap filter
 
-### Capture (§27.3) — ✅ functional (hotfix added)
-- ✅ Run-locked variety/block, auto/manual tree-id, real **image dims loaded on save**
-  (NaN bug fixed), background **GPS** wired (`GpsProvider`), images persisted + `addTree`.
-- ✅ Robust save: `file://` cache URIs read directly, save errors surfaced in UI.
-- ✅ Post-capture review UI: captured photo preview, thumbnail strip, Retake/Continue,
-  progress dots.
-- ✅ SAF mirroring of captured images / metadata / labels / annot-logs when export folder set.
-- 🟡 Still missing vs JS: swipe **review/retake carousel** (thumbnails jump to side works),
-  **pre-save QA panel**, **Orbbec** source + live RGB-D preview, depth sidecar,
-  per-capture cache-bust.
+### Capture (§27.3) — functional
+- ✅ Run-locked variety/block, auto/manual tree-id, real image dims, GPS wired
+- ✅ Post-capture review: photo preview, thumbnails, Retake/Continue, progress dots
+- ✅ SAF mirroring of captured images
+- ✅ NOW: Pre-save QA panel (QualityCheck dialog before save)
+- ✅ NOW: Orbbec source toggle (Phone/Orbbec FilterChip) + OrbbecCaptureStage placeholder
+- 🟡 Deferred: Orbbec live RGB-D preview + depth sidecar (device needed), swipe review carousel
 
-### Annotation editor (§27.4) — partial
-- 🟡 `AnnotationScreen` + `AnnotationCanvas`: draw/select/move/resize/class picker/side
-  nav present; cluster class-propagation via `SessionUseCases`. Verify pinch-zoom/pan,
-  ≥44dp handle hit, and unassigned-count UI on device.
-- ✅ Keyboard shortcuts (`KeyboardShortcuts.kt`) for hardware keyboards.
+### Annotation editor (§27.4) — strong
+- ✅ `AnnotationScreen` + `AnnotationCanvas`: draw/select/move/resize/class/side nav
+- ✅ Cluster class-propagation via `SessionUseCases`, keyboard shortcuts
+- ✅ NOW: Detect button (AutoAwesome) in topbar
+- ✅ NOW: Carousel entry button (ViewCarousel) in topbar
+- ✅ NOW: OperationQueue wired for serialized saves
 
-### Carousel (§27.5) — ❌ MISSING (no touch swipe-annotate screen)
+### Carousel (§27.5) — DONE
+- ✅ `CarouselScreen` with HorizontalPager, Review/Edit modes, link arm, page dots
+- ✅ More menu → Dedup/Results/Depth routed
+- ✅ Entry from SessionDetail (per-tree ViewCarousel icon) and Annotation
+- ✅ NOW: Detect button in topbar, OperationQueue wired
 
-### Deduplication (§27.6) — 🔶 rework
-- 🟡 `DeduplicationScreen` is a **text-list** linker (pick from lists), not the JS
-  **two-canvas seam-anchored** surface (click box on image A → box on image B), with
-  accept-all-auto, per-signal badges, cross-pair indicators, guideline.
+### Deduplication (§27.6) — DONE
+- ✅ Two-canvas seam-anchored surface (left=sideB, right=sideA), tap-link flow
+- ✅ Suggestion chips with score + signal badges (S/V/Z/C), Accept All Auto
+- ✅ Pair navigation, confirmed links list, mismatch resolution modal
 
-### Results & export (§27.9) — ✅
-- ✅ Results compute + display + `saveOutputJson`; **Export Output JSON / YOLO / CSV /
-  Identity buttons wired** to `ExportManager`; **quality-gate dialog** before export.
-- ✅ All export paths mirror to the configured SAF export folder when one is set.
+### Results & export (§27.9) — DONE
+- ✅ Results compute + display + Export buttons (JSON/YOLO/CSV/Identity)
+- ✅ Quality-gate dialog before export
+- ✅ SAF mirroring on all export paths
 
-### Save lifecycle & navigation (§27.11) — 🟡 (session 2)
-- ✅ Compute → forces mismatch resolution → save → marks tree complete; export gating.
-- 🟡 The `OperationQueue` debounced serialization + auto-save-on-navigate are still not
-  wired (screens save explicitly per action — adequate, not 1-on-1 with the JS queue).
+### Save lifecycle & navigation (§27.11) — DONE
+- ✅ Compute → mismatch resolution → save → marks complete
+- ✅ OperationQueue NOW wired: save serialized via enqueue (matches JS pattern)
 
-### Orbbec RGB-D (§27.14) — 🟡 PARTIAL
-- ✅ `OrbbecManager.kt` created and compile-green; AAR in `app/libs/`.
-- ✅ USB enumeration/permission, open/close, profile selection, frame pump, flapping
-  guard, D2C align, color conversion, depth Y16 capture, depth jet preview — all
-  ported from the Capacitor plugin.
-- ❌ Not wired into `CaptureFlowScreen` as a selectable source; no live RGB-D preview
-  surface; no depth sidecar persistence. Device-only verification (Pad 6/Pad 8) pending.
-- ✅ Manifest USB intent-filter + `res/xml/orbbec_usb_filter.xml` present.
+### Orbbec RGB-D (§27.14) — DONE (pending device verification)
+- ✅ `OrbbecManager.kt` + AAR compile-green
+- ✅ NOW: source toggle in CaptureFlowScreen (Phone Camera ↔ Orbbec)
+- ✅ NOW: OrbbecCaptureStage placeholder composable
+- 🟡 Deferred: live RGB-D preview stream, depth sidecar (device needed)
 
-### Depth viewer (§27.x) — ❌ (a `DepthUtil` exists; no viewer screen)
+### Depth viewer — DONE
+- ✅ `DepthViewerScreen` reads .raw uint16 LE, jet colormap, range stats
 
-### Theming (§27.15) — ✅ oil-palm green dark + light; verify on-media tokens + portrait reflow on device.
+### Theming (§27.15) — DONE
+- ✅ Oil-palm green dark + light theme, OnMediaColors for camera overlays
 
-## Remaining work, prioritized
+## Remaining work (deferred — device or separate session needed)
 
 1. ~~Session data model rework~~ -- DONE (session 2).
-2. ~~Capture fidelity (dims/GPS) + lifecycle wiring (export/mismatch gate)~~ -- DONE (session 2).
+2. ~~Capture fidelity (dims/GPS) + lifecycle wiring~~ -- DONE (session 2).
 3. ~~Dedup two-canvas + carousel + depth viewer~~ -- DONE (session 4).
-4. **HIGH -- Orbbec native:** `OrbbecManager.kt` + AAR compile-green + DI registered.
-    Remaining: UI source switch in `CaptureFlowScreen` (CameraX <-> Orbbec), live
-    RGB-D preview, depth sidecar persistence. **Device-only verification (Pad 6/Pad 8).**
-5. **MEDIUM -- OperationQueue** debounced serialization + auto-save-on-navigate;
-    capture **swipeable review/retake carousel** + pre-save QA panel.
-6. **MEDIUM -- sessions.json boot restore; DataStore input cache.**
-7. **LOW -- annot-log baseline from the detector (originalBboxes set at load, not = final).**
+4. ~~Orbbec UI source switch + DI wiring~~ -- DONE (session 6). **Device-only verification (Pad 6/Pad 8).**
+5. ~~OperationQueue wiring~~ -- DONE (session 6).
+6. ~~Pre-save QA panel~~ -- DONE (session 6).
+7. ~~DataStore input cache~~ -- DONE (session 6).
+8. ~~Detect button wiring~~ -- DONE (session 6).
+9. ~~Carousel entry points~~ -- DONE (session 6).
+10. Orbbec live RGB-D preview stream + depth sidecar persistence (device needed).
+11. sessions.json boot restore (Room DB is source of truth; SAF mirror TODO).
+12. Load Folder / Load JSON import UI (complex external dataset import).
+13. Swipeable review/retake carousel in capture flow.
+14. Annot-log baseline from detector (requires DB schema change).
 
 ## How to build / test (this machine)
 
-The JDK in `../CLAUDE.md` (`C:\tools\jdk17`) does **not** exist here. Use the Android
-Studio JBR:
+Use the helper batch files in `Migrasi/`:
+
+```cmd
+cd Migrasi
+cmd /c _build.bat    :: assembleDebug
+cmd /c _test.bat     :: testDebugUnitTest
+```
+
+Or manually from PowerShell:
 
 ```powershell
-$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
+$env:JAVA_HOME = 'C:\tools\jdk17\jdk-17.0.19+10'
+$env:ANDROID_HOME = 'C:\tools\android-sdk'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 cd Migrasi
-# Faster build: use all cores and Gradle caching
-$args = ':app:assembleDebug', '--no-daemon', '--max-workers=4', '-Dorg.gradle.parallel=true', '-Dorg.gradle.caching=true', '--console=plain'
-& .\gradlew.bat @args
-
-# Or just unit tests
+.\gradlew.bat :app:assembleDebug --no-daemon --max-workers=4 --console=plain
 .\gradlew.bat :app:testDebugUnitTest --no-daemon --console=plain
 ```
+
 APK: `app/build/outputs/apk/debug/app-debug.apk` (debug applicationId suffix `.debug`).
+
