@@ -26,10 +26,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.sawitulm.palmannotate.data.detection.OnnxDetector
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.domain.model.*
 import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases
+import dev.sawitulm.palmannotate.domain.util.OperationQueue
 import dev.sawitulm.palmannotate.ui.common.AnnotationCanvas
 import dev.sawitulm.palmannotate.ui.common.CanvasTool
 import kotlinx.coroutines.flow.first
@@ -44,6 +46,8 @@ import javax.inject.Inject
 class CarouselViewModel @Inject constructor(
     private val repo: SessionRepository,
     private val exportFolder: ExportFolderRepository,
+    private val detector: OnnxDetector,
+    private val opq: OperationQueue,
 ) : ViewModel() {
 
     var session by mutableStateOf<ActiveSession?>(null)
@@ -55,6 +59,8 @@ class CarouselViewModel @Inject constructor(
     var isLoading by mutableStateOf(true)
     var isSaving by mutableStateOf(false)
     var linkArmed by mutableStateOf(false)
+    var isDetecting by mutableStateOf(false)
+        private set
 
     val currentSide: TreeSide?
         get() = session?.sides?.getOrNull(currentSideIndex)
@@ -125,20 +131,56 @@ class CarouselViewModel @Inject constructor(
 
     fun save() {
         val s = session ?: return
-        viewModelScope.launch {
-            isSaving = true
+        opq.enqueue("save-carousel") {
             val safTreeUri = exportFolder.folderUri.first()
             repo.saveSession(s, safTreeUri)
-            isSaving = false
         }
     }
 
     fun saveAndExit(onDone: () -> Unit) {
         val s = session ?: return
-        viewModelScope.launch {
+        opq.enqueue("save-carousel") {
             val safTreeUri = exportFolder.folderUri.first()
             repo.saveSession(s, safTreeUri)
             onDone()
+        }
+    }
+
+    fun detectCurrentSide() {
+        val side = currentSide ?: return
+        val uri = side.imageUri ?: return
+        viewModelScope.launch {
+            isDetecting = true
+            try {
+                val detections = detector.detect(uri)
+                val s = session ?: return@launch
+                var nextId = side.bboxes.size
+                val newBoxes = detections.filter { d ->
+                    val overlaps = side.bboxes.any { existing ->
+                        val existingArea = (existing.x2 - existing.x1) * (existing.y2 - existing.y1)
+                        val detArea = (d.x2 - d.x1) * (d.y2 - d.y1)
+                        val ix1 = maxOf(d.x1, existing.x1)
+                        val iy1 = maxOf(d.y1, existing.y1)
+                        val ix2 = minOf(d.x2, existing.x2)
+                        val iy2 = minOf(d.y2, existing.y2)
+                        val iw = maxOf(0f, ix2 - ix1)
+                        val ih = maxOf(0f, iy2 - iy1)
+                        val inter = iw * ih
+                        val union = existingArea + detArea - inter
+                        union > 0f && inter / union > 0.5f
+                    }
+                    !overlaps
+                }.mapIndexed { i, d ->
+                    val id = "det${nextId + i}"
+                    Bbox.unassigned(id, d.x1, d.y1, d.x2, d.y2)
+                }
+                val updatedSides = s.sides.toMutableList()
+                updatedSides[currentSideIndex] = side.copy(bboxes = side.bboxes + newBoxes)
+                session = s.copy(sides = updatedSides)
+            } catch (_: Exception) {
+            } finally {
+                isDetecting = false
+            }
         }
     }
 }
@@ -192,6 +234,17 @@ fun CarouselScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
+                    // Detect
+                    IconButton(
+                        onClick = { viewModel.detectCurrentSide() },
+                        enabled = !viewModel.isDetecting,
+                    ) {
+                        if (viewModel.isDetecting) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, "Detect")
+                        }
+                    }
                     // Mode toggle
                     FilterChip(
                         selected = viewModel.mode == CarouselMode.EDIT,

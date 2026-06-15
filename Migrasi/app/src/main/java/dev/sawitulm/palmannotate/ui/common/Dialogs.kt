@@ -5,7 +5,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import dev.sawitulm.palmannotate.data.storage.InputCache
 import dev.sawitulm.palmannotate.domain.model.AnnotationClass
 import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases.MismatchCluster
 
@@ -18,11 +20,12 @@ import dev.sawitulm.palmannotate.domain.usecase.SessionUseCases.MismatchCluster
 fun NewSessionDialog(
     onDismiss: () -> Unit,
     onCreate: (variety: String, block: String, sideCount: Int, autoId: Boolean) -> Unit,
+    inputCache: InputCache? = null,
 ) {
-    var variety by remember { mutableStateOf("DAMIMAS") }
-    var block by remember { mutableStateOf("") }
-    var sideCount by remember { mutableIntStateOf(4) }
-    var autoId by remember { mutableStateOf(true) }
+    var variety by remember { mutableStateOf(inputCache?.lastVariety ?: "DAMIMAS") }
+    var block by remember { mutableStateOf(inputCache?.lastBlock ?: "") }
+    var sideCount by remember { mutableIntStateOf(inputCache?.lastSideCount ?: 4) }
+    var autoId by remember { mutableStateOf(inputCache?.lastAutoId ?: true) }
     var varietyError by remember { mutableStateOf(false) }
     var blockError by remember { mutableStateOf(false) }
 
@@ -78,7 +81,15 @@ fun NewSessionDialog(
                 onClick = {
                     varietyError = variety.isBlank()
                     blockError = block.isBlank()
-                    if (!varietyError && !blockError) onCreate(variety.trim(), block.trim(), sideCount, autoId)
+                    if (!varietyError && !blockError) {
+                        inputCache?.let { cache ->
+                            cache.lastVariety = variety.trim()
+                            cache.lastBlock = block.trim()
+                            cache.lastSideCount = sideCount
+                            cache.lastAutoId = autoId
+                        }
+                        onCreate(variety.trim(), block.trim(), sideCount, autoId)
+                    }
                 },
             ) { Text("Start") }
         },

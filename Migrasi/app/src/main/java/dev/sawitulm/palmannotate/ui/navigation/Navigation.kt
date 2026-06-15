@@ -37,6 +37,7 @@ object Routes {
     fun results(treeKey: String) = "results/$treeKey"
     fun dedup(treeKey: String) = "dedup/$treeKey"
     fun carousel(treeKey: String) = "carousel/$treeKey"
+    fun depth(treeKey: String) = "depth/$treeKey"
 }
 
 @Composable
@@ -59,6 +60,7 @@ fun PalmAnnotateNavHost(
                 onBack = { navController.popBackStack() },
                 onAddTree = { navController.navigate(Routes.capture(runId)) },
                 onOpenTree = { treeKey -> navController.navigate(Routes.annotation(treeKey)) },
+                onOpenCarousel = { treeKey -> navController.navigate(Routes.carousel(treeKey)) },
             )
         }
 
@@ -89,6 +91,7 @@ fun PalmAnnotateNavHost(
                 onBack = { navController.popBackStack() },
                 onViewResults = { navController.navigate(Routes.results(treeKey)) },
                 onOpenDedup = { navController.navigate(Routes.dedup(treeKey)) },
+                onOpenCarousel = { navController.navigate(Routes.carousel(treeKey)) },
             )
         }
 
@@ -122,6 +125,7 @@ fun PalmAnnotateNavHost(
                 onBack = { navController.popBackStack() },
                 onDedup = { navController.navigate(Routes.dedup(treeKey)) },
                 onResults = { navController.navigate(Routes.results(treeKey)) },
+                onDepth = { navController.navigate(Routes.depth(treeKey)) },
             )
         }
 

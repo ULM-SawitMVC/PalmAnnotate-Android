@@ -71,6 +71,7 @@ fun SessionDetailScreen(
     onBack: () -> Unit,
     onAddTree: () -> Unit,             // navigate to capture(runId)
     onOpenTree: (String) -> Unit,      // navigate to annotation(treeKey)
+    onOpenCarousel: (String) -> Unit = {}, // navigate to carousel(treeKey)
     viewModel: SessionDetailViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(sessionId) { viewModel.load(sessionId) }
@@ -121,7 +122,8 @@ fun SessionDetailScreen(
                     items(trees, key = { it.treeKey }) { tree ->
                         TreeRow(
                             tree = tree,
-                            onClick = { onOpenTree(tree.treeKey) },
+                            onAnnotate = { onOpenTree(tree.treeKey) },
+                            onCarousel = { onOpenCarousel(tree.treeKey) },
                             onDelete = { viewModel.deleteTree(tree.treeKey) },
                         )
                     }
@@ -177,9 +179,9 @@ private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TreeRow(tree: TreeEntity, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun TreeRow(tree: TreeEntity, onAnnotate: () -> Unit, onCarousel: () -> Unit, onDelete: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
-    ElevatedCard(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.primary, modifier = Modifier.height(36.dp).widthIn(min = 44.dp)) {
                 Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
@@ -187,11 +189,15 @@ private fun TreeRow(tree: TreeEntity, onClick: () -> Unit, onDelete: () -> Unit)
                 }
             }
             Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).clickable(onClick = onAnnotate)) {
                 Text(tree.treeName, fontWeight = FontWeight.Medium, maxLines = 1)
                 Text("${tree.sideCount} sides${if (tree.isComplete) " · complete" else ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (tree.isComplete) Icon(Icons.Default.CheckCircle, "Complete", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onCarousel) {
+                Icon(Icons.Default.ViewCarousel, "Carousel", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             IconButton(onClick = { confirm = true }) {
                 Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
             }

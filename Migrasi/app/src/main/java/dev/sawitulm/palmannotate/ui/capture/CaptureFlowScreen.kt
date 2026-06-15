@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,12 +45,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import coil.compose.rememberAsyncImagePainter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.sawitulm.palmannotate.data.camera.OrbbecManager
 import dev.sawitulm.palmannotate.data.db.SessionEntity
 import dev.sawitulm.palmannotate.data.location.GpsProvider
 import dev.sawitulm.palmannotate.data.storage.AndroidStorageManager
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.domain.model.*
+import dev.sawitulm.palmannotate.domain.quality.QualityCheck
+import dev.sawitulm.palmannotate.ui.common.QualityGateModal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -63,6 +67,7 @@ import java.util.*
 import javax.inject.Inject
 
 enum class SideStep { PREVIEW, REVIEW }
+enum class CaptureSource { PHONE_CAMERA, ORBBEC }
 
 @HiltViewModel
 class CaptureFlowViewModel @Inject constructor(
@@ -70,6 +75,7 @@ class CaptureFlowViewModel @Inject constructor(
     private val storage: AndroidStorageManager,
     private val gps: GpsProvider,
     private val exportFolder: ExportFolderRepository,
+    private val orbbec: OrbbecManager,
 ) : ViewModel() {
 
     var run by mutableStateOf<SessionEntity?>(null)
@@ -87,6 +93,40 @@ class CaptureFlowViewModel @Inject constructor(
         private set
     var saveError by mutableStateOf<String?>(null)
         private set
+    var captureSource by mutableStateOf(CaptureSource.PHONE_CAMERA)
+        private set
+    var showQaDialog by mutableStateOf(false)
+        private set
+    var qaReport by mutableStateOf<QualityCheck.CaptureReport?>(null)
+        private set
+
+    fun selectSource(src: CaptureSource) { captureSource = src }
+    fun dismissQa() { showQaDialog = false }
+
+    fun requestSave(runId: String, context: Context, onDone: (String) -> Unit) {
+        val r = run ?: return
+        val capturedCount = capturedImages.count { it != null }
+        val hasGps = latitude != null && longitude != null
+        val report = QualityCheck.analyzeCaptureShots(
+            capturedSides = capturedCount,
+            expectedSides = sideCount,
+            depthSides = 0,
+            hasGps = hasGps,
+            hasVariety = r.variety.isNotBlank(),
+            hasBlock = r.block.isNotBlank(),
+        )
+        if (report.status == QualityCheck.Level.ERROR || report.status == QualityCheck.Level.WARN) {
+            qaReport = report
+            showQaDialog = true
+        } else {
+            save(runId, context, onDone)
+        }
+    }
+
+    fun saveIgnoringQa(runId: String, context: Context, onDone: (String) -> Unit) {
+        showQaDialog = false
+        save(runId, context, onDone)
+    }
 
     fun load(runId: String) {
         viewModelScope.launch {
@@ -145,7 +185,7 @@ class CaptureFlowViewModel @Inject constructor(
     private fun safe(s: String) = s.uppercase().replace(Regex("[^A-Z0-9_]+"), "_").trim('_').ifBlank { "TREE" }
     private fun safeBlock(s: String) = s.uppercase().replace(Regex("[^A-Z0-9]"), "")
 
-    fun save(runId: String, context: Context, onDone: (String) -> Unit) {
+    private fun save(runId: String, context: Context, onDone: (String) -> Unit) {
         val r = run ?: return
         saveError = null
         viewModelScope.launch {
@@ -263,6 +303,16 @@ fun CaptureFlowScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Cancel")
                     }
                 },
+                actions = {
+                    val isOrbbec = viewModel.captureSource == CaptureSource.ORBBEC
+                    FilterChip(
+                        selected = isOrbbec,
+                        onClick = { viewModel.selectSource(if (isOrbbec) CaptureSource.PHONE_CAMERA else CaptureSource.ORBBEC) },
+                        label = { Text(if (isOrbbec) "Orbbec" else "Phone", fontSize = 12.sp) },
+                        leadingIcon = { Icon(if (isOrbbec) Icons.Default.Usb else Icons.Default.CameraAlt, null, Modifier.size(16.dp)) },
+                        modifier = Modifier.height(30.dp),
+                    )
+                },
             )
         },
     ) { padding ->
@@ -331,6 +381,27 @@ fun CaptureFlowScreen(
                         .clip(RoundedCornerShape(16.dp))
                         .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
                 ) {
+                    if (viewModel.captureSource == CaptureSource.ORBBEC) {
+                        OrbbecCaptureStage(
+                            isCaptured = viewModel.capturedImages.getOrNull(viewModel.currentSide) != null,
+                            currentStep = viewModel.currentStep,
+                            uri = viewModel.capturedImages.getOrNull(viewModel.currentSide),
+                            isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
+                            allCaptured = viewModel.allCaptured,
+                            isSaving = viewModel.isSaving,
+                            onCaptured = {
+                                viewModel.onImageCaptured(it)
+                                Toast.makeText(context, "Side ${viewModel.currentSide + 1} captured via Orbbec", Toast.LENGTH_SHORT).show()
+                            },
+                            onRetake = { viewModel.retakeCurrent() },
+                            onContinue = {
+                                val finished = viewModel.continueFromReview()
+                                if (finished && viewModel.allCaptured) {
+                                    viewModel.requestSave(sessionId, context, onTreeSaved)
+                                }
+                            },
+                        )
+                    } else {
                     when (viewModel.currentStep) {
                         SideStep.PREVIEW -> {
                             CameraCaptureStage(
@@ -355,12 +426,13 @@ fun CaptureFlowScreen(
                                 onContinue = {
                                     val finished = viewModel.continueFromReview()
                                     if (finished && viewModel.allCaptured) {
-                                        viewModel.save(sessionId, context, onTreeSaved)
+                                        viewModel.requestSave(sessionId, context, onTreeSaved)
                                     }
                                 },
                             )
                         }
                     }
+                    } // end else (phone camera)
                 }
 
                 // Bottom progress dots.
@@ -390,6 +462,16 @@ fun CaptureFlowScreen(
             } else {
                 Text("Camera permission is required for capture.")
             }
+        }
+    }
+
+    viewModel.qaReport?.let { report ->
+        if (viewModel.showQaDialog) {
+            QualityGateModal(
+                issues = report.issues.map { "${it.code}: ${it.message}" },
+                onContinue = { viewModel.saveIgnoringQa(sessionId, context, onTreeSaved) },
+                onBack = { viewModel.dismissQa() },
+            )
         }
     }
 }
@@ -586,6 +668,40 @@ private fun CameraPreview(
             try {
                 ProcessCameraProvider.getInstance(context).get().unbindAll()
             } catch (_: Exception) { }
+        }
+    }
+}
+
+@Composable
+private fun OrbbecCaptureStage(
+    isCaptured: Boolean,
+    currentStep: SideStep,
+    uri: Uri?,
+    isLastSide: Boolean,
+    allCaptured: Boolean,
+    isSaving: Boolean,
+    onCaptured: (Uri) -> Unit,
+    onRetake: () -> Unit,
+    onContinue: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (!isCaptured || currentStep == SideStep.PREVIEW) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(Icons.Default.Usb, "Orbbec", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                Text("Orbbec RGB-D Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Connect Orbbec device to capture depth-aligned frames.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = {
+                    val fakeUri = Uri.parse("file:///dev/null")
+                    onCaptured(fakeUri)
+                }) {
+                    Icon(Icons.Default.CameraAlt, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Simulate Capture")
+                }
+            }
+        } else {
+            CapturedReviewStage(uri = uri, isLastSide = isLastSide, allCaptured = allCaptured, isSaving = isSaving, onRetake = onRetake, onContinue = onContinue)
         }
     }
 }

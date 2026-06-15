@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
+import dev.sawitulm.palmannotate.data.storage.InputCache
 import dev.sawitulm.palmannotate.data.storage.RunSummary
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.ui.common.NewSessionDialog
@@ -56,6 +57,7 @@ data class HomeStats(
 class HomeViewModel @Inject constructor(
     private val repo: SessionRepository,
     private val exportFolder: ExportFolderRepository,
+    val inputCache: InputCache,
 ) : ViewModel() {
 
     val runs: StateFlow<List<RunSummary>> = repo.observeRuns()
@@ -214,6 +216,7 @@ fun HomeScreen(
                     onSessionClick(runId)
                 }
             },
+            inputCache = viewModel.inputCache,
         )
     }
 }

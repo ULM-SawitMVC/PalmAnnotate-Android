@@ -12,6 +12,7 @@ import dev.sawitulm.palmannotate.data.detection.OnnxDetector
 import dev.sawitulm.palmannotate.data.location.GpsProvider
 import dev.sawitulm.palmannotate.data.storage.AndroidStorageManager
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
+import dev.sawitulm.palmannotate.data.storage.InputCache
 import dev.sawitulm.palmannotate.data.storage.SafMirrorStore
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
 import dev.sawitulm.palmannotate.domain.util.OperationQueue
@@ -68,4 +69,8 @@ object AppModule {
 
     @Provides @Singleton
     fun provideOperationQueue(): OperationQueue = OperationQueue()
+
+    @Provides @Singleton
+    fun provideInputCache(@ApplicationContext ctx: Context): InputCache =
+        InputCache(ctx)
 }
