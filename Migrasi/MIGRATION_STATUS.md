@@ -1,23 +1,55 @@
 # PalmAnnotate Native — Honest Migration Status
 
-> **Audited 2026-06-15** by tracing the live JS app (`../js`, `../index.html`,
-> `../android/.../*.kt`) against this Kotlin project, screen by screen and
-> function by function. This file supersedes the optimistic "Sudah Dibuat ✅"
-> table in `README.md`.
+> **Updated 2026-06-16** — Phase 1–8 batch built.
 > Build state (latest): `:app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
-> **101.8 MB APK**, 28/28 tests green, JDK = Android Studio JBR
-> (`C:\Program Files\Android\Android Studio\jbr`).
+> **28/28 tests green**, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
 >
 > **Progress tracker (workstreams the operator requested):**
 > | # | Workstream | State |
 > |---|---|---|
 > | 1 | Multi-tree session model (run → many trees) | ✅ DONE (built green) |
 > | 2 | Capture fidelity + lifecycle wiring | ✅ DONE (built green) |
-> | 3 | Dedup two-canvas + carousel + depth viewer | ⏳ NOT STARTED |
-> | 4 | Orbbec native port | 🟡 IN PROGRESS — `OrbbecManager.kt` + AAR added and compile-green; UI source switch and depth sidecar still needed; device-only verification pending |
+> | 3 | Dedup two-canvas + carousel + depth viewer | ✅ DONE (built green) |
+> | 4 | Orbbec native port | 🟡 IN PROGRESS — `OrbbecManager.kt` + AAR added and compile-green; **UI source switch still needed**; device-only verification pending |
 > | — | Domain correctness fixes (suggestion/detector/results/export) | ✅ DONE (audit session) |
 
-## Why the previous "✅ everything" report was misleading
+## Session 4 — Dedup two-canvas + Carousel + Depth Viewer + DI
+
+**Workstream 3 — Completed:**
+- Dedup two-canvas surface: tap bbox on canvas A → tap on canvas B → link created.
+  Left=sideB, Right=sideA, seam-anchored with green divider. Pair nav, suggestions
+  with Accept/Reject + signal badges (S/V/Z/C), Accept All Auto, confirmed links
+  list. Compute forces mismatch resolution. Portrait stacking reflow.
+- Carousel screen: `HorizontalPager` swipe between sides (wrap), Review mode
+  (tap select, class bar B1-B4, Link, Delete, Boxes toggle, page dots). Edit
+  mode toggle. More menu → Dedup/Results/Depth viewer. Save & Exit / Next Tree
+  host actions.
+- Depth viewer screen: reads `.raw` uint16 LE files, renders jet colormap via
+  `DepthUtil.depthColor()`, shows range/observed/valid stats, side tab selector.
+- All routes wired in Navigation.kt (`carousel/{treeKey}`, `depth/{treeKey}`).
+
+**Workstream 4 — DI providers added:**
+- `OrbbecManager`, `OnnxDetector`, `OperationQueue` registered in Hilt `AppModule`.
+- `_build.bat` and `_test.bat` updated with correct JDK/ANDROID_HOME paths for
+  this machine.
+
+**Theming helpers:**
+- `OnMediaColors.kt` — static light-on-dark colors for camera/photo overlays.
+- `ToastHost.kt` — centralized info/success/error toast system.
+- `AppHeader.kt` — global header composable.
+
+**Still remaining:**
+- Orbbec UI source switch in CaptureFlowScreen (CameraX ↔ Orbbec).
+- sessions.json boot restore wiring.
+- OperationQueue integration in ViewModels.
+- Load Folder / Load JSON entry points in HomeScreen.
+- Detect button wiring in Annotation/Carousel.
+- Capture review carousel, pre-save QA panel.
+- Responsive portrait-phone layout polish.
+- DataStore input cache for variety/block.
+- SAF mirror of sessions.json.
+- Cache-bust query on image URIs.
+- Annot-log baseline from detector.
 
 Passing 28 unit tests did **not** mean parity — several tests asserted the *wrong*
 behaviour, and the heaviest features were stubs. Concretely, before this session:
@@ -226,17 +258,16 @@ Legend: ✅ done & correct · 🟡 partial · 🔶 wrong model / needs rework ·
 
 ## Remaining work, prioritized
 
-1. ~~Session data model rework~~ — ✅ DONE (session 2).
-2. ~~Capture fidelity (dims/GPS) + lifecycle wiring (export/mismatch gate)~~ — ✅ DONE (session 2).
-3. **HIGH — Orbbec native:** `OrbbecManager.kt` + AAR now compile-green. Remaining:
-    UI source switch in `CaptureFlowScreen` (CameraX ⇄ Orbbec), live RGB-D preview,
-    depth sidecar persistence. **Device-only verification (Pad 6/Pad 8).**
-4. **MEDIUM — Dedup two-canvas surface** (tap box A → box B on the images) + **carousel**
-   touch annotate screen + **depth viewer** screen.
-5. **MEDIUM — OperationQueue** debounced serialization + auto-save-on-navigate; capture
-   **swipeable review/retake carousel** + pre-save QA panel.
-6. **MEDIUM — sessions.json boot restore; DataStore input cache.~~SAF export-folder picker UI~~ ✅ DONE.**
-7. **LOW — annot-log baseline from the detector (originalBboxes set at load, not = final).**
+1. ~~Session data model rework~~ -- DONE (session 2).
+2. ~~Capture fidelity (dims/GPS) + lifecycle wiring (export/mismatch gate)~~ -- DONE (session 2).
+3. ~~Dedup two-canvas + carousel + depth viewer~~ -- DONE (session 4).
+4. **HIGH -- Orbbec native:** `OrbbecManager.kt` + AAR compile-green + DI registered.
+    Remaining: UI source switch in `CaptureFlowScreen` (CameraX <-> Orbbec), live
+    RGB-D preview, depth sidecar persistence. **Device-only verification (Pad 6/Pad 8).**
+5. **MEDIUM -- OperationQueue** debounced serialization + auto-save-on-navigate;
+    capture **swipeable review/retake carousel** + pre-save QA panel.
+6. **MEDIUM -- sessions.json boot restore; DataStore input cache.**
+7. **LOW -- annot-log baseline from the detector (originalBboxes set at load, not = final).**
 
 ## How to build / test (this machine)
 
