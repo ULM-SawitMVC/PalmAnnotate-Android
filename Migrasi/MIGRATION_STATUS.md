@@ -1,9 +1,40 @@
 # PalmAnnotate Native — Honest Migration Status
 
-> **Updated 2026-06-16** — Session 7 complete (audit + parallel fixes).
-> Build state (latest): `:app:clean :app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
-> **39/39 tests green** (34 DomainTests + 5 FolderResumeTests), APK `app-debug.apk` ~100.5 MB,
-> JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+> **Updated 2026-06-16** — Session 7 + critical on-device hotfix.
+> Build state (latest): `:app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
+> **39/39 tests green**, APK `app-debug.apk` ~100.5 MB, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+
+## HOTFIX 2026-06-16 — captured trees were never persisting (Room REPLACE+CASCADE)
+
+**Symptom (device, Xiaomi Pad — Pad 8/Android 16 fleet):** after capturing a tree, the run always
+showed **0 Trees**, the annotation editor said "No side selected", and the carousel was empty — even
+though the side images/labels/metadata WERE written to app-external storage. The run's `nextId`
+counter advanced on every save, so trees seemed to "save" but vanished.
+
+**Root cause (NOT external storage):** `addTree` ends by advancing the run counter via
+`sessionDao.upsert(run.copy(nextId=…))`, which was `@Insert(onConflict = REPLACE)`. For an existing
+row, SQLite's `INSERT OR REPLACE` is a **DELETE+INSERT**; because `trees` has
+`ForeignKey(onDelete = CASCADE)` to `sessions`, replacing the session **cascade-deleted the tree
+(and its sides) inserted two lines earlier**. Pure DB bug; the files on disk are not FK-cascaded so
+they survived (which is what made it look like a storage issue). Unit tests passed because in-memory
+DAOs don't exercise the FK cascade.
+
+**Fix:** added real `@Update` methods to `SessionDao`/`TreeDao` and switched every *modify-existing-row*
+call from `upsert(REPLACE)` to `update()`:
+- `SessionRepository.addTree` / `deleteTree` → `sessionDao.update(...)` (advance nextId without wiping trees).
+- `SessionRepository.saveSession` → `treeDao.update(...)` (don't cascade-wipe sides before re-add).
+- `SessionRepository.saveOutputJson` "mark complete" → `treeDao.update(...)` (this REPLACE would have
+  erased a tree's annotations when flipping `isComplete`).
+`createRun` / `addTree`'s tree insert keep `upsert` (genuinely new rows, no cascade).
+
+**Verified on device:** capture → Save & Annotate now opens the editor with the real photo + S1–S4
+tabs; SessionDetail shows **1 Tree · 4 Photos**; the tree **survives a full app restart** (home shows
+1 Tree). Note: a run's `nextId` can read higher than its tree count if trees were "saved" during the
+broken build — those failed saves advanced the counter without leaving a tree (cosmetic; the counter
+only moves forward by design).
+
+**Also:** capture screen tightened (outer padding 16dp→6dp, header/thumbnail/dot spacers reduced) so
+the live preview fills much more of the screen for outdoor field use.
 
 ## Session 7 — Audit + parallel fixes (3 worktree agents, integrated to main)
 
