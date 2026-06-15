@@ -1,8 +1,39 @@
 # PalmAnnotate Native — Honest Migration Status
 
-> **Updated 2026-06-16** — Session 6 complete.
-> Build state (latest): `:app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
-> **28/28 tests green**, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+> **Updated 2026-06-16** — Session 7 complete (audit + parallel fixes).
+> Build state (latest): `:app:clean :app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
+> **39/39 tests green** (34 DomainTests + 5 FolderResumeTests), APK `app-debug.apk` ~100.5 MB,
+> JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+
+## Session 7 — Audit + parallel fixes (3 worktree agents, integrated to main)
+
+An audit (3 Explore agents) vs `System_Requirements.md §27`, this file, and the original `js/`
+sources found a data-corrupting bbox-id bug, a link-pruning gap, and folder-resume gaps. Three
+workstreams ran in parallel git worktrees (disjoint files) and were octopus-merged to `main`:
+
+- **A — correctness (`Bbox.kt`, `SessionUseCases.kt`, `AnnotationScreen.kt`, `CarouselScreen.kt`,
+  `DomainTests.kt`):** bbox ids were `"b${bboxes.size}"`/`"det${size+i}"` which **reuse an index
+  after a delete → id collisions + broken cross-side links**. Replaced with pure
+  `Bbox.nextId(existing, prefix)` = `<prefix><maxNumericSuffix+1>` (never reused, mirrors JS
+  `'nb'+_idSeq++`). `deleteBbox` now prunes confirmed+suggested links via the existing
+  `SessionUseCases` helper from both screens. `detectCurrentSide` seeds `originalBboxes` (annot-log
+  baseline) for fresh captures. +6 tests.
+- **D — capture review-all (`CaptureFlowScreen.kt`):** after the last side, a `HorizontalPager`
+  review of every shot with per-shot **Retake** + a single **Save & Annotate** (routes through the
+  existing pre-save QA gate). Phase enum `SIDES`/`REVIEW_ALL`; retake returns to the pager.
+- **C — Load Folder resume (`FolderResumeImporter.kt` new, `SafMirrorStore.kt`,
+  `SessionRepository.kt`, `AndroidStorageManager.kt`, `HomeScreen.kt`, `FolderResumeTests.kt`
+  new):** picking a folder that already holds `PalmAnnotate/Output JSON/*.json` **resumes** by
+  scanning those files (via `OutputSchema.toSessionData`) + `dataset/images/field/`, grouping trees
+  into runs by variety·block, deduping against Room, and importing; empty folder → create fresh.
+  **`sessions.json` index read/write + all call sites were REMOVED on native** (per operator: not
+  relevant on native; "Load JSON" import was JS-only and never existed here). app-external stays the
+  PRIMARY store; chosen folder = mirror + resume source.
+
+> **Decision recorded:** sessions.json portable index and Load-JSON import are intentionally dropped
+> on native; resume is folder-scan based. app-external remains primary (Directory.Documents fails on
+> SDK 34). Out of scope this session (needs a device): Orbbec live RGB-D preview + depth sidecar
+> persistence; and the Output-JSON byte-diff vs the JS app on real data.
 >
 > **Progress tracker (workstreams the operator requested):**
 > | # | Workstream | State |
@@ -271,10 +302,12 @@ Legend: ✅ done & correct · 🟡 partial · ❌ missing
 8. ~~Detect button wiring~~ -- DONE (session 6).
 9. ~~Carousel entry points~~ -- DONE (session 6).
 10. Orbbec live RGB-D preview stream + depth sidecar persistence (device needed).
-11. sessions.json boot restore (Room DB is source of truth; SAF mirror TODO).
-12. Load Folder / Load JSON import UI (complex external dataset import).
-13. Swipeable review/retake carousel in capture flow.
-14. Annot-log baseline from detector (requires DB schema change).
+11. ~~sessions.json boot restore~~ -- DROPPED on native (session 7); resume is folder-scan based.
+12. ~~Load Folder / Load JSON import UI~~ -- Load Folder DONE as folder-scan resume (session 7);
+    Load JSON dropped (JS-only, not relevant on native).
+13. ~~Swipeable review/retake carousel in capture flow~~ -- DONE (session 7).
+14. ~~Annot-log baseline from detector~~ -- DONE (session 7): `detectCurrentSide` seeds `originalBboxes`.
+15. Output-JSON byte-diff vs JS app on real data (verification, device needed).
 
 ## How to build / test (this machine)
 
