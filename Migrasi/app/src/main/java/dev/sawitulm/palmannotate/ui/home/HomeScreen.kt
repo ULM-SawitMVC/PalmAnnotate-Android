@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
+import dev.sawitulm.palmannotate.data.storage.FolderResumeImporter
 import dev.sawitulm.palmannotate.data.storage.InputCache
 import dev.sawitulm.palmannotate.data.storage.RunSummary
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
@@ -57,6 +58,7 @@ data class HomeStats(
 class HomeViewModel @Inject constructor(
     private val repo: SessionRepository,
     private val exportFolder: ExportFolderRepository,
+    private val folderResumeImporter: FolderResumeImporter,
     val inputCache: InputCache,
 ) : ViewModel() {
 
@@ -95,6 +97,20 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch { exportFolder.saveFolder(uri) }
     }
 
+    /**
+     * Persist the chosen export folder, then resume-by-scan: if it already holds a
+     * PalmAnnotate/ structure, prior runs/trees are rebuilt into Room. The chosen
+     * folder stays a best-effort mirror; app-external remains the primary store.
+     * [onResult] reports how many trees were resumed (0 = new/empty folder).
+     */
+    fun setFolderAndResume(uri: android.net.Uri, onResult: (Int) -> Unit) {
+        viewModelScope.launch {
+            exportFolder.saveFolder(uri)
+            val imported = folderResumeImporter.resumeFromFolder(uri)
+            onResult(imported)
+        }
+    }
+
     fun clearFolder() {
         viewModelScope.launch { exportFolder.clear() }
     }
@@ -115,6 +131,8 @@ fun HomeScreen(
     val stats by viewModel.stats.collectAsState()
     val groups by viewModel.groups.collectAsState()
     val folderName by viewModel.folderName.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree(),
@@ -124,7 +142,13 @@ fun HomeScreen(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
-            viewModel.setFolder(uri)
+            // Persist the folder, then resume-by-scan any PalmAnnotate/ data it holds.
+            viewModel.setFolderAndResume(uri) { imported ->
+                scope.launch {
+                    val msg = if (imported > 0) "Resumed $imported tree${if (imported == 1) "" else "s"} from folder" else "New folder set"
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
         }
     }
 
@@ -132,6 +156,7 @@ fun HomeScreen(
     var expandedGroup by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {

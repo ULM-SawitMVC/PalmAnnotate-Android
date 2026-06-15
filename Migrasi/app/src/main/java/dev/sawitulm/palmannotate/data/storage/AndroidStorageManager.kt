@@ -37,7 +37,7 @@ class AndroidStorageManager(private val context: Context) {
     val exportsDir get() = File(rootDir, "exports").also { it.mkdirs() }
     val snapshotsDir get() = File(rootDir, "snapshots").also { it.mkdirs() }
 
-    val sessionsFile get() = File(rootDir, "sessions.json")
+    // sessions.json index dropped on native (resume is folder-scan based)
 
     // ─── Image helpers ────────────────────────────────────────────────────────
 

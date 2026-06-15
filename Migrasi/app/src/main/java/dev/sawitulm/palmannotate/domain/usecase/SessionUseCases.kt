@@ -269,7 +269,7 @@ object SessionUseCases {
         val updatedSides = session.sides.map { side ->
             if (side.sideIndex != sideIndex) side
             else {
-                val newId = "b${side.bboxes.size}"
+                val newId = Bbox.nextId(side.bboxes, "b")
                 val newBbox = Bbox.unassigned(newId, x1, y1, x2, y2)
                 side.copy(bboxes = side.bboxes + newBbox)
             }

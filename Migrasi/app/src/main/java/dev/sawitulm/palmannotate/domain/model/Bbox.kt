@@ -42,5 +42,21 @@ data class Bbox(
             className = AnnotationClass.UNASSIGNED.displayName,
             x1 = x1, y1 = y1, x2 = x2, y2 = y2,
         )
+
+        /**
+         * Next never-reused id for [prefix] within [existing] boxes.
+         *
+         * Returns `<prefix><N>` where N is one greater than the largest numeric
+         * suffix already present on ANY existing id (regardless of its prefix).
+         * A single shared sequence across prefixes guarantees a brand-new id can
+         * never collide with a surviving box even after a delete shrinks the list.
+         * Port of the never-reused `'nb'+_idSeq++` scheme in js/bbox-editor.js.
+         */
+        fun nextId(existing: List<Bbox>, prefix: String): String {
+            val maxSuffix = existing.maxOfOrNull { b ->
+                b.id.takeLastWhile { it.isDigit() }.toIntOrNull() ?: -1
+            } ?: -1
+            return "$prefix${maxSuffix + 1}"
+        }
     }
 }
