@@ -14,6 +14,7 @@ import dev.sawitulm.palmannotate.ui.dedup.DeduplicationScreen
 import dev.sawitulm.palmannotate.ui.home.HomeScreen
 import dev.sawitulm.palmannotate.ui.results.ResultsScreen
 import dev.sawitulm.palmannotate.ui.session.SessionDetailScreen
+import dev.sawitulm.palmannotate.ui.viewer.DepthViewerScreen
 
 /**
  * Routes. A "session" id is a RUN id; a "tree" is identified by its treeKey.
@@ -28,6 +29,7 @@ object Routes {
     const val RESULTS = "results/{treeKey}"
     const val DEDUP = "dedup/{treeKey}"
     const val CAROUSEL = "carousel/{treeKey}"
+    const val DEPTH = "depth/{treeKey}"
 
     fun sessionDetail(runId: String) = "session/$runId"
     fun capture(runId: String) = "capture/$runId"
@@ -121,6 +123,14 @@ fun PalmAnnotateNavHost(
                 onDedup = { navController.navigate(Routes.dedup(treeKey)) },
                 onResults = { navController.navigate(Routes.results(treeKey)) },
             )
+        }
+
+        composable(
+            route = Routes.DEPTH,
+            arguments = listOf(navArgument("treeKey") { type = NavType.StringType }),
+        ) { entry ->
+            val treeKey = entry.arguments?.getString("treeKey") ?: return@composable
+            DepthViewerScreen(treeKey = treeKey, onBack = { navController.popBackStack() })
         }
     }
 }

@@ -7,11 +7,14 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.sawitulm.palmannotate.data.db.*
+import dev.sawitulm.palmannotate.data.camera.OrbbecManager
+import dev.sawitulm.palmannotate.data.detection.OnnxDetector
 import dev.sawitulm.palmannotate.data.location.GpsProvider
 import dev.sawitulm.palmannotate.data.storage.AndroidStorageManager
 import dev.sawitulm.palmannotate.data.storage.ExportFolderRepository
 import dev.sawitulm.palmannotate.data.storage.SafMirrorStore
 import dev.sawitulm.palmannotate.data.storage.SessionRepository
+import dev.sawitulm.palmannotate.domain.util.OperationQueue
 import javax.inject.Singleton
 
 @Module
@@ -54,4 +57,15 @@ object AppModule {
         storage: AndroidStorageManager,
         saf: SafMirrorStore,
     ): SessionRepository = SessionRepository(sessionDao, treeDao, sideDao, bboxDao, linkDao, storage, saf)
+
+    @Provides @Singleton
+    fun provideOrbbecManager(@ApplicationContext ctx: Context): OrbbecManager =
+        OrbbecManager(ctx)
+
+    @Provides @Singleton
+    fun provideOnnxDetector(@ApplicationContext ctx: Context): OnnxDetector =
+        OnnxDetector(ctx)
+
+    @Provides @Singleton
+    fun provideOperationQueue(): OperationQueue = OperationQueue()
 }
