@@ -1,0 +1,342 @@
+package dev.sawitulm.palmannotate.data.storage
+
+import android.net.Uri
+import android.util.Log
+import dev.sawitulm.palmannotate.data.db.*
+import dev.sawitulm.palmannotate.data.export.ExportManager
+import dev.sawitulm.palmannotate.data.yolo.YoloParser
+import dev.sawitulm.palmannotate.domain.model.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
+
+/**
+ * Central repository — bridges Room (runs + trees + annotations), the filesystem,
+ * and the SAF mirror.
+ *
+ * Vocabulary (matches the JS app):
+ *   RUN  (SessionEntity) — variety+block, holds many trees, owns the tree-id counter.
+ *   TREE (TreeEntity)    — one tree = N side photos; the unit that is annotated.
+ *
+ * Across the UI/nav an annotation target is identified by its **treeKey**, which is
+ * what [ActiveSession.sessionId] carries.
+ */
+class SessionRepository(
+    private val sessionDao: SessionDao,
+    private val treeDao: TreeDao,
+    private val sideDao: SideDao,
+    private val bboxDao: BboxDao,
+    private val linkDao: ConfirmedLinkDao,
+    private val storage: AndroidStorageManager,
+    private val saf: SafMirrorStore,
+) {
+    companion object { private const val TAG = "SessionRepo" }
+
+    // ─── Runs (home list) ──────────────────────────────────────────────────────
+
+    /** Observe runs with a derived tree count for the home screen. */
+    fun observeRuns(): Flow<List<RunSummary>> =
+        sessionDao.observeAll().combine(treeDao.observeAll()) { runs, trees ->
+            val counts = trees.groupingBy { it.sessionId }.eachCount()
+            runs.map { it.toSummary(counts[it.sessionId] ?: 0) }
+        }
+
+    suspend fun getRun(sessionId: String): SessionEntity? = withContext(Dispatchers.IO) {
+        sessionDao.getById(sessionId)
+    }
+
+    private fun normToken(s: String) = s.uppercase().replace(Regex("[^A-Z0-9]"), "")
+    fun groupKeyFor(variety: String, block: String) = "${normToken(variety)}__${normToken(block)}"
+
+    suspend fun createRun(variety: String, block: String, sideCount: Int, autoId: Boolean): String =
+        withContext(Dispatchers.IO) {
+            val id = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            sessionDao.upsert(
+                SessionEntity(
+                    sessionId = id, variety = variety.trim(), block = block.trim(),
+                    groupKey = groupKeyFor(variety, block),
+                    sideCount = sideCount.coerceAtLeast(2), autoId = autoId, nextId = 1,
+                    createdAt = now, updatedAt = now,
+                )
+            )
+            writeSessionsIndex()
+            id
+        }
+
+    suspend fun deleteRun(sessionId: String, safTreeUri: Uri? = null) = withContext(Dispatchers.IO) {
+        val trees = treeDao.getBySession(sessionId)
+        for (t in trees) deleteTreeArtifacts(t, safTreeUri)
+        sessionDao.deleteById(sessionId) // cascades trees/sides/bboxes/links
+        writeSessionsIndex()
+    }
+
+    // ─── Trees within a run ──────────────────────────────────────────────────────
+
+    fun observeTrees(sessionId: String): Flow<List<TreeEntity>> = treeDao.observeBySession(sessionId)
+    suspend fun getTrees(sessionId: String): List<TreeEntity> = withContext(Dispatchers.IO) {
+        treeDao.getBySession(sessionId)
+    }
+
+    /**
+     * Add a captured tree to a run: insert the tree + its sides/bboxes, write the
+     * YOLO labels + annot-log, and advance the run's nextId. Returns the treeKey.
+     */
+    suspend fun addTree(
+        sessionId: String,
+        treeName: String,
+        treeId: Int,
+        split: String,
+        sides: List<TreeSide>,
+        metadata: TreeMetadata?,
+        safTreeUri: Uri? = null,
+    ): String = withContext(Dispatchers.IO) {
+        val run = sessionDao.getById(sessionId) ?: throw IllegalStateException("Run not found")
+        val now = System.currentTimeMillis()
+        val treeKey = UUID.randomUUID().toString()
+        treeDao.upsert(
+            TreeEntity(
+                treeKey = treeKey, sessionId = sessionId, treeName = treeName, treeId = treeId,
+                split = split, sideCount = sides.size.coerceAtLeast(run.sideCount),
+                variety = metadata?.variety ?: run.variety, block = metadata?.block ?: run.block,
+                createdAt = now, updatedAt = now,
+            )
+        )
+
+        // Persist metadata JSON (and SAF mirror if configured).
+        val metaJson = buildMetadataJson(metadata, treeName, run, treeId).toString(2)
+        try { storage.writeText(storage.metadataFile(treeName), metaJson) } catch (_: Exception) {}
+        if (safTreeUri != null) {
+            saf.writeText(safTreeUri, "dataset/metadata/${treeName}.json", metaJson)
+        }
+
+        persistSides(treeKey, treeName, split, sides, safTreeUri)
+
+        // Advance the tree-id counter past the highest used id.
+        val nextId = maxOf(run.nextId, treeId + 1)
+        sessionDao.upsert(run.copy(nextId = nextId, updatedAt = now))
+        writeSessionsIndex()
+        treeKey
+    }
+
+    suspend fun deleteTree(treeKey: String, safTreeUri: Uri? = null) = withContext(Dispatchers.IO) {
+        val tree = treeDao.getByKey(treeKey) ?: return@withContext
+        treeDao.deleteByKey(treeKey) // cascades sides/bboxes/links
+        deleteTreeArtifacts(tree, safTreeUri)
+        // Recompute the run's nextId from survivors (frees the lowest id, like JS).
+        val run = sessionDao.getById(tree.sessionId)
+        if (run != null) {
+            val survivors = treeDao.getBySession(tree.sessionId)
+            val maxId = survivors.maxOfOrNull { it.treeId } ?: 0
+            sessionDao.upsert(run.copy(nextId = maxId + 1, updatedAt = System.currentTimeMillis()))
+        }
+        writeSessionsIndex()
+    }
+
+    private fun deleteTreeArtifacts(tree: TreeEntity, safTreeUri: Uri?) {
+        storage.deleteTree(tree.treeName, tree.sideCount)
+        if (safTreeUri != null) saf.deleteDatasetTree(safTreeUri, tree.treeName, tree.sideCount)
+    }
+
+    private fun buildMetadataJson(metadata: TreeMetadata?, treeName: String, run: SessionEntity, treeId: Int): JSONObject {
+        val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
+        return JSONObject().apply {
+            put("name", treeName)
+            put("variety", metadata?.variety ?: run.variety)
+            put("blok", metadata?.block ?: run.block)
+            put("treeId", treeId)
+            put("operator", "")
+            put("timestamp", ts)
+            metadata?.latitude?.let { put("lat", it) }
+            metadata?.longitude?.let { put("lng", it) }
+        }
+    }
+
+    // ─── Load / save one tree as an ActiveSession ───────────────────────────────
+
+    suspend fun loadActiveSession(treeKey: String): ActiveSession? = withContext(Dispatchers.IO) {
+        val tree = treeDao.getByKey(treeKey) ?: return@withContext null
+        val sideEntities = sideDao.getByTree(treeKey)
+        val sides = sideEntities.map { se ->
+            val bboxes = bboxDao.getBySide(se.id).map { it.toBbox() }
+            TreeSide(
+                sideIndex = se.sideIndex, label = se.label,
+                imageUri = se.imageUri.takeIf { it.isNotBlank() }?.let { Uri.parse(it) },
+                labelUri = se.labelUri?.let { Uri.parse(it) },
+                imageWidth = se.imageWidth, imageHeight = se.imageHeight,
+                bboxes = bboxes, originalBboxes = bboxes,
+            )
+        }
+        val links = linkDao.getByTree(treeKey).map {
+            CrossSideLink.create(it.linkId, it.sideA, it.bboxIdA, it.sideB, it.bboxIdB)
+        }
+        ActiveSession(
+            sessionId = treeKey, treeName = tree.treeName, split = tree.split,
+            sides = sides, suggestedLinks = emptyList(), confirmedLinks = links,
+            metadata = TreeMetadata(variety = tree.variety, block = tree.block, treeId = tree.treeId.toString()),
+            createdAt = tree.createdAt, updatedAt = tree.updatedAt,
+        )
+    }
+
+    /** Write-through save of one tree (sides/bboxes/links + label files + annot-log). */
+    suspend fun saveSession(session: ActiveSession, safTreeUri: Uri? = null) = withContext(Dispatchers.IO) {
+        val treeKey = session.sessionId
+        val tree = treeDao.getByKey(treeKey) ?: return@withContext
+        val now = System.currentTimeMillis()
+        treeDao.upsert(tree.copy(updatedAt = now, sideCount = session.sides.size))
+        persistSides(treeKey, session.treeName, session.split, session.sides, safTreeUri)
+        linkDao.deleteByTree(treeKey)
+        linkDao.insertAll(session.confirmedLinks.map {
+            ConfirmedLinkEntity(treeKey = treeKey, linkId = it.linkId, sideA = it.sideA, bboxIdA = it.bboxIdA, sideB = it.sideB, bboxIdB = it.bboxIdB)
+        })
+        writeSessionsIndex()
+    }
+
+    /** Replace a tree's sides + bboxes in the DB and write YOLO labels + annot-log. */
+    private suspend fun persistSides(treeKey: String, treeName: String, split: String, sides: List<TreeSide>, safTreeUri: Uri?) {
+        sideDao.deleteByTree(treeKey)
+        bboxDao.deleteByTree(treeKey)
+        for (side in sides) {
+            val sideId = sideDao.upsert(
+                SideEntity(
+                    treeKey = treeKey, sideIndex = side.sideIndex, label = side.label,
+                    imageUri = side.imageUri?.toString() ?: "",
+                    imageWidth = side.imageWidth, imageHeight = side.imageHeight,
+                    labelUri = side.labelUri?.toString(),
+                )
+            )
+            bboxDao.insertAll(side.bboxes.map { it.toEntity(sideId) })
+            if (side.imageWidth > 0 && side.imageHeight > 0) {
+                val yoloText = YoloParser.serialize(side.bboxes, side.imageWidth, side.imageHeight)
+                runCatching {
+                    storage.writeText(storage.labelFile(treeName, side.sideIndex), yoloText)
+                    if (safTreeUri != null) {
+                        saf.writeText(safTreeUri, "Output TXT/field/${treeName}_${side.sideIndex + 1}.txt", yoloText)
+                    }
+                }
+            }
+            writeAnnotLog(treeName, split, side, safTreeUri)
+            if (safTreeUri != null && side.imageUri != null) {
+                runCatching {
+                    val imgFile = File(side.imageUri.path ?: "")
+                    if (imgFile.exists()) {
+                        val bytes = imgFile.readBytes()
+                        saf.writeBytes(
+                            safTreeUri,
+                            "dataset/images/field/${treeName}_${side.sideIndex + 1}.jpg",
+                            bytes,
+                            "image/jpeg",
+                        )
+                    }
+                }.onFailure { Log.w(TAG, "SAF mirror image failed for side ${side.sideIndex}", it) }
+            }
+        }
+    }
+
+    // ─── Output JSON ─────────────────────────────────────────────────────────────
+
+    suspend fun saveOutputJson(session: ActiveSession, result: TreeResults, safTreeUri: Uri? = null) =
+        withContext(Dispatchers.IO) {
+            val jsonText = ExportManager.generateOutputJson(session, result).toString(2)
+            storage.writeText(storage.outputJsonFile(session.treeName), jsonText)
+            if (safTreeUri != null) saf.writeText(safTreeUri, "Output JSON/${session.treeName}.json", jsonText)
+            // Mark the tree complete (the JS "Compute & Mark Complete" green check).
+            treeDao.getByKey(session.sessionId)?.let { treeDao.upsert(it.copy(isComplete = true, updatedAt = System.currentTimeMillis())) }
+        }
+
+    // ─── Portable sessions index (runs + trees) ──────────────────────────────────
+
+    private suspend fun writeSessionsIndex() {
+        try {
+            val runs = sessionDao.getAllOnce()
+            val trees = treeDao.getAllOnce().groupBy { it.sessionId }
+            val arr = JSONArray()
+            for (r in runs) {
+                arr.put(JSONObject().apply {
+                    put("id", r.sessionId); put("variety", r.variety); put("block", r.block)
+                    put("groupKey", r.groupKey); put("sideCount", r.sideCount); put("autoId", r.autoId)
+                    put("nextId", r.nextId); put("createdAt", r.createdAt); put("updatedAt", r.updatedAt)
+                    put("trees", JSONArray().apply {
+                        for (t in trees[r.sessionId].orEmpty()) put(JSONObject().apply {
+                            put("treeName", t.treeName); put("treeId", t.treeId); put("sideCount", t.sideCount)
+                        })
+                    })
+                })
+            }
+            storage.writeText(storage.sessionsFile, JSONObject().put("version", 1).put("sessions", arr).toString(2))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to write sessions index", e)
+        }
+    }
+
+    suspend fun readSessionsIndex(): List<JSONObject> = withContext(Dispatchers.IO) {
+        try {
+            val text = storage.readText(storage.sessionsFile) ?: return@withContext emptyList()
+            val arr = JSONObject(text).optJSONArray("sessions") ?: return@withContext emptyList()
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to read sessions index", e); emptyList()
+        }
+    }
+
+    private fun writeAnnotLog(treeName: String, split: String, side: TreeSide, safTreeUri: Uri? = null) {
+        runCatching {
+            val log = JSONObject().apply {
+                put("treeName", treeName); put("sideIndex", side.sideIndex); put("split", split)
+                put("savedAt", System.currentTimeMillis())
+                put("suggestions", annotLogArray(side.originalBboxes))
+                put("final", annotLogArray(side.bboxes))
+            }
+            val text = log.toString(2)
+            storage.writeText(storage.annotLogFile(treeName, side.sideIndex), text)
+            if (safTreeUri != null) {
+                saf.writeText(safTreeUri, "dataset/annotlog/field/${treeName}_${side.sideIndex + 1}.json", text)
+            }
+        }
+    }
+
+    private fun annotLogArray(boxes: List<Bbox>): JSONArray = JSONArray().apply {
+        for (b in boxes) put(JSONObject().apply {
+            put("id", b.id); put("classId", b.classId); put("className", b.className)
+            put("bbox_pixel", JSONArray().apply {
+                put(Math.round(b.x1)); put(Math.round(b.y1)); put(Math.round(b.x2)); put(Math.round(b.y2))
+            })
+        })
+    }
+}
+
+// ─── Mappers + summary types ────────────────────────────────────────────────────
+
+private fun SessionEntity.toSummary(treeCount: Int) = RunSummary(
+    sessionId = sessionId, variety = variety, block = block, groupKey = groupKey,
+    sideCount = sideCount, autoId = autoId, nextId = nextId,
+    createdAt = createdAt, updatedAt = updatedAt, treeCount = treeCount,
+)
+
+private fun BboxEntity.toBbox() = Bbox(id = bboxId, classId = classId, className = className, x1 = x1, y1 = y1, x2 = x2, y2 = y2)
+private fun Bbox.toEntity(sideId: Long) = BboxEntity(sideId = sideId, bboxId = id, classId = classId, className = className, x1 = x1, y1 = y1, x2 = x2, y2 = y2)
+
+/** Home-screen summary of one run (with derived tree count). */
+data class RunSummary(
+    val sessionId: String,
+    val variety: String,
+    val block: String,
+    val groupKey: String,
+    val sideCount: Int,
+    val autoId: Boolean,
+    val nextId: Int,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val treeCount: Int,
+)
