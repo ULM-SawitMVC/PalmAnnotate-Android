@@ -91,21 +91,30 @@ object SuggestionEngine {
         vertTol: Float = VERT_TOL,
         sizeRatioMin: Float = SIZE_RATIO_MIN,
         mutualBest: Boolean = true,
+        clockwise: Boolean = true,
     ): List<SuggestedPair> {
         if (imgA.w <= 0 || imgA.h <= 0 || imgB.w <= 0 || imgB.h <= 0) return emptyList()
 
-        // Stage 1: hard seam-band gate.
+        // Which image edge holds the shared seam depends on capture direction:
+        //   clockwise  → sideA's LEFT edge meets sideB's RIGHT edge
+        //   counter-cw → sideA's RIGHT edge meets sideB's LEFT edge
+        val seamOnLeftA = clockwise
+        val seamOnLeftB = !clockwise
+
+        // Stage 1: hard seam-band gate (per side, on the seam edge for this direction).
         val gatedA = ArrayList<Gated>()
         for (b in bboxesA) {
             val nb = norm(b, imgA.w, imgA.h)
             val cx = (nb.x1 + nb.x2) / 2f
-            if (cx <= seamBandFraction) gatedA.add(Gated(b, nb, cx))
+            val inBand = if (seamOnLeftA) cx <= seamBandFraction else cx >= (1f - seamBandFraction)
+            if (inBand) gatedA.add(Gated(b, nb, cx))
         }
         val gatedB = ArrayList<Gated>()
         for (b in bboxesB) {
             val nb = norm(b, imgB.w, imgB.h)
             val cx = (nb.x1 + nb.x2) / 2f
-            if (cx >= (1f - seamBandFraction)) gatedB.add(Gated(b, nb, cx))
+            val inBand = if (seamOnLeftB) cx <= seamBandFraction else cx >= (1f - seamBandFraction)
+            if (inBand) gatedB.add(Gated(b, nb, cx))
         }
 
         // Stage 2: score every surviving cross-side pair.
@@ -120,8 +129,11 @@ object SuggestionEngine {
                 val sizeRatio = min(areaA, areaB) / max(areaA, areaB)
                 if (sizeRatio < sizeRatioMin) continue
 
-                val seamA = 1f - clamp(ga.cx / seamBandFraction, 0f, 1f)
-                val seamB = 1f - clamp((1f - gb.cx) / seamBandFraction, 0f, 1f)
+                // Distance of each centre from its seam edge (0 = on the seam).
+                val seamA = if (seamOnLeftA) 1f - clamp(ga.cx / seamBandFraction, 0f, 1f)
+                            else 1f - clamp((1f - ga.cx) / seamBandFraction, 0f, 1f)
+                val seamB = if (seamOnLeftB) 1f - clamp(gb.cx / seamBandFraction, 0f, 1f)
+                            else 1f - clamp((1f - gb.cx) / seamBandFraction, 0f, 1f)
                 val seamSig = (seamA + seamB) / 2f
                 val vSig = vertSig(ga.nb, gb.nb, vertTol)
                 val sSig = sizeSig(ga.nb, gb.nb)
@@ -181,7 +193,7 @@ object SuggestionEngine {
      * Suggest duplicates across all adjacent side pairs in a session, using each
      * side's real image dimensions. Mirrors JS `ActiveSession.runSuggestions()`.
      */
-    fun suggestAll(session: ActiveSession): List<SuggestedPair> {
+    fun suggestAll(session: ActiveSession, clockwise: Boolean = true): List<SuggestedPair> {
         val byIndex = session.sides.associateBy { it.sideIndex }
         val out = ArrayList<SuggestedPair>()
         for ((iA, iB) in session.adjacentPairs) {
@@ -191,6 +203,7 @@ object SuggestionEngine {
             val pairs = suggestPairs(
                 sA.bboxes, Img(sA.imageWidth, sA.imageHeight),
                 sB.bboxes, Img(sB.imageWidth, sB.imageHeight),
+                clockwise = clockwise,
             )
             for (p in pairs) {
                 // Skip pairs already confirmed (matches runSuggestions dedupe).

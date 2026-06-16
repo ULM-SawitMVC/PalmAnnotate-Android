@@ -58,6 +58,11 @@ class DedupViewModel @Inject constructor(
     var suggestions by mutableStateOf<List<SuggestedPair>>(emptyList())
         private set
     var showSuggestions by mutableStateOf(true)
+    /** Capture rotation around the tree. true = clockwise (default), false = counter-clockwise.
+     *  Drives both the seam-gating in SuggestionEngine and which side is shown on the left,
+     *  so the overlapping seam always lands on the centre divider. */
+    var clockwise by mutableStateOf(true)
+        private set
     var isLoading by mutableStateOf(true)
         private set
     var errorMessage by mutableStateOf<String?>(null)
@@ -73,10 +78,11 @@ class DedupViewModel @Inject constructor(
     val currentPair: Pair<Int, Int>?
         get() = adjacentPairs.getOrNull(currentPairIndex)
 
-    // Left canvas shows the lower-indexed side of the pair, right canvas the higher —
-    // natural ascending reading order (Side 1 ↔ Side 2, Side 2 ↔ Side 3, …).
-    val leftSideIndex: Int get() = currentPair?.first ?: 0
-    val rightSideIndex: Int get() = currentPair?.second ?: 1
+    // Place the overlapping seam on the CENTER divider for either capture direction:
+    //   clockwise  → sideB (higher index) on the left, sideA (lower index) on the right
+    //   counter-cw → sideA (lower index) on the left, sideB (higher index) on the right
+    val leftSideIndex: Int get() = (if (clockwise) currentPair?.second else currentPair?.first) ?: 0
+    val rightSideIndex: Int get() = (if (clockwise) currentPair?.first else currentPair?.second) ?: 1
 
     val leftSide: TreeSide? get() = session?.sides?.getOrNull(leftSideIndex)
     val rightSide: TreeSide? get() = session?.sides?.getOrNull(rightSideIndex)
@@ -158,8 +164,15 @@ class DedupViewModel @Inject constructor(
 
     fun runSuggestions() {
         val s = session ?: return
-        suggestions = SuggestionEngine.suggestAll(s)
+        suggestions = SuggestionEngine.suggestAll(s, clockwise)
         showSuggestions = true
+    }
+
+    /** Flip capture direction; re-run suggestions if some are already shown. */
+    fun toggleDirection() {
+        clockwise = !clockwise
+        clearSelection()
+        if (suggestions.isNotEmpty()) runSuggestions()
     }
 
     fun onBboxTap(sideIndex: Int, bboxId: String) {
@@ -310,6 +323,12 @@ fun DeduplicationScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleDirection() }) {
+                        Icon(
+                            if (viewModel.clockwise) Icons.Default.RotateRight else Icons.Default.RotateLeft,
+                            contentDescription = if (viewModel.clockwise) "Capture: clockwise" else "Capture: counter-clockwise",
+                        )
+                    }
                     IconButton(onClick = { viewModel.runSuggestions() }) {
                         Icon(Icons.Default.AutoAwesome, "Suggest")
                     }
@@ -388,8 +407,9 @@ fun DeduplicationScreen(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) { page ->
                     val pair = viewModel.adjacentPairs.getOrNull(page) ?: return@HorizontalPager
-                    val lIdx = pair.first   // left canvas (lower side index)
-                    val rIdx = pair.second  // right canvas (higher side index)
+                    // Left/right follows capture direction so the seam sits at the centre.
+                    val lIdx = if (viewModel.clockwise) pair.second else pair.first
+                    val rIdx = if (viewModel.clockwise) pair.first else pair.second
                     val lSide = viewModel.session?.sides?.getOrNull(lIdx)
                     val rSide = viewModel.session?.sides?.getOrNull(rIdx)
 
