@@ -1,133 +1,95 @@
-Berikut adalah tutorial terstruktur khusus untuk AI Agent yang saya bungkus dalam *block code* agar mudah kamu *copy-paste* ke dalam system prompt atau *instruction set* agenmu:
+# HOW TO USE ADB — Git Bash (MSYS) Working Commands
 
-```markdown
-# SYSTEM PROMPT / SOP: ANDROID DEBUGGING VIA ADB AND SCREENSHOTS FOR AI AGENTS
+> **CRITICAL:** In Git Bash (MSYS), bare `/sdcard/` paths get converted to `C:/Program Files/Git/sdcard/`.  
+> Always use `MSYS_NO_PATHCONV=1` before adb commands, or the paths will be mangled.
 
-## OVERVIEW
-You are an AI Agent equipped with terminal execution capabilities (PowerShell/Bash) and ADB tools. Your goal is to inspect, diagnose, and fix runtime UI/UX bugs or logic freezes in an Android application directly on a connected device using ADB commands, log analysis, database forensics, and visual validation via screenshots.
+## Setup
 
-Follow this structured workflow to extract information and solve layout or database issues effectively.
-
----
-
-## PHASE 1: ENVIRONMENT & PACKAGE VERIFICATION
-Do not make assumptions about the target device. Always check the baseline status first.
-
-1. **Check Connected Devices**: Verify that the target device is online and authorized.
-   ```bash
-   adb devices
-
-```
-
-2. **Identify Package Varian & Name**: List installed packages using a keyword filter to identify the exact package name (e.g., debug vs. production builds).
 ```bash
-adb shell "pm list packages | grep <app_keyword>"
-
+ADB="/c/tools/android-sdk/platform-tools/adb.exe"
+PKG="dev.sawitulm.palmannotate.debug"
 ```
 
+## Common Commands
 
-3. **Verify Foreground Activity**: Identify which screen/activity is currently active on the screen to confirm you are debugging the correct view.
+### Check device
 ```bash
-adb shell "dumpsys activity activities | grep -E 'ResumedActivity|mResumedActivity'"
-
+MSYS_NO_PATHCONV=1 $ADB devices
 ```
 
-
-
-## PHASE 2: VISUAL INSPECTION VIA SCREENSHOTS
-
-When text logs do not provide layout clues, capture the device screen to visually inspect the UI state (e.g., detecting unassigned bounding boxes or infinite loading spinners).
-
-1. **Capture and Pull Screenshot**:
+### Screenshot → pull → read
 ```bash
-adb shell screencap -p /sdcard/screen.png
-adb pull /sdcard/screen.png %TEMP%\screen.png
-
+MSYS_NO_PATHCONV=1 $ADB shell "screencap -p /sdcard/pa.png"
+MSYS_NO_PATHCONV=1 $ADB pull /sdcard/pa.png "D:/Work/Assisten-Dosen/PalmAnnotate-Android/pa.png"
+# Then use vision_describe or read on the PNG
 ```
 
-
-2. **Inspect the Layout**: Use your vision processing capabilities to inspect `%TEMP%\screen.png`. Look for missing components, structural anomalies, or state indicators (like loading wheels).
-
-## PHASE 3: INTERACTION & SCREEN RESOLUTION HANDLING
-
-When simulating user interactions (e.g., automated tapping/clicking), you must account for screen parameters to avoid coordinate mismatches.
-
-1. **Get Screen Resolution and Density**:
+### Launch app
 ```bash
-adb shell wm size
-adb shell wm density
-
+MSYS_NO_PATHCONV=1 $ADB shell "monkey -p $PKG -c android.intent.category.LAUNCHER 1"
 ```
 
-
-2. **Calculate Precision Coordinates**:
-* Always check the orientation (Landscape vs. Portrait). For example, if `wm size` returns `2136x3200` in landscape, the coordinate matrix is `3200×2136`.
-* Do not use hardcoded screen coordinates from different device models. Map targets based on current actual ratios.
-
-
-3. **Simulate Tap Input**:
+### Force stop + relaunch
 ```bash
-adb shell input tap <X> <Y>
-
+MSYS_NO_PATHCONV=1 $ADB shell "am force-stop $PKG"
+sleep 1
+MSYS_NO_PATHCONV=1 $ADB shell "monkey -p $PKG -c android.intent.category.LAUNCHER 1"
 ```
 
-
-
-## PHASE 4: FORENSIC DEBUGGING (LOGCAT & LOCAL DATABASE)
-
-If the UI is stuck (e.g., an infinite loading spinner) but no crash is visible, the application is likely hitting an unhandled exception or database mismatch.
-
-1. **Isolate Logcat for Exceptions**:
-Clear the logcat buffer, trigger the action via tap, and read the fresh logs immediately:
+### Install APK
 ```bash
-adb logcat -c
-# [Simulate the tap/action that causes the issue here]
-adb logcat -d -t 400 | grep -E "Exception|FATAL|AndroidRuntime|<package_keyword>"
-
+MSYS_NO_PATHCONV=1 $ADB install -r "D:/Work/Assisten-Dosen/PalmAnnotate-Android/Migrasi/app/build/outputs/apk/debug/app-debug.apk"
 ```
 
-
-2. **Investigate SQLite Room Databases (Handling WAL)**:
-If you need to query the application's local database:
-* **Locate Database Files**:
+### Tap (screen coordinates)
 ```bash
-adb shell "run-as <package_name> ls databases"
-
+MSYS_NO_PATHCONV=1 $ADB shell "input tap <X> <Y>"
 ```
 
-
-* **The WAL Challenge**: If SQLite runs in Write-Ahead Logging mode, the latest rows reside in `<name>.db-wal` rather than the main `<name>.db`. Standard queries on the pulled `.db` file will return empty tables if not checkpointed.
-* **Force-Stop to Checkpoint WAL**: To force SQLite to merge WAL logs back into the main database file before pulling, stop the app cleanly:
+### Swipe
 ```bash
-adb shell am force-stop <package_name>
-
+MSYS_NO_PATHCONV=1 $ADB shell "input swipe <X1> <Y1> <X2> <Y2> <duration_ms>"
 ```
 
-
-* **Extract Data Safely**: Pull all database parts (`.db`, `.db-wal`, `.db-shm`) into the same directory before using external scripts (like Python's `sqlite3`) to read the tables.
-
-
-
-## PHASE 5: REDEPLOYMENT & VALIDATION
-
-After analyzing the root cause (e.g., identifying that a touch-slop threshold in `detectDragGestures` is swallowing plain taps, and fixing it by implementing `detectTapGestures`):
-
-1. **Build and Deploy**: Ensure environment paths (`JAVA_HOME`, `ANDROID_HOME`) are loaded, then build and install the updated APK.
+### Type text
 ```bash
-adb install -r path/to/app-debug.apk
-
+MSYS_NO_PATHCONV=1 $ADB shell "input text 'hello'"
 ```
 
-
-2. **Relaunch App via Monkey**:
+### Key event (Back, Enter, etc.)
 ```bash
-adb shell monkey -p <package_name> -c android.intent.category.LAUNCHER 1
-
+MSYS_NO_PATHCONV=1 $ADB shell "input keyevent 4"   # Back
+MSYS_NO_PATHCONV=1 $ADB shell "input keyevent 66"  # Enter
 ```
 
-
-3. **Re-Verify via Phase 2**: Take a final screenshot to confirm the bug is resolved.
-
+### Logcat (filtered)
+```bash
+MSYS_NO_PATHCONV=1 $ADB logcat -c
+# ... trigger the bug ...
+MSYS_NO_PATHCONV=1 $ADB logcat -d -t 400 2>/dev/null | grep -iE "Exception|FATAL|AndroidRuntime|palmannotate"
 ```
 
+### Screen info
+```bash
+MSYS_NO_PATHCONV=1 $ADB shell "wm size && wm density"
+MSYS_NO_PATHCONV=1 $ADB shell "dumpsys display | grep mCurrentOrientation"
 ```
+
+### Check foreground activity
+```bash
+MSYS_NO_PATHCONV=1 $ADB shell "dumpsys activity activities | grep -E 'ResumedActivity|mResumedActivity'"
+```
+
+### DB forensics (pull all WAL parts)
+```bash
+MSYS_NO_PATHCONV=1 $ADB shell "run-as $PKG ls databases"
+MSYS_NO_PATHCONV=1 $ADB shell "run-as $PKG cat databases/palmannotate.db" > /tmp/pa.db
+MSYS_NO_PATHCONV=1 $ADB shell "run-as $PKG cat databases/palmannotate.db-wal" > /tmp/pa.db-wal
+MSYS_NO_PATHCONV=1 $ADB shell "run-as $PKG cat databases/palmannotate.db-shm" > /tmp/pa.db-shm
+```
+
+## Screen Coordinate Mapping (Xiaomi Pad 6)
+
+- **Physical size:** 2136×3200 (portrait), density 440
+- **Landscape mode:** 3200×2136
+- Check orientation: `dumpsys display | grep mCurrentOrientation` (0=portrait, 1=landscape)
