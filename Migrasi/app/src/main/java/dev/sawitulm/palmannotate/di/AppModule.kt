@@ -57,7 +57,8 @@ object AppModule {
         linkDao: ConfirmedLinkDao,
         storage: AndroidStorageManager,
         saf: SafMirrorStore,
-    ): SessionRepository = SessionRepository(sessionDao, treeDao, sideDao, bboxDao, linkDao, storage, saf)
+        db: PalmAnnotateDatabase,
+    ): SessionRepository = SessionRepository(sessionDao, treeDao, sideDao, bboxDao, linkDao, storage, saf, db)
 
     @Provides @Singleton
     fun provideOrbbecManager(@ApplicationContext ctx: Context): OrbbecManager =

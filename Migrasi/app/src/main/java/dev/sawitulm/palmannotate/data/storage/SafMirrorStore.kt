@@ -127,6 +127,28 @@ class SafMirrorStore(private val context: Context) {
     }
 
     /**
+     * Cheap presence check: true if <treeUri>/<relPath> exists as a file. Used to skip
+     * re-mirroring large unchanged blobs (captured JPEGs) on every save — reading and
+     * re-writing several MB through SAF on each save was the main "save feels heavy" cost.
+     */
+    fun exists(treeUri: Uri, relPath: String): Boolean {
+        return try {
+            val tree = DocumentFile.fromTreeUri(context, treeUri) ?: return false
+            val segments = relPath.split('/').filter { it.isNotBlank() }
+            if (segments.isEmpty()) return false
+            var node = tree
+            for (i in 0 until segments.size - 1) {
+                val child = node.findFile(segments[i])
+                if (child == null || !child.isDirectory) return false
+                node = child
+            }
+            node.findFile(segments.last())?.isFile == true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Read raw bytes from <treeUri>/<relPath>. Returns null if missing/unreadable.
      */
     fun readBytes(treeUri: Uri, relPath: String): ByteArray? {

@@ -2,6 +2,7 @@ package dev.sawitulm.palmannotate.data.storage
 
 import android.net.Uri
 import android.util.Log
+import androidx.room.withTransaction
 import dev.sawitulm.palmannotate.data.db.*
 import dev.sawitulm.palmannotate.data.export.ExportManager
 import dev.sawitulm.palmannotate.data.yolo.YoloParser
@@ -38,6 +39,7 @@ class SessionRepository(
     private val linkDao: ConfirmedLinkDao,
     private val storage: AndroidStorageManager,
     private val saf: SafMirrorStore,
+    private val db: PalmAnnotateDatabase,
 ) {
     companion object { private const val TAG = "SessionRepo" }
 
@@ -101,14 +103,19 @@ class SessionRepository(
         val run = sessionDao.getById(sessionId) ?: throw IllegalStateException("Run not found")
         val now = System.currentTimeMillis()
         val treeKey = UUID.randomUUID().toString()
-        treeDao.upsert(
-            TreeEntity(
-                treeKey = treeKey, sessionId = sessionId, treeName = treeName, treeId = treeId,
-                split = split, sideCount = sides.size.coerceAtLeast(run.sideCount),
-                variety = metadata?.variety ?: run.variety, block = metadata?.block ?: run.block,
-                createdAt = now, updatedAt = now,
+        // Tree row + its sides in ONE transaction so a concurrent reader can never observe
+        // a tree that has no sides yet (which a racing save could then persist as the truth).
+        db.withTransaction {
+            treeDao.upsert(
+                TreeEntity(
+                    treeKey = treeKey, sessionId = sessionId, treeName = treeName, treeId = treeId,
+                    split = split, sideCount = sides.size.coerceAtLeast(run.sideCount),
+                    variety = metadata?.variety ?: run.variety, block = metadata?.block ?: run.block,
+                    createdAt = now, updatedAt = now,
+                )
             )
-        )
+            persistSidesDb(treeKey, sides)
+        }
 
         // Persist metadata JSON (and SAF mirror if configured).
         val metaJson = buildMetadataJson(metadata, treeName, run, treeId).toString(2)
@@ -117,7 +124,7 @@ class SessionRepository(
             saf.writeText(safTreeUri, "dataset/metadata/${treeName}.json", metaJson)
         }
 
-        persistSides(treeKey, treeName, split, sides, safTreeUri)
+        writeSideArtifacts(treeName, split, sides, safTreeUri)
 
         // Advance the tree-id counter past the highest used id. MUST be an UPDATE,
         // not upsert(REPLACE): replacing the existing run row cascade-deletes the
@@ -192,18 +199,35 @@ class SessionRepository(
         val treeKey = session.sessionId
         val tree = treeDao.getByKey(treeKey) ?: return@withContext
         val now = System.currentTimeMillis()
-        // UPDATE, not upsert(REPLACE): replacing the tree row would cascade-delete
-        // its sides/links before persistSides re-adds them.
-        treeDao.update(tree.copy(updatedAt = now, sideCount = session.sides.size))
-        persistSides(treeKey, session.treeName, session.split, session.sides, safTreeUri)
-        linkDao.deleteByTree(treeKey)
-        linkDao.insertAll(session.confirmedLinks.map {
-            ConfirmedLinkEntity(treeKey = treeKey, linkId = it.linkId, sideA = it.sideA, bboxIdA = it.bboxIdA, sideB = it.sideB, bboxIdB = it.bboxIdB)
-        })
+        // Atomic DB write: tree row + sides + bboxes + links replaced in ONE transaction so a
+        // concurrent load (or another screen's save) can never read — nor persist — a partial
+        // side list. The old non-atomic delete-then-insert was the "a tree loses a side on
+        // reopen" bug: a reader could catch the gap between deleteByTree and the re-inserts.
+        var rewroteSides = false
+        db.withTransaction {
+            val existingSides = sideDao.getByTree(treeKey).size
+            // Defence-in-depth: the app never removes a side, so a save carrying FEWER sides
+            // than are already stored is a stale/partial in-memory session — persisting it
+            // would drop a photo. Keep the stored sides; still update links.
+            rewroteSides = session.sides.size >= existingSides
+            treeDao.update(tree.copy(updatedAt = now, sideCount = if (rewroteSides) session.sides.size else existingSides))
+            if (rewroteSides) {
+                persistSidesDb(treeKey, session.sides)
+            } else {
+                Log.w(TAG, "saveSession: refusing to shrink sides for $treeKey (${session.sides.size} < $existingSides); kept stored sides")
+            }
+            linkDao.deleteByTree(treeKey)
+            linkDao.insertAll(session.confirmedLinks.map {
+                ConfirmedLinkEntity(treeKey = treeKey, linkId = it.linkId, sideA = it.sideA, bboxIdA = it.bboxIdA, sideB = it.sideB, bboxIdB = it.bboxIdB)
+            })
+        }
+        // Slow file/SAF artifacts run OUTSIDE the transaction (never hold the DB lock for the
+        // multi-MB SAF image mirror). Skipped when we declined to rewrite sides.
+        if (rewroteSides) writeSideArtifacts(session.treeName, session.split, session.sides, safTreeUri)
     }
 
-    /** Replace a tree's sides + bboxes in the DB and write YOLO labels + annot-log. */
-    private suspend fun persistSides(treeKey: String, treeName: String, split: String, sides: List<TreeSide>, safTreeUri: Uri?) {
+    /** Replace a tree's sides + bboxes in the DB. Call INSIDE a [db] transaction. */
+    private suspend fun persistSidesDb(treeKey: String, sides: List<TreeSide>) {
         sideDao.deleteByTree(treeKey)
         bboxDao.deleteByTree(treeKey)
         for (side in sides) {
@@ -216,6 +240,12 @@ class SessionRepository(
                 )
             )
             bboxDao.insertAll(side.bboxes.map { it.toEntity(sideId) })
+        }
+    }
+
+    /** Write YOLO labels, annot-log, and the SAF image mirror. Run OUTSIDE any transaction. */
+    private fun writeSideArtifacts(treeName: String, split: String, sides: List<TreeSide>, safTreeUri: Uri?) {
+        for (side in sides) {
             if (side.imageWidth > 0 && side.imageHeight > 0) {
                 val yoloText = YoloParser.serialize(side.bboxes, side.imageWidth, side.imageHeight)
                 runCatching {
@@ -227,18 +257,18 @@ class SessionRepository(
             }
             writeAnnotLog(treeName, split, side, safTreeUri)
             if (safTreeUri != null && side.imageUri != null) {
-                runCatching {
-                    val imgFile = File(side.imageUri.path ?: "")
-                    if (imgFile.exists()) {
-                        val bytes = imgFile.readBytes()
-                        saf.writeBytes(
-                            safTreeUri,
-                            "dataset/images/field/${treeName}_${side.sideIndex + 1}.jpg",
-                            bytes,
-                            "image/jpeg",
-                        )
-                    }
-                }.onFailure { Log.w(TAG, "SAF mirror image failed for side ${side.sideIndex}", it) }
+                // Images never change after capture — mirror once, then skip. Re-reading and
+                // re-writing several MB through SAF on every save (links/classes change, the
+                // photo does not) was the main "save feels heavy" cost.
+                val mirrorPath = "dataset/images/field/${treeName}_${side.sideIndex + 1}.jpg"
+                if (!saf.exists(safTreeUri, mirrorPath)) {
+                    runCatching {
+                        val imgFile = File(side.imageUri.path ?: "")
+                        if (imgFile.exists()) {
+                            saf.writeBytes(safTreeUri, mirrorPath, imgFile.readBytes(), "image/jpeg")
+                        }
+                    }.onFailure { Log.w(TAG, "SAF mirror image failed for side ${side.sideIndex}", it) }
+                }
             }
         }
     }
