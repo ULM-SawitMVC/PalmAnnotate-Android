@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -60,7 +64,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.util.Log
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -71,8 +75,6 @@ import javax.inject.Inject
 enum class SideStep { PREVIEW, REVIEW }
 enum class CaptureSource { PHONE_CAMERA, ORBBEC }
 
-// Capture has two macro-phases: SIDES (sequential per-side capture/review) and
-// REVIEW_ALL (one swipe carousel over every captured shot before save).
 enum class CapturePhase { SIDES, REVIEW_ALL }
 
 @HiltViewModel
@@ -89,15 +91,13 @@ class CaptureFlowViewModel @Inject constructor(
     var sideCount by mutableIntStateOf(4)
     var currentSide by mutableIntStateOf(0)
     val capturedImages = mutableStateListOf<Uri?>()
+    val capturedDepths = mutableStateListOf<OrbbecManager.OrbbecDepthData?>()
     var manualId by mutableStateOf("")
     var gpsStatus by mutableStateOf<String?>(null)
     var currentStep by mutableStateOf(SideStep.PREVIEW)
         private set
     var phase by mutableStateOf(CapturePhase.SIDES)
         private set
-    // True while re-shooting a single side that was launched from the REVIEW_ALL
-    // carousel — so confirming that side returns to the carousel instead of
-    // walking forward through the remaining sides.
     var retakingFromReview by mutableStateOf(false)
         private set
     private var latitude: Double? = null
@@ -113,17 +113,160 @@ class CaptureFlowViewModel @Inject constructor(
     var qaReport by mutableStateOf<QualityCheck.CaptureReport?>(null)
         private set
 
-    fun selectSource(src: CaptureSource) { captureSource = src }
+    // ── Orbbec live preview state ─────────────────────────────────────────────
+    var orbbecAvailable by mutableStateOf(false)
+        private set
+    var orbbecPermissionGranted by mutableStateOf(false)
+        private set
+    var isOrbbecPreviewRunning by mutableStateOf(false)
+        private set
+    var isOrbbecStarting by mutableStateOf(false)
+        private set
+    var orbbecPreviewBitmap by mutableStateOf<ImageBitmap?>(null)
+        private set
+    var orbbecDepthBitmap by mutableStateOf<ImageBitmap?>(null)
+        private set
+    var orbbecStateMsg by mutableStateOf<String?>(null)
+        private set
+
+    init {
+        initOrbbec()
+    }
+
+    private fun initOrbbec() {
+        orbbec.onDeviceChange = { attached, _ ->
+            orbbecAvailable = attached || orbbec.isAvailable()
+            if (!attached && isOrbbecPreviewRunning) {
+                isOrbbecPreviewRunning = false
+                orbbecPreviewBitmap = null
+                orbbecDepthBitmap = null
+            }
+        }
+        orbbec.onState = { _, msg -> orbbecStateMsg = msg }
+        orbbec.onFrame = { rgbB64, depthB64, _, _ ->
+            rgbB64?.let { b64 ->
+                runCatching {
+                    val bytes = Base64.decode(b64, Base64.NO_WRAP)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }.getOrNull()?.let { bmp -> orbbecPreviewBitmap = bmp }
+            }
+            depthB64?.let { b64 ->
+                runCatching {
+                    val bytes = Base64.decode(b64, Base64.NO_WRAP)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }.getOrNull()?.let { bmp -> orbbecDepthBitmap = bmp }
+            }
+        }
+        orbbec.start()
+        orbbecAvailable = orbbec.isAvailable()
+    }
+
+    fun selectSource(src: CaptureSource) {
+        if (src == captureSource) return
+        if (captureSource == CaptureSource.ORBBEC) stopOrbbecPreview()
+        captureSource = src
+    }
+
+    fun refreshOrbbec() {
+        viewModelScope.launch {
+            orbbecStateMsg = null
+            val found = orbbec.refresh()
+            orbbecAvailable = found
+        }
+    }
+
+    fun requestOrbbecPermissionAndStart() {
+        viewModelScope.launch {
+            isOrbbecStarting = true
+            orbbecStateMsg = null
+            try {
+                val granted = orbbec.requestPermission()
+                orbbecPermissionGranted = granted
+                if (granted) {
+                    orbbec.startPreview()
+                    isOrbbecPreviewRunning = true
+                } else {
+                    orbbecStateMsg = "USB access denied — tap 'Allow' on the system dialog"
+                }
+            } catch (e: Exception) {
+                orbbecStateMsg = e.message ?: "Failed to start Orbbec"
+                Log.w("CaptureFlow", "Orbbec start failed", e)
+            } finally {
+                isOrbbecStarting = false
+            }
+        }
+    }
+
+    fun startOrbbecPreviewIfReady() {
+        if (isOrbbecPreviewRunning || isOrbbecStarting || !orbbecAvailable) return
+        viewModelScope.launch {
+            isOrbbecStarting = true
+            try {
+                val granted = orbbec.requestPermission()
+                orbbecPermissionGranted = granted
+                if (granted) {
+                    orbbec.startPreview()
+                    isOrbbecPreviewRunning = true
+                }
+            } catch (e: Exception) {
+                Log.w("CaptureFlow", "Orbbec auto-start failed", e)
+            } finally {
+                isOrbbecStarting = false
+            }
+        }
+    }
+
+    fun stopOrbbecPreview() {
+        viewModelScope.launch {
+            try { orbbec.stopPreview() } catch (_: Exception) {}
+        }
+        isOrbbecPreviewRunning = false
+        orbbecPreviewBitmap = null
+        orbbecDepthBitmap = null
+    }
+
+    fun captureOrbbecFrame(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val frame = orbbec.capture()
+                val colorBytes = Base64.decode(frame.base64, Base64.NO_WRAP)
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+                val file = File(context.cacheDir, "orbbec_$ts.jpg")
+                file.writeBytes(colorBytes)
+                val idx = currentSide
+                if (idx < capturedDepths.size) capturedDepths[idx] = frame.depth
+                withContext(Dispatchers.Main) {
+                    onImageCaptured(Uri.fromFile(file))
+                }
+            } catch (e: Exception) {
+                Log.e("CaptureFlow", "Orbbec capture failed", e)
+                withContext(Dispatchers.Main) {
+                    orbbecStateMsg = "Capture failed: ${e.message}"
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        viewModelScope.launch {
+            try { orbbec.stopPreview() } catch (_: Exception) {}
+        }
+    }
+
+    // ── Standard capture logic ────────────────────────────────────────────────
+
     fun dismissQa() { showQaDialog = false }
 
     fun requestSave(runId: String, context: Context, onDone: (String) -> Unit) {
         val r = run ?: return
         val capturedCount = capturedImages.count { it != null }
+        val depthSides = capturedDepths.count { it != null }
         val hasGps = latitude != null && longitude != null
         val report = QualityCheck.analyzeCaptureShots(
             capturedSides = capturedCount,
             expectedSides = sideCount,
-            depthSides = 0,
+            depthSides = depthSides,
             hasGps = hasGps,
             hasVariety = r.variety.isNotBlank(),
             hasBlock = r.block.isNotBlank(),
@@ -148,7 +291,11 @@ class CaptureFlowViewModel @Inject constructor(
             sideCount = r.sideCount
             manualId = r.nextId.toString()
             capturedImages.clear()
-            repeat(sideCount) { capturedImages.add(null) }
+            capturedDepths.clear()
+            repeat(sideCount) {
+                capturedImages.add(null)
+                capturedDepths.add(null)
+            }
             currentSide = 0
             currentStep = SideStep.PREVIEW
             phase = CapturePhase.SIDES
@@ -180,16 +327,13 @@ class CaptureFlowViewModel @Inject constructor(
     }
 
     fun retakeCurrent() {
-        if (currentSide < capturedImages.size) capturedImages[currentSide] = null
+        if (currentSide < capturedImages.size) {
+            capturedImages[currentSide] = null
+            capturedDepths.getOrNull(currentSide)?.let { capturedDepths[currentSide] = null }
+        }
         currentStep = SideStep.PREVIEW
     }
 
-    /**
-     * Advance from a per-side REVIEW. On any side but the last, move to the next
-     * side's PREVIEW. After the last side, switch to the REVIEW_ALL phase (the
-     * swipe carousel over every shot) instead of saving immediately. Returns true
-     * when the review-all phase was entered (i.e. all sides done).
-     */
     fun continueFromReview(): Boolean {
         return if (currentSide < sideCount - 1) {
             currentSide++
@@ -201,15 +345,10 @@ class CaptureFlowViewModel @Inject constructor(
         }
     }
 
-    /**
-     * From the REVIEW_ALL carousel, re-shoot ONE side: drop back into the
-     * sequential SIDES phase at that side's PREVIEW with its shot cleared. After
-     * the operator re-captures (and confirms in the per-side REVIEW), the screen
-     * routes back to REVIEW_ALL via continueFromReview()/returnToReviewAll().
-     */
     fun retakeSide(index: Int) {
         if (index in 0 until capturedImages.size) {
             capturedImages[index] = null
+            if (index < capturedDepths.size) capturedDepths[index] = null
             currentSide = index
             currentStep = SideStep.PREVIEW
             phase = CapturePhase.SIDES
@@ -217,7 +356,6 @@ class CaptureFlowViewModel @Inject constructor(
         }
     }
 
-    /** Return to the review-all carousel (used after a single-side retake). */
     fun returnToReviewAll() {
         retakingFromReview = false
         if (allCaptured) {
@@ -260,6 +398,30 @@ class CaptureFlowViewModel @Inject constructor(
                         if (dims.outWidth <= 0 || dims.outHeight <= 0) {
                             throw IllegalStateException("Side ${index + 1}: captured file has zero dimensions")
                         }
+
+                        // Depth sidecar — best-effort, never blocks save
+                        capturedDepths.getOrNull(index)?.let { depth ->
+                            try {
+                                val rawBytes = Base64.decode(depth.base64, Base64.NO_WRAP)
+                                storage.writeBytes(storage.depthRawFile(treeName, index), rawBytes)
+                                val meta = JSONObject().apply {
+                                    put("width", depth.width)
+                                    put("height", depth.height)
+                                    put("format", depth.format)
+                                    put("valueScale", depth.valueScale)
+                                    put("encoding", depth.encoding)
+                                    put("unit", depth.unit)
+                                    put("alignedTo", depth.alignedTo)
+                                    put("displayFloorMm", depth.displayFloorMm)
+                                    put("displayCeilingMm", depth.displayCeilingMm)
+                                }
+                                storage.writeText(storage.depthJsonFile(treeName, index), meta.toString())
+                                Log.i("CaptureFlow", "Depth sidecar written for side $index (${rawBytes.size} bytes)")
+                            } catch (e: Exception) {
+                                Log.w("CaptureFlow", "Depth sidecar write failed for side $index", e)
+                            }
+                        }
+
                         allSides.add(
                             TreeSide(
                                 sideIndex = index,
@@ -338,6 +500,13 @@ fun CaptureFlowScreen(
         permLauncher.launch(Manifest.permission.CAMERA)
     }
 
+    // Auto-start Orbbec preview when switching to Orbbec source
+    LaunchedEffect(viewModel.captureSource, viewModel.orbbecAvailable) {
+        if (viewModel.captureSource == CaptureSource.ORBBEC && viewModel.orbbecAvailable) {
+            viewModel.startOrbbecPreviewIfReady()
+        }
+    }
+
     val run = viewModel.run
 
     Scaffold(
@@ -345,7 +514,10 @@ fun CaptureFlowScreen(
             TopAppBar(
                 title = { Text("Capture — View ${viewModel.currentSide + 1}/${viewModel.sideCount}") },
                 navigationIcon = {
-                    IconButton(onClick = onCancel) {
+                    IconButton(onClick = {
+                        viewModel.stopOrbbecPreview()
+                        onCancel()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Cancel")
                     }
                 },
@@ -374,7 +546,6 @@ fun CaptureFlowScreen(
                 return@Column
             }
 
-            // Locked variety/block + GPS status + optional manual ID.
             Row(
                 Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -400,10 +571,6 @@ fun CaptureFlowScreen(
             Spacer(Modifier.height(6.dp))
 
             if (hasCameraPermission) {
-                // After all sides are captured the flow switches to ONE swipe
-                // review carousel over every shot (per-shot Retake + Save/Cancel),
-                // replacing the last-side review. Until then it's the sequential
-                // per-side capture/review surface.
                 if (viewModel.phase == CapturePhase.REVIEW_ALL) {
                     viewModel.saveError?.let { err ->
                         Text(
@@ -425,113 +592,112 @@ fun CaptureFlowScreen(
                             .weight(1f),
                     )
                 } else {
-                // Thumbnail strip of all captured/reviewable sides.
-                CapturedThumbnails(
-                    sideCount = viewModel.sideCount,
-                    currentSide = viewModel.currentSide,
-                    capturedImages = viewModel.capturedImages,
-                    onSelect = { viewModel.goToSide(it) },
-                )
-                Spacer(Modifier.height(4.dp))
-
-                viewModel.saveError?.let { err ->
-                    Text(
-                        text = "Save error: $err",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.fillMaxWidth(),
+                    CapturedThumbnails(
+                        sideCount = viewModel.sideCount,
+                        currentSide = viewModel.currentSide,
+                        capturedImages = viewModel.capturedImages,
+                        onSelect = { viewModel.goToSide(it) },
                     )
-                    Spacer(Modifier.height(8.dp))
-                }
+                    Spacer(Modifier.height(4.dp))
 
-                // Confirming a per-side REVIEW either walks to the next side, or —
-                // after the last side / a single-side retake — returns to the
-                // review-all carousel. No direct save happens from here anymore.
-                val onSideContinue: () -> Unit = {
-                    if (viewModel.retakingFromReview) viewModel.returnToReviewAll()
-                    else viewModel.continueFromReview()
-                }
-                val sideContinueLabel = if (viewModel.retakingFromReview) "Done" else null
-
-                // Main stage.
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
-                ) {
-                    if (viewModel.captureSource == CaptureSource.ORBBEC) {
-                        OrbbecCaptureStage(
-                            isCaptured = viewModel.capturedImages.getOrNull(viewModel.currentSide) != null,
-                            currentStep = viewModel.currentStep,
-                            uri = viewModel.capturedImages.getOrNull(viewModel.currentSide),
-                            isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
-                            allCaptured = viewModel.allCaptured,
-                            isSaving = viewModel.isSaving,
-                            continueLabel = sideContinueLabel,
-                            onCaptured = {
-                                viewModel.onImageCaptured(it)
-                                Toast.makeText(context, "Side ${viewModel.currentSide + 1} captured via Orbbec", Toast.LENGTH_SHORT).show()
-                            },
-                            onRetake = { viewModel.retakeCurrent() },
-                            onContinue = onSideContinue,
+                    viewModel.saveError?.let { err ->
+                        Text(
+                            text = "Save error: $err",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth(),
                         )
-                    } else {
-                    when (viewModel.currentStep) {
-                        SideStep.PREVIEW -> {
-                            CameraCaptureStage(
-                                context = context,
-                                onCaptured = {
-                                    viewModel.onImageCaptured(it)
-                                    Toast.makeText(
-                                        context,
-                                        "Side ${viewModel.currentSide + 1} captured",
-                                        Toast.LENGTH_SHORT,
-                                    ).show()
-                                },
-                            )
-                        }
-                        SideStep.REVIEW -> {
-                            CapturedReviewStage(
-                                uri = viewModel.capturedImages[viewModel.currentSide],
+                        Spacer(Modifier.height(8.dp))
+                    }
+
+                    val onSideContinue: () -> Unit = {
+                        if (viewModel.retakingFromReview) viewModel.returnToReviewAll()
+                        else viewModel.continueFromReview()
+                    }
+                    val sideContinueLabel = if (viewModel.retakingFromReview) "Done" else null
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
+                    ) {
+                        if (viewModel.captureSource == CaptureSource.ORBBEC) {
+                            OrbbecCaptureStage(
+                                isAvailable = viewModel.orbbecAvailable,
+                                permissionGranted = viewModel.orbbecPermissionGranted,
+                                isPreviewRunning = viewModel.isOrbbecPreviewRunning,
+                                isStarting = viewModel.isOrbbecStarting,
+                                previewBitmap = viewModel.orbbecPreviewBitmap,
+                                depthBitmap = viewModel.orbbecDepthBitmap,
+                                stateMsg = viewModel.orbbecStateMsg,
+                                currentStep = viewModel.currentStep,
+                                capturedUri = viewModel.capturedImages.getOrNull(viewModel.currentSide),
                                 isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
                                 allCaptured = viewModel.allCaptured,
                                 isSaving = viewModel.isSaving,
                                 continueLabel = sideContinueLabel,
+                                onRequestPermission = { viewModel.requestOrbbecPermissionAndStart() },
+                                onRefresh = { viewModel.refreshOrbbec() },
+                                onCapture = { viewModel.captureOrbbecFrame(context) },
                                 onRetake = { viewModel.retakeCurrent() },
                                 onContinue = onSideContinue,
                             )
+                        } else {
+                            when (viewModel.currentStep) {
+                                SideStep.PREVIEW -> {
+                                    CameraCaptureStage(
+                                        context = context,
+                                        onCaptured = {
+                                            viewModel.onImageCaptured(it)
+                                            Toast.makeText(
+                                                context,
+                                                "Side ${viewModel.currentSide + 1} captured",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                        },
+                                    )
+                                }
+                                SideStep.REVIEW -> {
+                                    CapturedReviewStage(
+                                        uri = viewModel.capturedImages[viewModel.currentSide],
+                                        isLastSide = viewModel.currentSide == viewModel.sideCount - 1,
+                                        allCaptured = viewModel.allCaptured,
+                                        isSaving = viewModel.isSaving,
+                                        continueLabel = sideContinueLabel,
+                                        onRetake = { viewModel.retakeCurrent() },
+                                        onContinue = onSideContinue,
+                                    )
+                                }
+                            }
                         }
                     }
-                    } // end else (phone camera)
-                }
 
-                // Bottom progress dots.
-                Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    repeat(viewModel.sideCount) { i ->
-                        val captured = viewModel.capturedImages.getOrNull(i) != null
-                        val current = i == viewModel.currentSide
-                        Box(
-                            modifier = Modifier
-                                .size(if (current) 14.dp else 10.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when {
-                                        captured -> MaterialTheme.colorScheme.primary
-                                        current -> MaterialTheme.colorScheme.outline
-                                        else -> MaterialTheme.colorScheme.outlineVariant
-                                    },
-                                )
-                                .border(
-                                    width = if (current) 2.dp else 0.dp,
-                                    color = if (current) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                    shape = CircleShape,
-                                ),
-                        )
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        repeat(viewModel.sideCount) { i ->
+                            val captured = viewModel.capturedImages.getOrNull(i) != null
+                            val current = i == viewModel.currentSide
+                            Box(
+                                modifier = Modifier
+                                    .size(if (current) 14.dp else 10.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            captured -> MaterialTheme.colorScheme.primary
+                                            current -> MaterialTheme.colorScheme.outline
+                                            else -> MaterialTheme.colorScheme.outlineVariant
+                                        },
+                                    )
+                                    .border(
+                                        width = if (current) 2.dp else 0.dp,
+                                        color = if (current) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                        shape = CircleShape,
+                                    ),
+                            )
+                        }
                     }
                 }
-                } // end else (SIDES phase)
             } else {
                 Text("Camera permission is required for capture.")
             }
@@ -615,7 +781,6 @@ private fun CapturedReviewStage(
             )
         }
 
-        // Green captured badge.
         Box(
             modifier = Modifier
                 .padding(16.dp)
@@ -632,7 +797,6 @@ private fun CapturedReviewStage(
             )
         }
 
-        // Bottom action bar.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -666,14 +830,6 @@ private fun CapturedReviewStage(
     }
 }
 
-/**
- * Final review-all stage: a swipe carousel (HorizontalPager) over every captured
- * shot before save. Each page shows the photo full-bleed on a black media
- * background with the side label + "✓ Captured" badge and a per-shot Retake.
- * A single Save commits all sides (routing through the existing QualityGate/QA
- * dialog via onSave) and Cancel/Back is the top-bar nav icon. Page dots show the
- * current index. Non-throwing: missing/unreadable Uris just render an empty page.
- */
 @Composable
 private fun ReviewAllPager(
     sideCount: Int,
@@ -710,7 +866,6 @@ private fun ReviewAllPager(
                         )
                     }
 
-                    // Side label (top-start) + captured badge (top-end) over media.
                     Box(
                         modifier = Modifier
                             .padding(16.dp)
@@ -741,7 +896,6 @@ private fun ReviewAllPager(
                         )
                     }
 
-                    // Per-shot Retake — bottom of this page, over a dark scrim.
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -768,7 +922,6 @@ private fun ReviewAllPager(
             }
         }
 
-        // Page dots — current index highlighted.
         Row(
             Modifier
                 .fillMaxWidth()
@@ -790,7 +943,6 @@ private fun ReviewAllPager(
             }
         }
 
-        // Whole-set Save action (Cancel/Back is the top-bar nav icon).
         Button(
             onClick = onSave,
             enabled = !isSaving,
@@ -872,9 +1024,7 @@ private fun CameraPreview(
                         preview,
                         imageCapture,
                     )
-                } catch (_: Exception) {
-                    // Camera binding errors are best-effort surfaced by the blank preview.
-                }
+                } catch (_: Exception) { }
             }, ContextCompat.getMainExecutor(context))
         },
         modifier = Modifier.fillMaxSize(),
@@ -888,37 +1038,209 @@ private fun CameraPreview(
     }
 }
 
+/**
+ * Orbbec RGB-D capture stage with live preview.
+ *
+ * States:
+ *   No device  → prompt + "Find Camera" refresh button
+ *   Device found, no permission → "Grant USB Access" button
+ *   Starting preview → spinner
+ *   Preview running → live RGB full-screen + depth PiP (top-right) + shutter FAB
+ *   Captured (REVIEW step) → CapturedReviewStage
+ */
 @Composable
 private fun OrbbecCaptureStage(
-    isCaptured: Boolean,
+    isAvailable: Boolean,
+    permissionGranted: Boolean,
+    isPreviewRunning: Boolean,
+    isStarting: Boolean,
+    previewBitmap: ImageBitmap?,
+    depthBitmap: ImageBitmap?,
+    stateMsg: String?,
     currentStep: SideStep,
-    uri: Uri?,
+    capturedUri: Uri?,
     isLastSide: Boolean,
     allCaptured: Boolean,
     isSaving: Boolean,
-    continueLabel: String? = null,
-    onCaptured: (Uri) -> Unit,
+    continueLabel: String?,
+    onRequestPermission: () -> Unit,
+    onRefresh: () -> Unit,
+    onCapture: () -> Unit,
     onRetake: () -> Unit,
     onContinue: () -> Unit,
 ) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (!isCaptured || currentStep == SideStep.PREVIEW) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.Usb, "Orbbec", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-                Text("Orbbec RGB-D Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("Connect Orbbec device to capture depth-aligned frames.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = {
-                    val fakeUri = Uri.parse("file:///dev/null")
-                    onCaptured(fakeUri)
-                }) {
-                    Icon(Icons.Default.CameraAlt, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Simulate Capture")
+    if (currentStep == SideStep.REVIEW && capturedUri != null) {
+        CapturedReviewStage(
+            uri = capturedUri,
+            isLastSide = isLastSide,
+            allCaptured = allCaptured,
+            isSaving = isSaving,
+            continueLabel = continueLabel,
+            onRetake = onRetake,
+            onContinue = onContinue,
+        )
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            // Live preview running — show RGB frame + depth PiP + shutter
+            isPreviewRunning -> {
+                if (previewBitmap != null) {
+                    Image(
+                        bitmap = previewBitmap,
+                        contentDescription = "Orbbec live preview",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+
+                // Depth PiP — top-right corner
+                depthBitmap?.let { bmp ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .size(width = 130.dp, height = 90.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
+                    ) {
+                        Image(
+                            bitmap = bmp,
+                            contentDescription = "Depth preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .background(Color.Black.copy(alpha = 0.55f))
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                        ) {
+                            Text("DEPTH", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // Status message overlay (bottom-left)
+                stateMsg?.let { msg ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 12.dp, bottom = 100.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(msg, color = Color.White, fontSize = 11.sp)
+                    }
+                }
+
+                // Shutter button
+                FloatingActionButton(
+                    onClick = onCapture,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 32.dp)
+                        .size(72.dp),
+                    containerColor = MaterialTheme.colorScheme.primary,
+                ) {
+                    Icon(Icons.Default.CameraAlt, "Capture RGB-D", Modifier.size(32.dp))
+                }
+
+                // "LIVE" badge top-left
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.Red.copy(alpha = 0.8f))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text("● LIVE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
-        } else {
-            CapturedReviewStage(uri = uri, isLastSide = isLastSide, allCaptured = allCaptured, isSaving = isSaving, continueLabel = continueLabel, onRetake = onRetake, onContinue = onContinue)
+
+            // Starting up
+            isStarting -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "Starting Orbbec preview…",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+
+            // Device found, no permission yet
+            isAvailable && !permissionGranted -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(24.dp),
+                ) {
+                    Icon(Icons.Default.Usb, "Orbbec", modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "Orbbec camera detected",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Tap below to grant USB access and start the live preview.",
+                        color = Color.White.copy(alpha = 0.75f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    stateMsg?.let { Text(it, color = Color(0xFFFFB74D), style = MaterialTheme.typography.bodySmall) }
+                    Spacer(Modifier.height(4.dp))
+                    Button(onClick = onRequestPermission) {
+                        Icon(Icons.Default.LockOpen, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Grant USB Access")
+                    }
+                }
+            }
+
+            // No device detected
+            else -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(24.dp),
+                ) {
+                    Icon(Icons.Default.UsbOff, "No Orbbec", modifier = Modifier.size(56.dp), tint = Color.White.copy(alpha = 0.5f))
+                    Text(
+                        "No Orbbec device detected",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Connect the Orbbec camera to the USB hub, then tap Find Camera.",
+                        color = Color.White.copy(alpha = 0.65f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    stateMsg?.let { Text(it, color = Color(0xFFFFB74D), style = MaterialTheme.typography.bodySmall) }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = onRefresh,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    ) {
+                        Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Find Camera")
+                    }
+                }
+            }
         }
     }
 }

@@ -40,8 +40,8 @@ object DepthUtil {
         val observedMaxMm: Int,
     )
 
-    fun range(depths: IntArray, displayMaxMm: Int = 8000, displayMinMm: Int = 250): DepthRange {
-        val valid = depths.filter { it in 1 until displayMaxMm }
+    fun range(depths: IntArray, displayMaxMm: Int = 7000, displayMinMm: Int = 250): DepthRange {
+        val valid = depths.filter { it in displayMinMm..displayMaxMm }
         if (valid.isEmpty()) {
             return DepthRange(0, 0, 0, displayMinMm, displayMaxMm, 0, 0)
         }
@@ -50,28 +50,27 @@ object DepthUtil {
         val observedMin = sorted.first()
         val observedMax = sorted.last()
 
-        // Robust P2–P98
+        // Robust P2–P98 percentile (matches js/viewer/depth-viewer.js _range)
         val p2Idx = max(0, (sorted.size * 0.02).roundToInt() - 1)
         val p98Idx = min(sorted.size - 1, (sorted.size * 0.98).roundToInt() - 1)
-        val robustMin = sorted[max(0, p2Idx)]
-        val robustMax = sorted[min(sorted.size - 1, p98Idx)]
+        val robustMin = sorted[p2Idx]
+        val robustMax = sorted[p98Idx].coerceAtLeast(robustMin + 1)
 
-        val floor = max(displayMinMm, robustMin - 250)
-        val ceiling = min(displayMaxMm, robustMax + (robustMax - robustMin))
-
+        // Use P2-P98 directly as colormap range (same as web app)
+        // This ensures the full blue→red spectrum maps to the actual depth variation
         return DepthRange(
             minMm = robustMin,
-            maxMm = robustMax.coerceAtLeast(robustMin + 1),
+            maxMm = robustMax,
             valid = valid.size,
-            displayFloorMm = floor,
-            displayCeilingMm = ceiling,
+            displayFloorMm = robustMin,
+            displayCeilingMm = robustMax,
             observedMinMm = observedMin,
             observedMaxMm = observedMax,
         )
     }
 
     /**
-     * Map a depth value to an RGB color.
+     * Map a depth value to an RGB color using jet colormap (matches Orbbec preview).
      * Invalid (0) or out-of-range values map to black.
      */
     fun depthColor(depthMm: Int, floorMm: Int, ceilingMm: Int): Triple<Int, Int, Int> {
@@ -79,10 +78,12 @@ object DepthUtil {
             return Triple(0, 0, 0)
         }
         val t = (depthMm - floorMm).toFloat() / (ceilingMm - floorMm).coerceAtLeast(1)
-        // Simple cool-to-warm colormap
-        val r = (t * 255).toInt().coerceIn(0, 255)
-        val b = ((1 - t) * 255).toInt().coerceIn(0, 255)
-        val g = (128 - kotlin.math.abs(t - 0.5f) * 256).toInt().coerceIn(0, 255)
+        // Jet colormap (matches OrbbecManager.encodeDepthPreviewBase64)
+        val r = (clampUnit(1.5f - kotlin.math.abs(4f * t - 3f)) * 255f).toInt()
+        val g = (clampUnit(1.5f - kotlin.math.abs(4f * t - 2f)) * 255f).toInt()
+        val b = (clampUnit(1.5f - kotlin.math.abs(4f * t - 1f)) * 255f).toInt()
         return Triple(r, g, b)
     }
+
+    private fun clampUnit(v: Float) = if (v < 0f) 0f else if (v > 1f) 1f else v
 }

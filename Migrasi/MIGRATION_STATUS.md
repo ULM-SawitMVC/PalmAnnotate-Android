@@ -1,8 +1,26 @@
 # PalmAnnotate Native — Honest Migration Status
 
-> **Updated 2026-06-16** — Session 7 + critical on-device hotfix.
+> **Updated 2026-06-16** — Session 7 + critical on-device hotfix + depth viewer colormap fix.
 > Build state (latest): `:app:assembleDebug` + `:app:testDebugUnitTest` SUCCESSFUL —
-> **39/39 tests green**, APK `app-debug.apk` ~100.5 MB, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+> **39/39 tests green**, APK `app-debug.apk` ~105.6 MB, JDK = `C:\tools\jdk17\jdk-17.0.19+10`.
+
+## HOTFIX 2026-06-16 — Depth viewer colormap fix (valueScale + jet colormap)
+
+**Symptom (device, Xiaomi Pad — Pad 8/Android 16 fleet):** Depth & RAW viewer showed all blue
+instead of proper jet colormap (blue→cyan→green→yellow→red) like the Orbbec preview.
+
+**Root cause (DepthViewerScreen.kt):** The viewer was NOT reading `valueScale` from the depth
+JSON sidecar, and was using a simple cool-to-warm colormap (blue→red) instead of the jet
+colormap used in the Orbbec preview encoder (`OrbbecManager.encodeDepthPreviewBase64`).
+
+**Fix:**
+1. Added `valueScale` reading from JSON sidecar in `DepthViewerViewModel.load()`
+2. Applied `valueScale` to convert raw uint16 values to mm before colormap computation
+3. Updated `DepthUtil.depthColor()` to use the same jet colormap formula as the Orbbec preview
+   (blue→cyan→green→yellow→red instead of blue→red)
+
+**Verified on device:** Depth map now shows proper color gradient with blue (closer),
+green/yellow (further), and black (invalid/no-data) regions, matching the Orbbec live preview.
 
 ## HOTFIX 2026-06-16 — captured trees were never persisting (Room REPLACE+CASCADE)
 
