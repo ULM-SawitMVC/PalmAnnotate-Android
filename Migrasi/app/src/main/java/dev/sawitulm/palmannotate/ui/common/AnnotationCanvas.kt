@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.sawitulm.palmannotate.domain.model.AnnotationClass
 import dev.sawitulm.palmannotate.domain.model.Bbox
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
@@ -33,6 +35,39 @@ import java.io.File
  * label with class name, zoom/pan, draw-new-bbox, tap-to-select,
  * drag-to-move, drag-corner-to-resize.
  */
+
+/**
+ * Decode an image (content:// or file path) on a background thread, downsampled so its
+ * largest dimension is <= [maxDimension]. Keeps memory + decode time low for the dedup
+ * pager. Bbox coordinates are in original-image space and are scaled at draw time, so the
+ * smaller bitmap renders identically.
+ */
+private fun decodeDownsampled(
+    context: android.content.Context,
+    uriString: String,
+    maxDimension: Int,
+): androidx.compose.ui.graphics.ImageBitmap? {
+    fun openStream(): java.io.InputStream? = try {
+        context.contentResolver.openInputStream(android.net.Uri.parse(uriString))
+    } catch (_: Exception) {
+        val file = File(android.net.Uri.parse(uriString).path ?: "")
+        if (file.exists()) file.inputStream() else null
+    }
+    return try {
+        // Pass 1: bounds only.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        openStream()?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        // Pass 2: decode with sample size.
+        var sample = 1
+        val longest = maxOf(bounds.outWidth, bounds.outHeight)
+        while (longest / sample > maxDimension) sample *= 2
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        openStream()?.use { BitmapFactory.decodeStream(it, null, opts) }?.asImageBitmap()
+    } catch (_: Exception) {
+        null
+    }
+}
 
 enum class CanvasTool { SELECT, DRAW, PAN }
 
@@ -61,20 +96,15 @@ fun AnnotationCanvas(
     onCanvasTap: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Load image bitmap (lazily, cached)
+    // Load image bitmap off the main thread, downsampled so the dedup pager (which keeps
+    // several canvases composed at once) does not decode multiple full-res JPEGs on the UI
+    // thread — that was the cause of the slow/heavy dedup screen.
     val context = LocalContext.current
-    val bitmap = remember(imageUriString) {
-        if (imageUriString == null) return@remember null
-        try {
-            val uri = android.net.Uri.parse(imageUriString)
-            val inputStream = context.contentResolver.openInputStream(uri)
-            inputStream?.use { BitmapFactory.decodeStream(it) }?.asImageBitmap()
-        } catch (_: Exception) {
-            // Try file path
-            try {
-                val file = File(android.net.Uri.parse(imageUriString).path ?: "")
-                if (file.exists()) BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap() else null
-            } catch (_: Exception) { null }
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, imageUriString) {
+        value = null
+        val uriStr = imageUriString ?: return@produceState
+        value = withContext(Dispatchers.IO) {
+            decodeDownsampled(context, uriStr, maxDimension = 1600)
         }
     }
 
@@ -238,9 +268,10 @@ fun AnnotationCanvas(
         }
 
         // Draw image
-        if (bitmap != null) {
+        val bmp = bitmap
+        if (bmp != null) {
             drawImage(
-                image = bitmap,
+                image = bmp,
                 dstOffset = androidx.compose.ui.unit.IntOffset(offset.x.toInt(), offset.y.toInt()),
                 dstSize = IntSize((imageWidth * scale).toInt(), (imageHeight * scale).toInt()),
             )

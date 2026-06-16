@@ -73,8 +73,10 @@ class DedupViewModel @Inject constructor(
     val currentPair: Pair<Int, Int>?
         get() = adjacentPairs.getOrNull(currentPairIndex)
 
-    val leftSideIndex: Int get() = currentPair?.second ?: 0  // sideB
-    val rightSideIndex: Int get() = currentPair?.first ?: 1  // sideA
+    // Left canvas shows the lower-indexed side of the pair, right canvas the higher —
+    // natural ascending reading order (Side 1 ↔ Side 2, Side 2 ↔ Side 3, …).
+    val leftSideIndex: Int get() = currentPair?.first ?: 0
+    val rightSideIndex: Int get() = currentPair?.second ?: 1
 
     val leftSide: TreeSide? get() = session?.sides?.getOrNull(leftSideIndex)
     val rightSide: TreeSide? get() = session?.sides?.getOrNull(rightSideIndex)
@@ -342,6 +344,34 @@ fun DeduplicationScreen(
             }
         } else {
             val totalPairs = viewModel.adjacentPairs.size
+            // The pager is the single source of truth for which pair is shown. The arrow
+            // buttons scroll the pager; the pager's settled page drives the ViewModel index.
+            // (The previous two-way LaunchedEffect sync fought itself: an arrow-triggered
+            // animateScrollToPage across the wrap-around scrolled THROUGH the intermediate
+            // pages, each of which pushed a goToPair back — that was the "weird jumping".)
+            val pagerState = rememberPagerState(pageCount = { totalPairs.coerceAtLeast(1) })
+            val scope = rememberCoroutineScope()
+
+            LaunchedEffect(pagerState) {
+                snapshotFlow { pagerState.currentPage }.collect { page ->
+                    if (page < totalPairs) viewModel.goToPair(page)
+                }
+            }
+
+            fun goToPage(target: Int) {
+                if (totalPairs == 0) return
+                val t = ((target % totalPairs) + totalPairs) % totalPairs
+                scope.launch {
+                    // Animate only for an adjacent step; jump for wrap-around so we don't
+                    // animate through every page in between.
+                    if (kotlin.math.abs(t - pagerState.currentPage) == 1) {
+                        pagerState.animateScrollToPage(t)
+                    } else {
+                        pagerState.scrollToPage(t)
+                    }
+                }
+            }
+
             Column(Modifier.fillMaxSize().padding(padding)) {
                 // Pair navigation bar
                 PairNav(
@@ -349,34 +379,17 @@ fun DeduplicationScreen(
                     totalPairs = totalPairs,
                     leftLabel = "Side ${viewModel.leftSideIndex + 1}",
                     rightLabel = "Side ${viewModel.rightSideIndex + 1}",
-                    onPrev = { viewModel.prevPair() },
-                    onNext = { viewModel.nextPair() },
+                    onPrev = { goToPage(pagerState.currentPage - 1) },
+                    onNext = { goToPage(pagerState.currentPage + 1) },
                 )
-
-                // Swipeable pager for pair navigation
-                val pagerState = rememberPagerState(pageCount = { totalPairs.coerceAtLeast(1) })
-
-                // Sync pager → ViewModel (when user swipes)
-                LaunchedEffect(pagerState.currentPage) {
-                    if (pagerState.currentPage != viewModel.currentPairIndex && pagerState.currentPage < totalPairs) {
-                        viewModel.goToPair(pagerState.currentPage)
-                    }
-                }
-
-                // Sync ViewModel → pager (when buttons change the pair, including wrap-around)
-                LaunchedEffect(viewModel.currentPairIndex) {
-                    if (pagerState.currentPage != viewModel.currentPairIndex && viewModel.currentPairIndex < totalPairs) {
-                        pagerState.animateScrollToPage(viewModel.currentPairIndex)
-                    }
-                }
 
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) { page ->
                     val pair = viewModel.adjacentPairs.getOrNull(page) ?: return@HorizontalPager
-                    val lIdx = pair.second  // sideB (left canvas)
-                    val rIdx = pair.first   // sideA (right canvas)
+                    val lIdx = pair.first   // left canvas (lower side index)
+                    val rIdx = pair.second  // right canvas (higher side index)
                     val lSide = viewModel.session?.sides?.getOrNull(lIdx)
                     val rSide = viewModel.session?.sides?.getOrNull(rIdx)
 
