@@ -58,3 +58,9 @@ android/local.properties
 android/captures/
 android/.idea/
 *.iml
+
+# ADB temp screenshots
+pa.png
+*.db
+ui.xml
+dbtmp/
