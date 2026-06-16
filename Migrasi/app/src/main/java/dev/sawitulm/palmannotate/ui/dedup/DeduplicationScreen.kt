@@ -124,15 +124,15 @@ class DedupViewModel @Inject constructor(
     }
 
     fun nextPair() {
-        if (currentPairIndex < adjacentPairs.size - 1) {
-            currentPairIndex++
+        if (adjacentPairs.isNotEmpty()) {
+            currentPairIndex = (currentPairIndex + 1) % adjacentPairs.size
             clearSelection()
         }
     }
 
     fun prevPair() {
-        if (currentPairIndex > 0) {
-            currentPairIndex--
+        if (adjacentPairs.isNotEmpty()) {
+            currentPairIndex = (currentPairIndex + adjacentPairs.size - 1) % adjacentPairs.size
             clearSelection()
         }
     }
@@ -356,14 +356,14 @@ fun DeduplicationScreen(
                 // Swipeable pager for pair navigation
                 val pagerState = rememberPagerState(pageCount = { totalPairs.coerceAtLeast(1) })
 
-                // Sync pager → ViewModel
+                // Sync pager → ViewModel (when user swipes)
                 LaunchedEffect(pagerState.currentPage) {
                     if (pagerState.currentPage != viewModel.currentPairIndex && pagerState.currentPage < totalPairs) {
                         viewModel.goToPair(pagerState.currentPage)
                     }
                 }
 
-                // Sync ViewModel → pager (when buttons change the pair)
+                // Sync ViewModel → pager (when buttons change the pair, including wrap-around)
                 LaunchedEffect(viewModel.currentPairIndex) {
                     if (pagerState.currentPage != viewModel.currentPairIndex && viewModel.currentPairIndex < totalPairs) {
                         pagerState.animateScrollToPage(viewModel.currentPairIndex)
@@ -489,14 +489,14 @@ private fun PairNav(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onPrev, enabled = pairIndex > 0) {
+            IconButton(onClick = onPrev) {
                 Icon(Icons.Default.ChevronLeft, "Previous pair")
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("$leftLabel  ↔  $rightLabel", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Text("Pair ${pairIndex + 1} / $totalPairs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onNext, enabled = pairIndex < totalPairs - 1) {
+            IconButton(onClick = onNext) {
                 Icon(Icons.Default.ChevronRight, "Next pair")
             }
         }
