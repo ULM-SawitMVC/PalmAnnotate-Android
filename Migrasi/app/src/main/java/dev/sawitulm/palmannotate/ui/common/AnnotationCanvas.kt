@@ -1,6 +1,7 @@
 package dev.sawitulm.palmannotate.ui.common
 
 import android.graphics.BitmapFactory
+import android.util.Log
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,6 +28,8 @@ import dev.sawitulm.palmannotate.domain.model.Bbox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+
+private const val CANVAS_TAG = "CanvasPerf"
 
 /**
  * Full annotation canvas: image rendering + bbox overlay + interaction.
@@ -118,11 +121,18 @@ fun AnnotationCanvas(
         val uriStr = imageUriString ?: run { value = null; return@produceState }
         val cached = BitmapCache.get(uriStr)
         if (cached != null) {
+            Log.d(CANVAS_TAG, "Image CACHE HIT - uri=${uriStr.takeLast(50)}")
             value = cached
         } else {
+            Log.d(CANVAS_TAG, "Image LOAD START - uri=${uriStr.takeLast(50)}")
+            val loadStart = System.currentTimeMillis()
             value = null
             value = withContext(Dispatchers.IO) {
-                decodeDownsampled(context, uriStr, maxDimension = 1600)?.also { BitmapCache.put(uriStr, it) }
+                decodeDownsampled(context, uriStr, maxDimension = 1600)?.also { 
+                    BitmapCache.put(uriStr, it) 
+                    val loadTime = System.currentTimeMillis() - loadStart
+                    Log.d(CANVAS_TAG, "Image LOAD END - uri=${uriStr.takeLast(50)}, time=${loadTime}ms")
+                }
             }
         }
     }

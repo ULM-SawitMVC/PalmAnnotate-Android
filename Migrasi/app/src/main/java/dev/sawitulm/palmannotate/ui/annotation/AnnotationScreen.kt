@@ -145,6 +145,14 @@ class AnnotationViewModel @Inject constructor(
             repo.saveSession(s, safTreeUri)
         }
     }
+    
+    /** Save only DB (fast) - used before navigating to dedup. */
+    suspend fun saveDbOnly() {
+        val s = session ?: return
+        opq.enqueueAndWait("save-annotation-db") {
+            repo.saveDbOnly(s)
+        }
+    }
 
     fun detectCurrentSide() {
         val side = currentSide ?: return
@@ -250,11 +258,10 @@ fun AnnotationScreen(
                     }
                     // Dedup
                     IconButton(onClick = {
-                        // Save must complete BEFORE navigating to dedup,
-                        // otherwise dedup's loadActiveSession races with
-                        // persistSides (delete + re-insert) and sees partial data.
+                        // Save DB only (fast, ~12ms) then navigate.
+                        // writeSideArtifacts (YOLO/SAF) runs later via normal save.
                         scope.launch {
-                            viewModel.saveAndAwait()
+                            viewModel.saveDbOnly()
                             onOpenDedup()
                         }
                     }) {

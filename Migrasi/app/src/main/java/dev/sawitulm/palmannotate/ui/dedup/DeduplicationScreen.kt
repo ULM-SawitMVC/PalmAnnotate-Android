@@ -1,5 +1,6 @@
 package dev.sawitulm.palmannotate.ui.dedup
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +41,9 @@ import dev.sawitulm.palmannotate.ui.common.MismatchResolveModal
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "DedupPerf"
+private const val CANVAS_TAG = "CanvasPerf"
 
 // ════════════════════════════════════════════════════════════════════════════════
 // ViewModel
@@ -112,19 +116,29 @@ class DedupViewModel @Inject constructor(
     }
 
     fun load(sessionId: String) {
+        val startTime = System.currentTimeMillis()
+        Log.d(TAG, "load() START - sessionId=$sessionId")
         viewModelScope.launch {
             isLoading = true
             errorMessage = null
             try {
+                val dbStart = System.currentTimeMillis()
                 val loaded = repo.loadActiveSession(sessionId)
+                val dbTime = System.currentTimeMillis() - dbStart
+                Log.d(TAG, "load() DB query took ${dbTime}ms")
+                
                 session = loaded
                 if (loaded == null) {
                     errorMessage = "Session not found."
                 } else if (loaded.sides.size < 2) {
                     errorMessage = "Need at least 2 sides for deduplication (found ${loaded.sides.size})."
                 }
+                
+                val totalTime = System.currentTimeMillis() - startTime
+                Log.d(TAG, "load() END - total=${totalTime}ms, sides=${loaded?.sides?.size ?: 0}, links=${loaded?.confirmedLinks?.size ?: 0}")
             } catch (e: Exception) {
                 errorMessage = "Failed to load: ${e.localizedMessage ?: "Unknown error"}"
+                Log.e(TAG, "load() ERROR", e)
             } finally {
                 isLoading = false
             }
@@ -305,7 +319,28 @@ fun DeduplicationScreen(
     onCompute: () -> Unit,
     viewModel: DedupViewModel = hiltViewModel(),
 ) {
-    LaunchedEffect(sessionId) { viewModel.load(sessionId) }
+    // Track screen open time
+    val screenOpenTime = remember { System.currentTimeMillis() }
+    LaunchedEffect(sessionId) {
+        Log.d(TAG, "DeduplicationScreen composable START - sessionId=$sessionId")
+        viewModel.load(sessionId)
+    }
+    
+    // Log when session is loaded
+    LaunchedEffect(viewModel.session) {
+        if (viewModel.session != null) {
+            val elapsed = System.currentTimeMillis() - screenOpenTime
+            Log.d(TAG, "DeduplicationScreen SESSION LOADED - elapsed=${elapsed}ms")
+        }
+    }
+    
+    // Log when loading is complete
+    LaunchedEffect(viewModel.isLoading) {
+        if (!viewModel.isLoading) {
+            val elapsed = System.currentTimeMillis() - screenOpenTime
+            Log.d(TAG, "DeduplicationScreen LOADING COMPLETE - elapsed=${elapsed}ms")
+        }
+    }
 
     val session = viewModel.session
     val leftSide = viewModel.leftSide
