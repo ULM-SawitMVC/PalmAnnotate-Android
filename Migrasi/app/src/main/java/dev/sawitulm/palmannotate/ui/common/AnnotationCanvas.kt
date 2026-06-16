@@ -37,6 +37,20 @@ import java.io.File
  */
 
 /**
+ * Small LRU of decoded bitmaps keyed by URI. The dedup pager revisits the same side
+ * images as the operator pages back and forth; without a cache every visit re-decoded the
+ * JPEG (the "slow/heavy" feel). Bitmaps are downsampled so a handful fit comfortably.
+ */
+private object BitmapCache {
+    private const val MAX = 8
+    private val map = object : LinkedHashMap<String, androidx.compose.ui.graphics.ImageBitmap>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, androidx.compose.ui.graphics.ImageBitmap>?) = size > MAX
+    }
+    @Synchronized fun get(key: String) = map[key]
+    @Synchronized fun put(key: String, value: androidx.compose.ui.graphics.ImageBitmap) { map[key] = value }
+}
+
+/**
  * Decode an image (content:// or file path) on a background thread, downsampled so its
  * largest dimension is <= [maxDimension]. Keeps memory + decode time low for the dedup
  * pager. Bbox coordinates are in original-image space and are scaled at draw time, so the
@@ -101,10 +115,15 @@ fun AnnotationCanvas(
     // thread — that was the cause of the slow/heavy dedup screen.
     val context = LocalContext.current
     val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(initialValue = null, imageUriString) {
-        value = null
-        val uriStr = imageUriString ?: return@produceState
-        value = withContext(Dispatchers.IO) {
-            decodeDownsampled(context, uriStr, maxDimension = 1600)
+        val uriStr = imageUriString ?: run { value = null; return@produceState }
+        val cached = BitmapCache.get(uriStr)
+        if (cached != null) {
+            value = cached
+        } else {
+            value = null
+            value = withContext(Dispatchers.IO) {
+                decodeDownsampled(context, uriStr, maxDimension = 1600)?.also { BitmapCache.put(uriStr, it) }
+            }
         }
     }
 
@@ -121,6 +140,14 @@ fun AnnotationCanvas(
 
     // Fit image on first composition
     var didFit by remember { mutableStateOf(false) }
+
+    // Reused across draw frames — allocating a Paint per frame churned the GC during pan/zoom.
+    val labelPaint = remember {
+        android.graphics.Paint().apply {
+            isAntiAlias = true
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+    }
 
     val transformState = rememberTransformableState { zoomChange, panChange, _ ->
         scale = (scale * zoomChange).coerceIn(0.3f, 15f)
@@ -286,12 +313,8 @@ fun AnnotationCanvas(
 
         if (!showBoxes) return@Canvas
 
-        // Draw bboxes
-        val paint = android.graphics.Paint().apply {
-            textSize = 12.sp.toPx()
-            isAntiAlias = true
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-        }
+        // Draw bboxes (reuse the hoisted Paint; textSize/colour are set per box below)
+        val paint = labelPaint
 
         for (bbox in bboxes) {
             val cls = AnnotationClass.fromId(bbox.classId)

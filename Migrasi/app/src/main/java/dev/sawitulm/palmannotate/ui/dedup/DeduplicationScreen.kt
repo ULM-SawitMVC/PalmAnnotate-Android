@@ -370,24 +370,33 @@ fun DeduplicationScreen(
             // pages, each of which pushed a goToPair back — that was the "weird jumping".)
             val pagerState = rememberPagerState(pageCount = { totalPairs.coerceAtLeast(1) })
             val scope = rememberCoroutineScope()
+            // Capture direction drives the VISUAL slide direction, so paging feels like the
+            // physical walk around the tree and matches the seam-entry logic (the new side
+            // enters from the left when clockwise, from the right when counter-clockwise):
+            //   clockwise  → advancing a pair slides content left→right  (reverseLayout = true)
+            //   counter-cw → advancing a pair slides content right→left  (reverseLayout = false)
+            val reverseLayout = viewModel.clockwise
 
+            // Drive the ViewModel from the pager's SETTLED page only. Using currentPage here
+            // raced during the initial pageCount 1→4 expansion and made the screen open on a
+            // random pair; settledPage updates once the pager comes to rest.
             LaunchedEffect(pagerState) {
-                snapshotFlow { pagerState.currentPage }.collect { page ->
+                snapshotFlow { pagerState.settledPage }.collect { page ->
                     if (page < totalPairs) viewModel.goToPair(page)
                 }
             }
 
-            fun goToPage(target: Int) {
+            // Move one page toward the requested VISUAL side so the chevron's arrow, the swipe
+            // motion, and the revealed page all agree (with wrap-around). reverseLayout flips
+            // which page index sits on which visual side, so we fold it into the delta here.
+            fun scrollVisual(towardRight: Boolean) {
                 if (totalPairs == 0) return
-                val t = ((target % totalPairs) + totalPairs) % totalPairs
+                val cur = pagerState.currentPage
+                val delta = if (towardRight == reverseLayout) -1 else 1
+                val target = (((cur + delta) % totalPairs) + totalPairs) % totalPairs
                 scope.launch {
-                    // Animate only for an adjacent step; jump for wrap-around so we don't
-                    // animate through every page in between.
-                    if (kotlin.math.abs(t - pagerState.currentPage) == 1) {
-                        pagerState.animateScrollToPage(t)
-                    } else {
-                        pagerState.scrollToPage(t)
-                    }
+                    if (kotlin.math.abs(target - cur) == 1) pagerState.animateScrollToPage(target)
+                    else pagerState.scrollToPage(target)
                 }
             }
 
@@ -398,12 +407,16 @@ fun DeduplicationScreen(
                     totalPairs = totalPairs,
                     leftLabel = "Side ${viewModel.leftSideIndex + 1}",
                     rightLabel = "Side ${viewModel.rightSideIndex + 1}",
-                    onPrev = { goToPage(pagerState.currentPage - 1) },
-                    onNext = { goToPage(pagerState.currentPage + 1) },
+                    // Each chevron reveals the neighbour it points at; the swipe motion and the
+                    // arrow always agree. Progression around the tree (next pair) therefore runs
+                    // via the LEFT chevron when clockwise and the RIGHT chevron when counter-cw.
+                    onPrev = { scrollVisual(towardRight = false) }, // visually-left chevron
+                    onNext = { scrollVisual(towardRight = true) },  // visually-right chevron
                 )
 
                 HorizontalPager(
                     state = pagerState,
+                    reverseLayout = reverseLayout,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 ) { page ->
                     val pair = viewModel.adjacentPairs.getOrNull(page) ?: return@HorizontalPager
