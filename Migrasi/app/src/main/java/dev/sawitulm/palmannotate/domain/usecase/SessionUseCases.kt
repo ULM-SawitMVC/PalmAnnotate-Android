@@ -166,12 +166,13 @@ object SessionUseCases {
      * Resolve a mismatch cluster by setting all members to the majority class.
      * Returns the updated session.
      */
-    fun resolveMismatch(session: ActiveSession, mismatch: MismatchCluster): ActiveSession {
-        val newClass = AnnotationClass.fromId(mismatch.majorityClassId)
+    fun resolveMismatch(session: ActiveSession, mismatch: MismatchCluster, chosenClassId: Int? = null): ActiveSession {
+        val targetClassId = chosenClassId ?: mismatch.majorityClassId
+        val newClass = AnnotationClass.fromId(targetClassId)
         val updatedSides = session.sides.map { side ->
             val updatedBboxes = side.bboxes.map { bbox ->
                 val isMember = mismatch.members.any { it.first == side.sideIndex && it.third.id == bbox.id }
-                if (isMember && bbox.classId != mismatch.majorityClassId) {
+                if (isMember && bbox.classId != targetClassId) {
                     bbox.copy(classId = newClass.id, className = newClass.displayName)
                 } else bbox
             }
@@ -181,16 +182,17 @@ object SessionUseCases {
     }
 
     /**
-     * Resolve all mismatches using majority vote.
+     * Resolve all mismatches using specified class choices (or majority vote as fallback).
      */
-    fun resolveAllMismatches(session: ActiveSession): ActiveSession {
+    fun resolveAllMismatches(session: ActiveSession, choices: Map<String, Int>? = null): ActiveSession {
         var result = session
         val maxIter = 10 // safety limit
         for (i in 0 until maxIter) {
             val mismatches = getMismatchedClusters(result)
             if (mismatches.isEmpty()) break
             for (m in mismatches) {
-                result = resolveMismatch(result, m)
+                val chosen = choices?.get(m.rootKey)
+                result = resolveMismatch(result, m, chosen)
             }
         }
         return result

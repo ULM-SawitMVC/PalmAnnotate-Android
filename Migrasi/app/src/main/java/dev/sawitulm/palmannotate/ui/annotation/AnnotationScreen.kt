@@ -137,6 +137,15 @@ class AnnotationViewModel @Inject constructor(
         }
     }
 
+    /** Save and wait for completion (used by dedup button). */
+    suspend fun saveAndAwait() {
+        val s = session ?: return
+        opq.enqueueAndWait("save-annotation") {
+            val safTreeUri = exportFolder.folderUri.first()
+            repo.saveSession(s, safTreeUri)
+        }
+    }
+
     fun detectCurrentSide() {
         val side = currentSide ?: return
         val uri = side.imageUri ?: return
@@ -203,6 +212,7 @@ fun AnnotationScreen(
     LaunchedEffect(treeIndex) { viewModel.selectSide(treeIndex) }
 
     val session = viewModel.session
+    val scope = rememberCoroutineScope()
     val currentSide = viewModel.currentSide
 
     Scaffold(
@@ -239,7 +249,15 @@ fun AnnotationScreen(
                         Icon(Icons.Default.ViewCarousel, "Carousel")
                     }
                     // Dedup
-                    IconButton(onClick = { viewModel.save(); onOpenDedup() }) {
+                    IconButton(onClick = {
+                        // Save must complete BEFORE navigating to dedup,
+                        // otherwise dedup's loadActiveSession races with
+                        // persistSides (delete + re-insert) and sees partial data.
+                        scope.launch {
+                            viewModel.saveAndAwait()
+                            onOpenDedup()
+                        }
+                    }) {
                         Icon(Icons.Default.Link, "Deduplication")
                     }
                     // Save

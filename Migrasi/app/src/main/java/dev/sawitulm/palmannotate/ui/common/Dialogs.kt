@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.sawitulm.palmannotate.data.storage.InputCache
 import dev.sawitulm.palmannotate.domain.model.AnnotationClass
@@ -124,40 +125,88 @@ fun ConfirmDeleteDialog(
 
 /**
  * Mismatch resolve modal — shows clusters with inconsistent classes.
+ * Lets the user pick which class to use for each mismatched bunch.
  * Port of JS #modal-mismatch from index.html.
  */
 @Composable
 fun MismatchResolveModal(
     mismatches: List<MismatchCluster>,
-    onResolveAll: () -> Unit,
+    onResolveAll: (choices: Map<String, Int>) -> Unit,
     onCancel: () -> Unit,
 ) {
+    // Track user's class choice per mismatch (rootKey → classId)
+    val picks = remember(mismatches) {
+        mutableStateMapOf<String, Int>().apply {
+            mismatches.forEach { put(it.rootKey, it.majorityClassId) }
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Bunch Class Resolution") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "${mismatches.size} bunch${if (mismatches.size > 1) "es" else ""} have inconsistent classes across sides.",
+                    "${mismatches.size} bunch${if (mismatches.size > 1) "es" else ""} have inconsistent classes across sides. Choose the correct class for each bunch.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 for ((i, m) in mismatches.withIndex()) {
-                    val majorityCls = AnnotationClass.fromId(m.majorityClassId)
                     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(8.dp)) {
+                        Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                "Bunch #${i + 1} — will use ${majorityCls.displayName}",
+                                "Bunch #${i + 1}",
                                 style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
                             )
+                            // Show each member's current class
                             for (member in m.members) {
                                 val cls = AnnotationClass.fromId(member.third.classId)
-                                Text(
-                                    "Side ${member.first + 1}: ${cls.displayName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (member.third.classId != m.majorityClassId)
-                                        MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        "Side ${member.first + 1}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Text(
+                                        cls.displayName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (member.third.classId != (picks[m.rootKey] ?: m.majorityClassId))
+                                            MaterialTheme.colorScheme.error
+                                        else MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            // Class choice buttons (B1/B2/B3/B4)
+                            Text("Choose final class:", style = MaterialTheme.typography.labelSmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                for (cls in AnnotationClass.assignableEntries) {
+                                    val isSelected = picks[m.rootKey] == cls.id
+                                    val isObserved = cls.id in m.observedClassIds
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = { picks[m.rootKey] = cls.id },
+                                        label = { Text(cls.displayName, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = cls.composeColor.copy(alpha = 0.3f),
+                                            selectedLabelColor = cls.composeColor,
+                                        ),
+                                        border = if (isObserved && !isSelected) FilterChipDefaults.filterChipBorder(
+                                            borderColor = cls.composeColor.copy(alpha = 0.5f),
+                                            borderWidth = 1.dp,
+                                            enabled = true,
+                                            selected = false,
+                                        ) else FilterChipDefaults.filterChipBorder(
+                                            borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                            borderWidth = 1.dp,
+                                            enabled = true,
+                                            selected = false,
+                                        ),
+                                    )
+                                }
                             }
                         }
                     }
@@ -165,7 +214,7 @@ fun MismatchResolveModal(
             }
         },
         confirmButton = {
-            TextButton(onClick = onResolveAll) { Text("Apply & Continue") }
+            TextButton(onClick = { onResolveAll(picks.toMap()) }) { Text("Apply & Continue") }
         },
         dismissButton = {
             TextButton(onClick = onCancel) { Text("Cancel") }

@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -135,6 +137,13 @@ class DedupViewModel @Inject constructor(
         }
     }
 
+    fun goToPair(index: Int) {
+        if (index in adjacentPairs.indices && index != currentPairIndex) {
+            currentPairIndex = index
+            clearSelection()
+        }
+    }
+
     fun selectSideB(bboxId: String?) { selectedSideB = bboxId }
     fun selectSideA(bboxId: String?) { selectedSideA = bboxId }
 
@@ -249,9 +258,9 @@ class DedupViewModel @Inject constructor(
         }
     }
 
-    fun resolveAllMismatchesAndSave(onDone: () -> Unit) {
+    fun resolveAllMismatchesAndSave(choices: Map<String, Int>? = null, onDone: () -> Unit) {
         val s = session ?: return
-        val resolved = SessionUseCases.resolveAllMismatches(s)
+        val resolved = SessionUseCases.resolveAllMismatches(s, choices)
         session = resolved
         viewModelScope.launch {
             val safTreeUri = exportFolder.folderUri.first()
@@ -332,61 +341,103 @@ fun DeduplicationScreen(
                 }
             }
         } else {
+            val totalPairs = viewModel.adjacentPairs.size
             Column(Modifier.fillMaxSize().padding(padding)) {
                 // Pair navigation bar
                 PairNav(
                     pairIndex = viewModel.currentPairIndex,
-                    totalPairs = viewModel.adjacentPairs.size,
+                    totalPairs = totalPairs,
                     leftLabel = "Side ${viewModel.leftSideIndex + 1}",
                     rightLabel = "Side ${viewModel.rightSideIndex + 1}",
                     onPrev = { viewModel.prevPair() },
                     onNext = { viewModel.nextPair() },
                 )
 
-                // Two canvases
-                if (isPortrait) {
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Top) {
-                        DedupHalfCanvas(
-                            label = "Side ${viewModel.leftSideIndex + 1}",
-                            side = leftSide,
-                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
-                            selectedId = viewModel.selectedSideB,
-                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.leftSideIndex },
-                            onTap = { viewModel.onBboxTap(viewModel.leftSideIndex, it) },
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
-                        HorizontalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
-                        DedupHalfCanvas(
-                            label = "Side ${viewModel.rightSideIndex + 1}",
-                            side = rightSide,
-                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
-                            selectedId = viewModel.selectedSideA,
-                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.rightSideIndex },
-                            onTap = { viewModel.onBboxTap(viewModel.rightSideIndex, it) },
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
+                // Swipeable pager for pair navigation
+                val pagerState = rememberPagerState(pageCount = { totalPairs.coerceAtLeast(1) })
+
+                // Sync pager → ViewModel
+                LaunchedEffect(pagerState.currentPage) {
+                    if (pagerState.currentPage != viewModel.currentPairIndex && pagerState.currentPage < totalPairs) {
+                        viewModel.goToPair(pagerState.currentPage)
                     }
-                } else {
-                    Row(modifier = Modifier.weight(1f)) {
-                        DedupHalfCanvas(
-                            label = "Side ${viewModel.leftSideIndex + 1}",
-                            side = leftSide,
-                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
-                            selectedId = viewModel.selectedSideB,
-                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.leftSideIndex },
-                            onTap = { viewModel.onBboxTap(viewModel.leftSideIndex, it) },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
-                        VerticalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
-                        DedupHalfCanvas(
-                            label = "Side ${viewModel.rightSideIndex + 1}",
-                            side = rightSide,
-                            linkedIds = viewModel.pairLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet(),
-                            selectedId = viewModel.selectedSideA,
-                            pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == viewModel.rightSideIndex },
-                            onTap = { viewModel.onBboxTap(viewModel.rightSideIndex, it) },
-                            modifier = Modifier.weight(1f).fillMaxHeight(),
-                        )
+                }
+
+                // Sync ViewModel → pager (when buttons change the pair)
+                LaunchedEffect(viewModel.currentPairIndex) {
+                    if (pagerState.currentPage != viewModel.currentPairIndex && viewModel.currentPairIndex < totalPairs) {
+                        pagerState.animateScrollToPage(viewModel.currentPairIndex)
+                    }
+                }
+
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) { page ->
+                    val pair = viewModel.adjacentPairs.getOrNull(page) ?: return@HorizontalPager
+                    val lIdx = pair.second  // sideB (left canvas)
+                    val rIdx = pair.first   // sideA (right canvas)
+                    val lSide = viewModel.session?.sides?.getOrNull(lIdx)
+                    val rSide = viewModel.session?.sides?.getOrNull(rIdx)
+
+                    if (lSide == null || rSide == null) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("No data for this pair")
+                        }
+                        return@HorizontalPager
+                    }
+
+                    // Pair-specific links
+                    val pageLinks = viewModel.session?.confirmedLinks?.filter {
+                        (it.sideA == rIdx && it.sideB == lIdx) ||
+                        (it.sideA == lIdx && it.sideB == rIdx)
+                    } ?: emptyList()
+                    val linkedIds = pageLinks.flatMap { listOf(it.bboxIdA, it.bboxIdB) }.toSet()
+
+                    if (isPortrait) {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            DedupHalfCanvas(
+                                label = "Side ${lIdx + 1}",
+                                side = lSide,
+                                linkedIds = linkedIds,
+                                selectedId = viewModel.selectedSideB,
+                                pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == lIdx },
+                                onTap = { viewModel.onBboxTap(lIdx, it) },
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                            )
+                            HorizontalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
+                            DedupHalfCanvas(
+                                label = "Side ${rIdx + 1}",
+                                side = rSide,
+                                linkedIds = linkedIds,
+                                selectedId = viewModel.selectedSideA,
+                                pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == rIdx },
+                                onTap = { viewModel.onBboxTap(rIdx, it) },
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            DedupHalfCanvas(
+                                label = "Side ${lIdx + 1}",
+                                side = lSide,
+                                linkedIds = linkedIds,
+                                selectedId = viewModel.selectedSideB,
+                                pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == lIdx },
+                                onTap = { viewModel.onBboxTap(lIdx, it) },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                            VerticalDivider(color = Color(0xFFB8E04A), thickness = 2.dp)
+                            DedupHalfCanvas(
+                                label = "Side ${rIdx + 1}",
+                                side = rSide,
+                                linkedIds = linkedIds,
+                                selectedId = viewModel.selectedSideA,
+                                pending = viewModel.pendingBboxId.takeIf { viewModel.pendingSide == rIdx },
+                                onTap = { viewModel.onBboxTap(rIdx, it) },
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                            )
+                        }
                     }
                 }
 
@@ -410,8 +461,8 @@ fun DeduplicationScreen(
     if (showMismatch && mismatches.isNotEmpty()) {
         MismatchResolveModal(
             mismatches = mismatches,
-            onResolveAll = {
-                viewModel.resolveAllMismatchesAndSave { onCompute() }
+            onResolveAll = { choices ->
+                viewModel.resolveAllMismatchesAndSave(choices) { onCompute() }
                 showMismatch = false
             },
             onCancel = { showMismatch = false },
